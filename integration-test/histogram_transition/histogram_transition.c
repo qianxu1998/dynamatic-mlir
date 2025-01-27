@@ -1,39 +1,38 @@
 //===- histogram.c ---------------------------------------------*- C -*-===//
 
 #include "dynamatic/Integration.h"
-#include "histogram.h"
+#include "histogram_transition.h"
 #include <stdlib.h>
 
-void histogram(in_int_t feature[1000], in_int_t weight[1000],
+void histogram_transition(in_int_t feature[1000],
                inout_int_t hist[1000], in_int_t n) {
   for (int i = 0; i < n; ++i) {
-    int m = feature[i];
-    int wt = weight[i];
-    int x = hist[m];
-    hist[i] = x + wt;
+
+    if (feature[i] > 5) {
+      hist[i] = hist[0] + 1;
+    }
+
+    hist[i] = hist[0] + 1;
   }
 }
 
 int main(void) {
   in_int_t feature[1000];
-  in_int_t weight[1000];
   inout_int_t hist[1000];
   in_int_t n;
 
   n = 1000;
   for (int i = 0; i < 1000; ++i) {
-    // feature[i] = rand() % 1000;
+
     if (i < 500) {
-      // feature[i] = i - 1;
-      feature[i] = 0;
+      feature[i] = 4;
     } else {
-      feature[i] = i - 1;
+      feature[i] = 6;
     }
-    
-    weight[i] = rand() % 100;
+
     hist[i] = rand() % 100;
   }
 
-  CALL_KERNEL(histogram, feature, weight, hist, n);
+  CALL_KERNEL(histogram_transition, feature, hist, n);
   return 0;
 }

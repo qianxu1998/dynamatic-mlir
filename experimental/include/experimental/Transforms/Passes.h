@@ -20,6 +20,7 @@
 #include "experimental/Transforms/Speculation/HandshakeSpeculation.h"
 #include "experimental/Transforms/Speculation/SpecAnnotatePaths.h"
 #include "experimental/Transforms/LSQSizing/HandshakeSizeLSQs.h"
+#include "experimental/Transforms/Switching/SwitchingEstimation.h"
 #include "mlir/Pass/Pass.h"
 
 namespace dynamatic {

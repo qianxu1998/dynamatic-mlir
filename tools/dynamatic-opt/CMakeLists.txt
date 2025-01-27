@@ -16,6 +16,7 @@ target_link_libraries(dynamatic-opt
   AffineToScf
   DynamaticLowerScfToCf
   DynamaticBufferPlacement
+  DynamaticExperimentalSwitchingEstimation
   DynamaticLSQSizing
   DynamaticSpeculation
   DynamaticExperimentalResourceSharing

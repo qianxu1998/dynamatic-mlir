@@ -113,4 +113,23 @@ def HandshakeSizeLSQs : DynamaticPass<"handshake-size-lsqs"> {
       "Three different cases for memory collsions: none/half/full">];
 }
 
+def SwitchingEstimation : DynamaticPass<"switching-estimation"> {
+  let summary = "Estimate the switching of different dataflow units after buffer placement";
+  let description = [{
+    This pass estimates the swithcing/transition number of all PIs and POs of all
+    dataflow units during the entire circuit execution.
+  }];
+  let constructor = "dynamatic::experimental::switching::createSwitchingEstimation()";
+  let options = [
+    Option<"dataTrace", "data-trace", "std::string", "",
+           "Path to the scf data profiling results">,
+    Option<"bbList", "bb-list", "std::string", "",
+           "Path to the scf bb execution list profiling result">,
+    Option<"frequencies", "frequencies", "std::string", "",
+           "Path to the scf level frequency profiling result, a csv file generated during the buffer placement process">,
+    Option<"timingModels", "timing-models", "std::string", "",
+      "Path to JSON-formatted file containing timing models for dataflow "
+      "components.">];
+}
+
 #endif // EXPERIMENTAL_TRANSFORMS_PASSES_TD

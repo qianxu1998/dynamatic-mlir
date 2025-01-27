@@ -558,7 +558,7 @@ void HandshakePlaceBuffersPass::instantiateBuffers(BufferPlacement &placement) {
     builder.setInsertionPoint(opDst);
 
     Value bufferIn = channel;
-    auto placeBuffer = [&](const TimingInfo &timing, unsigned numSlots) {
+    auto placeBuffer = [&](const TimingInfo &timing, unsigned numSlots, buffer::PlacementResult& channelPlaceRes) {
       if (numSlots == 0)
         return;
 
@@ -570,14 +570,23 @@ void HandshakePlaceBuffersPass::instantiateBuffers(BufferPlacement &placement) {
       Value bufferRes = bufOp->getResult(0);
       opDst->replaceUsesOfWith(bufferIn, bufferRes);
       bufferIn = bufferRes;
+
+      /// Record the buffer occupancy
+      if (channelPlaceRes.bufOccupancyMap.size() > 0) {
+        // Create and add handshake.bufOcc attribute for all buffer operations
+        auto bufOccAttr = handshake::BufferOccupancyAttr::get(bufOp->getContext(), channelPlaceRes.bufOccupancyMap);
+
+        // Set the attribute
+        setDialectAttr(bufOp, bufOccAttr);
+      }
     };
 
     if (placeRes.opaqueBeforeTrans) {
-      placeBuffer(TimingInfo::oehb(), placeRes.numOpaque);
-      placeBuffer(TimingInfo::tehb(), placeRes.numTrans);
+      placeBuffer(TimingInfo::oehb(), placeRes.numOpaque, placeRes);
+      placeBuffer(TimingInfo::tehb(), placeRes.numTrans, placeRes);
     } else {
-      placeBuffer(TimingInfo::tehb(), placeRes.numTrans);
-      placeBuffer(TimingInfo::oehb(), placeRes.numOpaque);
+      placeBuffer(TimingInfo::tehb(), placeRes.numTrans, placeRes);
+      placeBuffer(TimingInfo::oehb(), placeRes.numOpaque, placeRes);
     }
   }
 }
