@@ -60,6 +60,7 @@ struct SwitchingEstimationPass
   llvm::SmallVector<std::pair<unsigned, unsigned>> extractBackedges(llvm::SmallVector<experimental::ArchBB> archs);
 
   // This function extract all CFDFCs from the bbList attribute and the corresponding II from CFDFCThroughputAttr
+  // and store all the information in an instance of SwitchingInfo
   LogicalResult extractAllCFDFCs(mlir::ModuleOp& topModule);
 
   // Extract all op names of the alus in order
@@ -97,6 +98,9 @@ void SwitchingEstimationPass::runDynamaticPass() {
     AdjGraph tmpAdjGraph(mgInstance, timingDB, switchInfo.cfdfcIIs[mgIndex]);
     switchInfo.segToAdjGraphMap.insert_or_assign(std::to_string(mgIndex), &tmpAdjGraph);
   }
+
+  //! Testing
+  printVector(switchInfo.funcOpNames);
 }
 
 
@@ -176,6 +180,7 @@ LogicalResult SwitchingEstimationPass::extractAllCFDFCs(mlir::ModuleOp& topModul
         }
       }
 
+      // Debug
       llvm::dbgs() << "[DEBUG] \t[CFDFC] " << cfdfcIndex << "\n";
 
       mlir::ArrayAttr bbList = llvm::dyn_cast<mlir::ArrayAttr>(cfdfcBBListPair.getValue());

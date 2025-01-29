@@ -13,7 +13,6 @@ using namespace dynamatic::handshake;
 // Constructor for the SCF parsing class
 SCFProfilingResult::SCFProfilingResult(StringRef dataTrace, StringRef bbList, SwitchingInfo& switchInfo) {
   // Step 0: Get the directory path
-  // TODO: Need to add this to the pass interface, instead of hardcoding the file name here
   std::filesystem::path pathObj(bbList.str());
   std::string resultDir = pathObj.parent_path().string();
   std::string scfFilePath = resultDir + "/cf_dyn_transformed.mlir";
@@ -36,7 +35,7 @@ SCFProfilingResult::SCFProfilingResult(StringRef dataTrace, StringRef bbList, Sw
 
   //! Testing, 01/09/2024
   // for (const auto& [key, value]: execPhaseToSegExecNumMap) {
-  //   llvm::dbgs() << "[DEBUG] Op Name: " << key << "\n";
+  //   llvm::dbgs() << "[DEBUG] Seg Name: " << key << "\n";
 
   //   llvm::dbgs() << "[DEBUG] \tValue: " << value.first << ", Iter Index: " << value.second << "\n";
     
@@ -266,12 +265,11 @@ void SCFProfilingResult::parseBBListFile(StringRef bbList, SwitchingInfo& switch
   executedSegTrace.push_back("E");
   switchInfo.segToBBListMap["E"] = tmpEndBBList;
 
-  // Construct the BB iter map
   unsigned iterMapCounter = 0;
   unsigned iterCounter = 0;
   for (const auto& selSeg: executedSegTrace) {
     for (int i = 0; i < switchInfo.segToBBListMap[selSeg].size(); i++) {
-      bbToIterMap[iterMapCounter] = iterCounter;
+      bbToIterMap[iterMapCounter++] = iterCounter;
     }
     iterCounter++;
   }
@@ -381,7 +379,10 @@ SCFFile::SCFFile(StringRef scfFile) {
           std::string tmpName = std::regex_replace(*vecIter, nonNameExpr, "");
         
           if (tmpName.find("constant") == std::string::npos) {
-            opNameList.push_back(tmpName);
+            // Also remove all index_cast node
+            if (tmpName.find("index_cast") == std::string::npos) {
+              opNameList.push_back(tmpName);
+            }
           }
         }
       }

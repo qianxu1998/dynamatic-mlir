@@ -153,12 +153,6 @@ public:
   void printPerDataChannelToggleNumber();
   void printPerHandshakeChannelToggleNumber();
 
-  // Virtual class for switching calculation
-  void calValidSwitching();
-  void calReadySwitching();
-  void calValdiSet();
-  void calReadySet();
-
   // 
   //  Internal Storing Variables
   //
@@ -203,7 +197,7 @@ public:
   //  Internal Storing Variables
   //
   std::vector<std::string> segStartNodes;             // Vector storing all starting nodes in the segment
-  std::map<std::string, AdjNode> nodes;               // Map from unit name to the corresponding node storing structure
+  std::map<std::string, std::unique_ptr<AdjNode>> nodes;               // Map from unit name to the corresponding node storing structure
   std::vector<std::pair<std::string, std::string>> backedges; // Vector storing all backedges in the Adjacency graph;
 };
 
@@ -215,8 +209,7 @@ public:
 // Define the constant name sensitive list used for parsing the profiling results
 // As the name of the same operation in scf level IR and the final handshake IR
 // is different, we need to map the scf level op to the handshake mlir file.
-// TODO: Solve this more elegantly, directly add the scf level name in the attribute
-// TODO: Add the name of the rest of operations, i.e. lsq etc.
+// TODO: Add support for more node types
 const std::set<std::string> NAME_SENSE_LIST = {
   "muli",
   "addi",
@@ -232,46 +225,6 @@ const std::set<std::string> NAME_SENSE_LIST = {
   "store",
   "shli",
   "shrsi"
-};
-
-// Internal timing database for all handshake ops
-const std::map<std::string, unsigned> OP_DELAY_MAP = {
-  {"handshake.source", 0},
-  {"handshake.cmpi", 0},
-  {"handshake.addi", 0},
-  {"handshake.subi", 0},
-  {"handshake.muli", 4},
-  {"handshake.extsi", 0},
-  {"handshake.mc_load", 1},
-  {"handshake.mc_store", 0},
-  {"handshake.lsq_load", 5},
-  {"handshake.lsq_store", 0},
-  {"handshake.merge", 0},
-  {"handshake.addf", 10},
-  {"handshake.subf", 10},
-  {"handshake.mulf", 6},
-  {"handshake.divui", 36},
-  {"handshake.divsi", 36},
-  {"handshake.divf", 30},
-  {"handshake.cmpf", 2},
-  {"handshake.control_merge", 0},
-  {"handshake.fork", 0},
-  {"handshake.d_return", 0},
-  {"handshake.cond_br", 0},
-  {"handshake.end", 0},
-  {"handshake.andi", 0},
-  {"handshake.ori", 0},
-  {"handshake.xori", 0},
-  {"handshake.shli", 0},
-  {"handshake.shrsi", 0},
-  {"handshake.shrui", 0},
-  {"handshake.select", 0},
-  {"handshake.mux", 0},
-  {"handshake.source", 0},
-  {"handshake.trunci", 0},
-  {"handshake.constant", 0},
-  {"handshake.extui", 0},
-  {"handshake.mem_controller", 0}
 };
 
 //===----------------------------------------------------------------------===//
@@ -293,7 +246,7 @@ inline void printVector(const T& selVec) {
   llvm::dbgs() << "[DEBUG] Vector Contents: "; 
 
   for (auto& selVal : selVec) {
-    llvm::dbgs() << "[" << counter << "] : " << selVal << " ";
+    llvm::dbgs() << "[" << counter << "] : " << selVal << "; ";
 
     counter++;
   }

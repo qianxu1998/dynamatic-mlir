@@ -10,6 +10,9 @@
 using namespace mlir;
 using namespace dynamatic;
 
+/// Function declaration
+static unsigned extractNodeLatency(mlir::Operation *op, TimingDatabase timingDB);
+
 void SwitchingInfo::insertBE(unsigned srcBB, unsigned dstBB, StringRef mgLabel) {
   std::pair<unsigned, unsigned> BBPair = {srcBB, dstBB};
 
@@ -56,7 +59,6 @@ AdjNode::AdjNode(mlir::Operation* selOp,
 //===----------------------------------------------------------------------===//
 // Initialize the whole adjacency graph for the selected segment
 AdjGraph::AdjGraph(const buffer::CFDFC& cfdfc, const TimingDatabase& timingDB, unsigned II) {
-  // TODO: Need to check whether invalid backedges are removed from the CFDFC or not
   std::map<std::string, std::vector<std::string>> nodeToPresMap;
   std::map<std::string, std::vector<std::string>> nodeToSucsMap;
 
@@ -77,52 +79,49 @@ AdjGraph::AdjGraph(const buffer::CFDFC& cfdfc, const TimingDatabase& timingDB, u
   }
 
 
-  // Traverse all units in the mg
-  for (auto& unit: cfdfc.units) {
-    unsigned latency = 0;
-    std::string unitType = unit->getName().getStringRef().str();
-    std::string unitName = unit->getAttrOfType<StringAttr>("handshake.name").str();
-    unsigned numSlots = 0;
+  // Traverse all nodes in the MG
+  for (auto& selNode: cfdfc.units) {
+    std::string unitType = selNode->getName().getStringRef().str();
+    std::string unitName = selNode->getAttrOfType<StringAttr>("handshake.name").str();
     bool isBuffer = false;
 
     // Get the unit latency
-    if (unitType == "handshake.buffer") {
-      // Buffer node encountered, need to retrieve the buffer attributes
-      auto hwAttr = unit->getAttrOfType<DictionaryAttr>("hw.parameters");
-      isBuffer = true;
+    unsigned nodeLatency = extractNodeLatency(selNode, timingDB);
 
-      for (auto& namedAttr : hwAttr.getValue()) {
-        mlir::Attribute value = namedAttr.getValue();
-        mlir::StringAttr name = namedAttr.getName().cast<mlir::StringAttr>();
+    // Get the datawidth of all output channels
+    //! Testing
+    llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n";
+    llvm::dbgs() << "[DEBUG] \t\tSucs Node List: [";
+    for (const auto& selSuc : nodeToSucsMap[unitName]) {
+      llvm::dbgs() << selSuc << ", ";
+    }
+    llvm::dbgs() << "]\n";
 
-        if (name.str() == "TIMING") {
-          // Timing information
-          auto timingInfo = value.dyn_cast<TimingAttr>().getInfo();
 
-          if (timingInfo.getLatency(SignalType::DATA)) {
-            latency = timingInfo.getLatency(SignalType::DATA).value();
-          } else {
-            latency = 0;
-          }
-        } else {
-          // Get the number of slots
-          if (auto actualValue = value.dyn_cast<mlir::IntegerAttr>()) {
-            numSlots = static_cast<unsigned>(actualValue.getValue().getZExtValue());
-          }
+    /// If this is a buffer node, get the number of slots
+    if (isa<handshake::BufferOp>(selNode)) {
+      auto params = selNode->getAttrOfType<DictionaryAttr>(RTL_PARAMETERS_ATTR_NAME);
+      if (!params) {
+        llvm::errs() << "[ERROR] " << RTL_PARAMETERS_ATTR_NAME << " is missing for op " << unitName << " in handshake_export.mlir\n";
+        exit(-1);
+      }
+      
+      // Retrieve the number of slots
+      auto optSlots = params.getNamed(BufferOp::NUM_SLOTS_ATTR_NAME);
+      unsigned numSlotsValue = 0;
+      if (optSlots) {
+        if (auto numSlots = dyn_cast<IntegerAttr>(optSlots->getValue())) {
+          if (numSlots.getType().isUnsignedInteger())
+            numSlotsValue = numSlots.getUInt();
         }
-
       }
 
-    } else {
-      // Check the existence of the key
-      if (OP_DELAY_MAP.find(unitType) != OP_DELAY_MAP.end()) {
-        latency = OP_DELAY_MAP.at(unitType);
-      } else {
-        llvm::errs() << "[ERROR] Unit Type not found in OP_DELAY_MAP: " << unitType << "\n";
-      }
+      /// Debug
+      
     }
 
   }
+
 }
 
 void AdjGraph::insertToSurroundingList(std::map<std::string, std::vector<std::string>>& selMap, 
@@ -214,4 +213,36 @@ std::string strip(const std::string &inputStr, const std::string &toRemove) {
   }
 
   return stripped;
+}
+
+/// Extracts the latency for each operation
+/// This is done in 3 ways:
+/// 1. If the operation is in the timingDB, the latency is extracted from the
+/// timingDB
+/// 2. If the operation is a buffer operation, the latency is extracted from the
+/// timing attribute
+/// 3. If the operation is neither, then its latency is set to 0
+static unsigned extractNodeLatency(mlir::Operation *op, TimingDatabase timingDB) {
+  double latency = 0;
+
+  if (!failed(timingDB.getLatency(op, SignalType::DATA, latency))) {
+    return latency;
+  }
+
+  if (isa<handshake::BufferOp>(op)) {
+    auto params = op->getAttrOfType<DictionaryAttr>(RTL_PARAMETERS_ATTR_NAME);
+    if (!params)
+      return 0;
+
+    auto optTiming = params.getNamed(handshake::BufferOp::TIMING_ATTR_NAME);
+    if (!optTiming)
+      return 0;
+
+    if (auto timing = dyn_cast<handshake::TimingAttr>(optTiming->getValue())) {
+      handshake::TimingInfo info = timing.getInfo();
+      return info.getLatency(SignalType::DATA).value_or(0);
+    }
+  }
+
+  return 0;
 }
