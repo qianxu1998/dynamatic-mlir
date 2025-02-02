@@ -6,6 +6,25 @@
 //===----------------------------------------------------------------------===//
 
 #include "experimental/Transforms/Switching/SwitchingSupport.h"
+#include "experimental/Transforms/Switching/ExecModel.h"
+#include "dynamatic/Dialect/Handshake/HandshakeOps.h"
+#include "dynamatic/Dialect/Handshake/HandshakeDialect.h"
+#include "dynamatic/Dialect/Handshake/HandshakeInterfaces.h"
+#include "dynamatic/Dialect/Handshake/HandshakeAttributes.h"
+#include "dynamatic/Dialect/Handshake/MemoryInterfaces.h"
+#include "dynamatic/Support/CFG.h"
+#include "dynamatic/Transforms/BufferPlacement/CFDFC.h"
+#include "dynamatic/Support/DynamaticPass.h"
+#include "dynamatic/Support/LLVM.h"
+#include "dynamatic/Support/Logging.h"
+#include "dynamatic/Support/Backedge.h"
+#include "dynamatic/Support/TimingModels.h"
+#include "dynamatic/Support/Attribute.h"
+#include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/Pass/PassManager.h"
+#include "mlir/IR/Value.h"
+#include "llvm/Support/Path.h"
+#include "llvm/Support/Debug.h"
 
 using namespace mlir;
 using namespace dynamatic;
@@ -52,23 +71,284 @@ AdjNode::AdjNode(mlir::Operation* selOp,
   }
 }
 
+bool AdjNode::handshakeUpdateFinished() {
+  if (validSignal.size() == sucs.size()) {
+    if (readySignal.size() == pres.size()) {
+      if (setR.size() == pres.size()) {
+        if (setV.size() == sucs.size()) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+bool AdjNode::handshakeSwitchingChecking() {
+  if (validSignal.size() == sucs.size()) {
+    if (readySignal.size() == pres.size()) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+void AdjNode::totalHandshakeSwitchingUpdate() {
+  for (const auto& [s, selValue]: validSignal) {
+    totalValidSwitching += selValue;
+  }
+
+  for (const auto& [p, selValue]: readySignal) {
+    totalReadySwitching += selValue;
+  }
+
+}
+
+void AdjNode::updateDataoutChannel(int inputData) {
+  // For each successor, we do xor for the data init
+  for (const auto& suc: sucs) {
+    int diff = 0;
+
+    // Check whether the key is in dataOut or not
+    if (dataOut.find(suc) != dataOut.end()) {
+      auto &hist = dataOut[suc];
+      diff = hist.back() ^ inputData;
+      hist.push_back(inputData);
+    } else {
+      diff = inputData;
+      std::vector<int> tmpVec = {inputData};
+      dataOut[suc] = tmpVec;
+    }
+
+    // Update the per_channel count
+    auto positions = getPositionList(diff);
+
+    for (const auto& selPos : positions) {
+      if (perChannelToggle[suc].find(selPos) != perChannelToggle[suc].end()) {
+        perChannelToggle[suc][selPos] += 1;
+      }
+    }
+
+  }
+}
+
+void AdjNode::updateHandshakeChannelSwitching(unsigned validChannelSwitching, unsigned readyChannelSwitching) {
+  totalValidSwitching += validChannelSwitching;
+  totalReadySwitching += readyChannelSwitching;
+
+  // Update the handshake status as well
+  handshakeUpdateFlag = true;
+}
+
+void AdjNode::totalDataSwitchingCounting(bool mapped) {
+  for (const auto& [suc, valueVec] : dataOut) {
+    // Define tmp storing structure
+    unsigned numSwitches = 0;
+
+    // If this suc is one of the units at scf level
+    int lastInput = mapped && valueVec[0] == -1 ? 1 : valueVec[0];
+
+    // The corresponding output channel maynot have dataout
+    // Check the validity of the data channel value
+    for (unsigned i = 0; i < valueVec.size(); i++) {
+      int curVal = (valueVec[i] == -1) ? 1 : valueVec[i];
+      int diff = lastInput ^ curVal;
+
+      // Count bits
+      unsigned bitCount = 0;
+      while(diff) {
+        bitCount += (diff & 1);
+        diff >>= 1;
+      }
+      numSwitches += bitCount;
+      lastInput = curVal;
+    }
+
+    // Store the total number of channel switches
+    dataSwitches[suc] = numSwitches;
+    totalDataSwitching += numSwitches;
+  }
+}
+
+std::vector<unsigned> AdjNode::getPositionList(int number) {
+  std::vector<unsigned> positions;
+  unsigned idx = 0;
+  int tmp = number;
+  while (tmp) {
+    if (tmp & 1) positions.push_back(idx);
+    tmp >>= 1;
+    idx++;
+  }
+
+  return positions;
+}
+
+// Define all the printing functions to faciliate debug
+void AdjNode::printDetail() {
+  llvm::dbgs() << "[DEBUG] \t=============================================================\n";
+  llvm::dbgs() << "[DEBUG] \t[Node Info Start]\n";
+
+  //
+  llvm::dbgs() << "[DEBUG] \t\tLatency: " << nodeLatency <<";\n";
+  llvm::dbgs() << "[DEBUG] \t\tPredecessors: [";
+  for (const auto& p: pres) {
+    llvm::dbgs() << p << " ";
+  }
+  llvm::dbgs() << "]\n[DEBUG] \t\tSuccessors: [";
+  for (const auto& s: sucs) {
+    llvm::dbgs() << s << " ";
+  }
+  llvm::dbgs() << "]\n";
+
+  llvm::dbgs() << "[DEBUG] \t\tSuccessor Channel DataWidth: \n";
+  for (const auto& [s, width] : sucsDataWidthMap) {
+    llvm::dbgs() << "\t\t\t\tNode: " << s << ", Data_width: " << width <<"\n";
+  }
+
+  llvm::dbgs() << "[DEBUG] \t\tSuccessor Channel Data Value\n";
+  for (const auto& [s, valueVec] : dataOut) {
+    llvm::dbgs() << "\t\t\t\tNode: " << s << ", Output Value Vector: \n";
+    printVector(valueVec);
+    llvm::dbgs() << "\n";
+  }
+
+  llvm::dbgs() << "[DEBUG] \t\tValid Channel Switching: \n";
+  for (const auto& [s, numSwitches] : validSignal) {
+    llvm::dbgs() << "\t\t\t\tNode: " << s << ", Data_width: " << numSwitches <<"\n";
+  }
+
+  llvm::dbgs() << "[DEBUG] \t\tReady Channel Switching: \n";
+  for (const auto& [s, numSwitches] : readySignal) {
+    llvm::dbgs() << "\t\t\t\tNode: " << s << ", Data_width: " << numSwitches <<"\n";
+  }
+
+  llvm::dbgs() << "[DEBUG] \t\tValid Active Range: \n";
+  for (const auto& [s, valueVec] : setV) {
+    llvm::dbgs() << "\t\t\t\tNode: " << s << " ; Active Range: [";
+    for (const auto& selValue : valueVec) {
+      llvm::dbgs() << selValue << " ";
+    }
+    llvm::dbgs() << "]\n";
+  }
+
+  llvm::dbgs() << "[DEBUG] \t\tReady Active Range: \n";
+  for (const auto& [s, valueVec] : setR) {
+    llvm::dbgs() << "\t\t\t\tNode: " << s << " ; Active Range: [";
+    for (const auto& selValue : valueVec) {
+      llvm::dbgs() << selValue << " ";
+    }
+    llvm::dbgs() << "]\n";
+  }
+
+}
+
+void AdjNode::printHandshakeSwitching() {
+  llvm::dbgs() << "[DEBUG] \t\tTotal Valid Switching Number: " << totalValidSwitching << "\n";
+  llvm::dbgs() << "[DEBUG] \t\tTotal Ready Switching Number: " << totalReadySwitching << "\n";
+
+  llvm::dbgs() << "[DEBUG] \t\tValid Channel Switching: \n";
+  for (const auto& [s, numSwitches] : validSignal) {
+    llvm::dbgs() << "\t\t\t\tNode: " << s << ", Data_width: " << numSwitches <<"\n";
+  }
+
+  llvm::dbgs() << "[DEBUG] \t\tReady Channel Switching: \n";
+  for (const auto& [s, numSwitches] : readySignal) {
+    llvm::dbgs() << "\t\t\t\tNode: " << s << ", Data_width: " << numSwitches <<"\n";
+  }
+
+  llvm::dbgs() << "[DEBUG] \t\tValid Active Range: \n";
+  for (const auto& [s, valueVec] : setV) {
+    llvm::dbgs() << "\t\t\t\tNode: " << s << " ; Active Range: [";
+    for (const auto& selValue : valueVec) {
+      llvm::dbgs() << selValue << " ";
+    }
+    llvm::dbgs() << "]\n";
+  }
+
+  llvm::dbgs() << "[DEBUG] \t\tReady Active Range: \n";
+  for (const auto& [s, valueVec] : setR) {
+    llvm::dbgs() << "\t\t\t\tNode: " << s << " ; Active Range: [";
+    for (const auto& selValue : valueVec) {
+      llvm::dbgs() << selValue << " ";
+    }
+    llvm::dbgs() << "]\n";
+  }
+}
+
+void AdjNode::printDataChannelSwitching() {
+  llvm::dbgs() << "[DEBUG] \t\tTotal Number of Data Channel Switches: " << totalDataSwitching << "\n";
+
+  // Print per channel data switches
+  for (const auto& [suc, value] : dataSwitches) {
+    llvm::dbgs() << "[DEBUG] \t\t\tChannel: " << suc << ": " << value <<"\n";
+  }
+}
+
+void AdjNode::printPerDataChannelToggleNumber() {
+  llvm::dbgs() << "[DEBUG] \t\tData Channel Per BIT Switches: \n";
+
+  for (const auto& [suc, valueVec] : perChannelToggle) {
+    llvm::dbgs() << "[DEBUG] \t\t Node: " << suc << "\n";
+
+    for (const auto& [selBit, value]: valueVec) {
+      llvm::dbgs() << "[DEBUG] \t\t\tBit " << selBit << ": " << value << "\n";
+    }
+  }
+
+}
+
+void AdjNode::printPerHandshakeChannelToggleNumber() {
+  llvm::dbgs() << "[DEBUG] \t\t[VALID CHANNEL]\n";
+  for (const auto& [suc, validSwitch]: validSignal) {
+    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << suc << ", Valid Switching: " << validSwitch << "\n";
+  }
+
+  llvm::dbgs() << "[DEBUG] \t\t[READY CHANNEL]\n";
+  for (const auto& [pre, readySwitching]: readySignal) {
+    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << pre << ", Ready Switching: " << readySwitching << "\n";
+  }
+}
+
 //===----------------------------------------------------------------------===//
 //
 // Definitions of AdjGraph
 //
 //===----------------------------------------------------------------------===//
 // Initialize the whole adjacency graph for the selected segment
-AdjGraph::AdjGraph(const buffer::CFDFC& cfdfc, const TimingDatabase& timingDB, unsigned II) {
+AdjGraph::AdjGraph(const buffer::CFDFC& cfdfc, const TimingDatabase& timingDB, 
+                    const unsigned &II, const unsigned &mgIndex) {
+  cfdfcIndex = mgIndex;
+  
   std::map<std::string, std::vector<std::string>> nodeToPresMap;
   std::map<std::string, std::vector<std::string>> nodeToSucsMap;
 
-  // Construct the pres and sucs map for all units in the CFDFC
+  // Step 1: Construct the pres and sucs map for all units in the CFDFC
   for (const auto& selChannel: cfdfc.channels) {
     mlir::Operation* srcOp = selChannel.getDefiningOp();
     std::string srcName = srcOp->getAttrOfType<StringAttr>("handshake.name").str();
 
     for (const auto& dstOp: selChannel.getUsers()) {
       std::string dstName = dstOp->getAttrOfType<StringAttr>("handshake.name").str();
+
+      // Get the BB of the dstOp
+      unsigned dstBB;
+      if (std::optional<unsigned> optBB = getLogicBB(dstOp); !optBB.has_value())
+        continue;
+      else
+        dstBB = *optBB;
+
+      // Check whether this node is in the cfdfc
+      if (!cfdfc.cycle.contains(dstBB)) continue;
+
+      // Check whether this is a backedge
+      if (cfdfc.isCFDFCBackedge(selChannel)) {
+        backedges.push_back(std::make_pair(srcName, dstName));
+
+        // Add the name of dstNode to start node vector
+        segStartNodes.push_back(dstName);
+      }
       
       // Insert to sucs
       insertToSurroundingList(nodeToSucsMap, srcName, dstName);
@@ -78,47 +358,28 @@ AdjGraph::AdjGraph(const buffer::CFDFC& cfdfc, const TimingDatabase& timingDB, u
     }
   }
 
-
-  // Traverse all nodes in the MG
+  // Step 2:Traverse all nodes in the MG
   for (auto& selNode: cfdfc.units) {
     std::string unitType = selNode->getName().getStringRef().str();
     std::string unitName = selNode->getAttrOfType<StringAttr>("handshake.name").str();
-    bool isBuffer = false;
 
     // Get the unit latency
     unsigned nodeLatency = extractNodeLatency(selNode, timingDB);
 
-    // Get the datawidth of all output channels
     //! Testing
+    llvm::dbgs() << "[DEBUG] \t=================================\n";
     llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n";
-    llvm::dbgs() << "[DEBUG] \t\tSucs Node List: [";
-    for (const auto& selSuc : nodeToSucsMap[unitName]) {
-      llvm::dbgs() << selSuc << ", ";
-    }
-    llvm::dbgs() << "]\n";
 
+    // Step 2.1: Construct the node storing structure
+    auto newNode = createNodeFromOperation(
+      selNode, nodeToPresMap[unitName], nodeToSucsMap[unitName], nodeLatency);
 
-    /// If this is a buffer node, get the number of slots
-    if (isa<handshake::BufferOp>(selNode)) {
-      auto params = selNode->getAttrOfType<DictionaryAttr>(RTL_PARAMETERS_ATTR_NAME);
-      if (!params) {
-        llvm::errs() << "[ERROR] " << RTL_PARAMETERS_ATTR_NAME << " is missing for op " << unitName << " in handshake_export.mlir\n";
-        exit(-1);
-      }
-      
-      // Retrieve the number of slots
-      auto optSlots = params.getNamed(BufferOp::NUM_SLOTS_ATTR_NAME);
-      unsigned numSlotsValue = 0;
-      if (optSlots) {
-        if (auto numSlots = dyn_cast<IntegerAttr>(optSlots->getValue())) {
-          if (numSlots.getType().isUnsignedInteger())
-            numSlotsValue = numSlots.getUInt();
-        }
-      }
+    if (!newNode) continue;
 
-      /// Debug
-      
-    }
+    newNode->printDetail();
+
+    // Store the new node
+    nodes[unitName] = std::move(newNode);
 
   }
 
@@ -133,6 +394,159 @@ void AdjGraph::insertToSurroundingList(std::map<std::string, std::vector<std::st
     selMap[key] = tmpVec;
   }
 
+}
+
+std::unique_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
+                                                    std::vector<std::string> &pres, std::vector<std::string> &sucs,
+                                                    unsigned &nodeLatency) {
+    std::map<std::string, unsigned> nodeSucsDataWidthMap;
+    // Get the successor channels' dataWidth
+    for (unsigned resIndex = 0, e = op->getNumResults(); resIndex < e; ++resIndex) {
+      mlir::Value selRes = op->getResult(resIndex);
+
+      // The result is of type !handshake.channel<...>
+      if (auto chanTy = selRes.getType().dyn_cast<handshake::ChannelType>()) {
+        // Extract the underlying data width.
+        unsigned dataWidth = chanTy.getDataBitWidth();
+
+        // Now, iterate over all users of this result.
+        for (mlir::Operation *user : selRes.getUsers()) {
+          // Try to get the successor's name attribute.
+          if (auto nameAttr = user->getAttrOfType<mlir::StringAttr>("handshake.name")) {
+            nodeSucsDataWidthMap[nameAttr.getValue().str()] = dataWidth;
+          }
+        }
+      }
+    }
+    
+    // Return a unique pointer
+    return llvm::TypeSwitch<Operation *, std::unique_ptr<AdjNode>>(op)
+      // handshake::AddIOp operator
+      .Case<handshake::AddIOp>([&](auto selNode) {
+        return std::unique_ptr<AdjNode>(nullptr);
+      })
+      // handshake::SubIOp operator
+      .Case<handshake::SubIOp>([&](auto selNode) {
+        
+        return std::unique_ptr<AdjNode>(nullptr);
+      })
+      // handshake::MulIOp operator
+      .Case<handshake::MulIOp>([&](auto selNode) {
+        
+        return std::unique_ptr<AdjNode>(nullptr);
+      })
+      // handshake::CmpIOp operator
+      .Case<handshake::CmpIOp>([&](auto selNode) {
+        
+        return std::unique_ptr<AdjNode>(nullptr);
+      })
+      // handshake::BufferOp operator
+      .Case<handshake::BufferOp>([&](handshake::BufferOp selNode) {
+        // For the buffer nodes, we need to get the number of slots and transparency
+        auto params = selNode->getAttrOfType<DictionaryAttr>(RTL_PARAMETERS_ATTR_NAME);
+        if (!params) {
+          llvm::errs() << "[ERROR] " << RTL_PARAMETERS_ATTR_NAME << " is missing for buffer op in handshake_export.mlir\n";
+          exit(-1);
+        }
+
+        // Retrieve the number of slots
+        auto optSlots = params.getNamed(BufferOp::NUM_SLOTS_ATTR_NAME);
+        unsigned numSlotsValue = 0;
+        if (optSlots) {
+          if (auto numSlots = dyn_cast<IntegerAttr>(optSlots->getValue())) {
+            if (numSlots.getType().isUnsignedInteger())
+              numSlotsValue = numSlots.getUInt();
+          }
+        }
+
+        // Get the occupancy value
+        float_t occValue = -1;
+        DictionaryAttr occAttr = getDialectAttr<handshake::BufferOccupancyAttr>(op).getBufferOccMap();
+        auto occValueAttr = occAttr.get(std::to_string(cfdfcIndex)).dyn_cast<mlir::FloatAttr>();
+        if (occValueAttr) {
+          // Successfully retrieved the occ attribute
+          occValue = occValueAttr.getValueAsDouble();
+        } else {
+          llvm::errs() << "[ERROR] Failed to retrieve the buffer occupancy attribute\n";
+          exit(-1);
+        }
+
+        auto node = std::make_unique<BufferNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+
+        // Update the desired inforamtion for the buffer node
+        node->occupancy = occValue;
+        node->numSlots = numSlotsValue;
+        node->transparent = nodeLatency ? false : true;
+
+        return node;
+      })
+      // handshake::MuxOp operator
+      .Case<handshake::MuxOp>([&](auto selNode) {
+        
+        return std::unique_ptr<AdjNode>(nullptr);
+      })
+      // handshake::ForkOp operator
+      .Case<handshake::ForkOp>([&](auto selNode) {
+        
+        return std::unique_ptr<AdjNode>(nullptr);
+      })
+      // handshake::LazyForkOp operator
+      .Case<handshake::LazyForkOp>([&](auto selNode) {
+        
+        return std::unique_ptr<AdjNode>(nullptr);
+      })
+      // handshake::TruncIOp operator
+      .Case<handshake::TruncIOp>([&](auto selNode) {
+        
+        return std::unique_ptr<AdjNode>(nullptr);
+      })
+      // handshake::ExtSIOp operator
+      .Case<handshake::ExtSIOp>([&](auto selNode) {
+        
+        return std::unique_ptr<AdjNode>(nullptr);
+      })
+      // handshake::ExtUIOp operator
+      .Case<handshake::ExtUIOp>([&](auto selNode) {
+        
+        return std::unique_ptr<AdjNode>(nullptr);
+      })
+      // handshake::ControlMergeOp operator
+      .Case<handshake::ControlMergeOp>([&](auto selNode) {
+        
+        return std::unique_ptr<AdjNode>(nullptr);
+      })
+      // handshake::ConditionalBranchOp operator
+      .Case<handshake::ConditionalBranchOp>([&](auto selNode) {
+        
+        return std::unique_ptr<AdjNode>(nullptr);
+      })
+      // handshake::SourceOp operator
+      .Case<handshake::SourceOp>([&](auto selNode) {
+        
+        return std::unique_ptr<AdjNode>(nullptr);
+      })
+      // handshake::ConstantOp operator
+      .Case<handshake::ConstantOp>([&](auto selNode) {
+        
+        return std::unique_ptr<AdjNode>(nullptr);
+      })
+      // handshake::LoadOp operator
+      .Case<handshake::LoadOp>([&](auto selNode) {
+
+        
+        
+        return std::unique_ptr<AdjNode>(nullptr);
+      })
+      // handshake::StoreOp operator
+      .Case<handshake::StoreOp>([&](auto selNode) {
+        
+        return std::unique_ptr<AdjNode>(nullptr);
+      })
+      .Default([](auto selNode) {
+          selNode->emitOpError() << "Unknown operation!";
+
+          return std::unique_ptr<AdjNode>(nullptr);
+      });
 }
 
 //===----------------------------------------------------------------------===//

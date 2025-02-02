@@ -1,4 +1,4 @@
-//===- SwitchingSupport.h - Switching Estimation -----*- C++ -*-===//
+//===- ExecModel.h - Switching Estimation -----*- C++ -*-===//
 //
 // Dynamatic is under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -13,13 +13,49 @@
 #ifndef EXPERIMENTAL_TRANSFORMS_SWITCHING_EXECUTION_MODEL_H
 #define EXPERIMENTAL_TRANSFORMS_SWITCHING_EXECUTION_MODEL_H
 
+#include "experimental/Transforms/Switching/SwitchingSupport.h"
+#include "mlir/IR/Operation.h"
+
+#include <map>
+#include <memory>
+#include <set>
+#include <string>
+#include <vector>
 
 //===----------------------------------------------------------------------===//
 //
 // Model for Buffer Node
 //
 //===----------------------------------------------------------------------===//
+class BufferNode : public AdjNode {
+public:
+  // Constructor
+  BufferNode(mlir::Operation *op,
+             const std::vector<std::string> &predecessors,
+             const std::vector<std::string> &successors,
+             const std::map<std::string, unsigned> &sucDataWidthMap,
+             const unsigned &latency);
 
+  // Handshake Counting functions
+  void calValidSwitching(const std::string &sucNodeName, unsigned II);
+  void calReadySwitching(const std::string &preNodeName, unsigned II);
+
+  void calValidSet(const std::string &sucNodeName,
+                   std::set<unsigned> &inSetV);
+  void calReadySet(const std::string &preNodeName,
+                   std::set<unsigned> &inSetR);
+
+  // Override printDetail function
+  void printDetail() override;
+
+  //
+  /// Internal variable
+  //
+  unsigned START;
+  float_t occupancy;
+  unsigned numSlots;
+  bool transparent;
+};
 
 //===----------------------------------------------------------------------===//
 //
@@ -100,9 +136,17 @@
 
 //===----------------------------------------------------------------------===//
 //
+// Model for Lazy fork Node
+//
+//===----------------------------------------------------------------------===//
+
+
+//===----------------------------------------------------------------------===//
+//
 // Model for Fork Node
 //
 //===----------------------------------------------------------------------===//
+
 
 
 //===----------------------------------------------------------------------===//

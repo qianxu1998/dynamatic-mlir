@@ -18,6 +18,7 @@
 #include "dynamatic/Dialect/Handshake/HandshakeAttributes.h"
 #include "experimental/Support/StdProfiler.h"
 #include "dynamatic/Support/TimingModels.h"
+#include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Debug.h"
 
 #include <unordered_set>
@@ -120,32 +121,32 @@ public:
           const std::vector<std::string>& predecessors, const std::vector<std::string>& successors, 
           const std::map<std::string, unsigned>& sucDataWidthMap, const unsigned& latency);
 
-  // This funciton checks whether the handshake channel swiching calculation is finished or not
-  bool handshakeFinished();
+  // This funciton checks whether the handshake channel swiching information updating is finished or not
+  bool handshakeUpdateFinished();
 
-  // This function checks the handshake switching patterns of the node itself
+  // This function checks the handshake switching number of the node itself is updated or not
   bool handshakeSwitchingChecking();
 
   // This function prints all information of the node
-  void printDetail();
+  virtual void printDetail();
 
-  // This function prints handshake switching
+  // This function prints details of handshake switching
   void printHandshakeSwitching();
 
   // This function will calculate the total valid and ready swithcing for the node
   void totalHandshakeSwitchingUpdate();
 
-  // This function updates the dataout process
-  void updateDataout(int inputData);
+  // This function calculate the number of switches in the dataout channel
+  void updateDataoutChannel(int inputData);
 
-  // 
+  // Add extra handshake channel switches
   void updateHandshakeChannelSwitching(unsigned validChannelSwitching, unsigned readyChannelSwitching);
 
   // This function calculates the total number of switches of all data out channels
   //  Note: We treat "X" as invalid data and will count it only once
-  void totalDataSwitchingCounting(bool mappedUnits);
+  void totalDataSwitchingCounting(bool mapped);
 
-  // This function will return the list of 1's position in the number's binary format
+  // This function will return the vector of 1's position in the number's binary format
   std::vector<unsigned> getPositionList(int number);
 
   //
@@ -158,14 +159,16 @@ public:
   //
   unsigned nodeLatency = 0;       // Used to store the latency of the chosen node
   mlir::Operation* op;            // Pointer to the operation in the mlir file
+  // Memory controller is exclueded from the pres and sucs
   std::vector<std::string> pres;  // Vector storing the predecessors of the node in the segemnt
   std::vector<std::string> sucs;  // Vector storing the successors of the node in the segement
 
   // Handshake Signal Switching
-  std::map<std::string, unsigned> validSignal;  // Map used to store number of switching of the node's valid signals (per channel, e.x., {"node_name" : 2})
-  std::map<std::string, unsigned> readySignal;  // Map used to store number of switching of the node's ready signals (per channel, e.x., {"node_name" : 2})
-  std::set<unsigned> setV;                      // Set used to store the active range of the corresponding valid signal in different channels
-  std::set<unsigned> setR;                      // Set used to store active range of the corresponding ready signal in different channels
+  std::map<std::string, unsigned> validSignal;    // Map used to store number of switching of the node's valid signals (per channel, e.x., {"node_name" : 2})
+  std::map<std::string, unsigned> readySignal;    // Map used to store number of switching of the node's ready signals (per channel, e.x., {"node_name" : 2})
+  // TODO: Need to improve the way the setR/V is stored
+  std::map<std::string, std::set<unsigned>> setV; // Set used to store the active range of the corresponding valid signal in different channels
+  std::map<std::string, std::set<unsigned>> setR; // Set used to store active range of the corresponding ready signal in different channels
 
   // Data channel Switching
   std::map<std::string, unsigned> sucsDataWidthMap; // Map from succeeding node name to the channel width
@@ -173,7 +176,7 @@ public:
   std::map<std::string, std::vector<int>> dataOut;  // Map from succeeding node name to the corresponding outptu channel dict
   
   // Overall signal switching status
-  std::map<std::string, std::vector<unsigned>> dataSwitches;  // Map storing the number of data switches for different data channels
+  std::map<std::string, unsigned> dataSwitches;  // Map storing the number of data switches for different data channels
   std::map<std::string, unsigned> handshakeSwitches;          // Map storing the number of switches in different handshake channels
 
   unsigned totalValidSwitching = 0;
@@ -187,18 +190,26 @@ public:
 // Seg subgraph that stores all the nodes of a segment in the dataflow circuit
 class AdjGraph {
 public:
-  AdjGraph(const buffer::CFDFC& cfdfc, const TimingDatabase& timingDB, unsigned II);
+  AdjGraph(const buffer::CFDFC& cfdfc, const TimingDatabase& timingDB, 
+            const unsigned &II, const unsigned &mgIndex);
 
   // This function insert a new element to the given map
   void insertToSurroundingList(std::map<std::string, std::vector<std::string>>& selMap, 
                                 std::string& key, std::string& value);
 
+  // This function create the corresponding storing structure for a node based on the mlir op type
+  // and returns a unique pointer to it.
+  std::unique_ptr<AdjNode> createNodeFromOperation(mlir::Operation *op,
+                                                    std::vector<std::string> &pres, std::vector<std::string> &sucs,
+                                                    unsigned &nodeLatency);
+
   // 
   //  Internal Storing Variables
   //
-  std::vector<std::string> segStartNodes;             // Vector storing all starting nodes in the segment
-  std::map<std::string, std::unique_ptr<AdjNode>> nodes;               // Map from unit name to the corresponding node storing structure
+  std::vector<std::string> segStartNodes;                     // Vector storing all starting nodes in the segment
+  std::map<std::string, std::unique_ptr<AdjNode>> nodes;      // Map from unit name to the corresponding node storing structure
   std::vector<std::pair<std::string, std::string>> backedges; // Vector storing all backedges in the Adjacency graph;
+  unsigned cfdfcIndex = 0;                                    // Variable storing the corresponding cfdfc index
 };
 
 //===----------------------------------------------------------------------===//

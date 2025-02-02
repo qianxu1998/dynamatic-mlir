@@ -95,7 +95,7 @@ void SwitchingEstimationPass::runDynamaticPass() {
   for (const auto& [mgIndex, mgInstance]: switchInfo.cfdfcs) {
     llvm::dbgs() << "[DEBUG] \tMG : " << mgIndex << "\n";
     
-    AdjGraph tmpAdjGraph(mgInstance, timingDB, switchInfo.cfdfcIIs[mgIndex]);
+    AdjGraph tmpAdjGraph(mgInstance, timingDB, switchInfo.cfdfcIIs[mgIndex], mgIndex);
     switchInfo.segToAdjGraphMap.insert_or_assign(std::to_string(mgIndex), &tmpAdjGraph);
   }
 
