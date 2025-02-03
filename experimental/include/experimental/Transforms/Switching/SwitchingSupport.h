@@ -116,6 +116,9 @@ class NodeInfo {
 */
 class AdjNode {
 public:
+  // Define the virtual destructor
+  virtual ~AdjNode() = default;
+
   // Constructer
   AdjNode(mlir::Operation* selOp, 
           const std::vector<std::string>& predecessors, const std::vector<std::string>& successors, 
@@ -243,6 +246,9 @@ const std::set<std::string> NAME_SENSE_LIST = {
 // Helper Functions
 //
 //===----------------------------------------------------------------------===//
+// Get the operation name
+std::string getHandshakeNodeName(mlir::Value &selRes);
+
 // The following function prints the backEdgeToCFDFCMap 
 void printBEToCFDFCMap(const std::map<std::pair<unsigned, unsigned>, std::vector<unsigned>>& selMap);
 

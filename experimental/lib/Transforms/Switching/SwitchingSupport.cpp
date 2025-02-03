@@ -414,6 +414,8 @@ std::unique_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
           // Try to get the successor's name attribute.
           if (auto nameAttr = user->getAttrOfType<mlir::StringAttr>("handshake.name")) {
             nodeSucsDataWidthMap[nameAttr.getValue().str()] = dataWidth;
+
+            llvm::dbgs() << "[DEBUG] \t\t" << nameAttr.getValue() << "\n";
           }
         }
       }
@@ -423,12 +425,13 @@ std::unique_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
     return llvm::TypeSwitch<Operation *, std::unique_ptr<AdjNode>>(op)
       // handshake::AddIOp operator
       .Case<handshake::AddIOp>([&](auto selNode) {
-        return std::unique_ptr<AdjNode>(nullptr);
+        auto node = std::make_unique<AddiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        return node;
       })
       // handshake::SubIOp operator
       .Case<handshake::SubIOp>([&](auto selNode) {
-        
-        return std::unique_ptr<AdjNode>(nullptr);
+        auto node = std::make_unique<SubiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        return node;
       })
       // handshake::MulIOp operator
       .Case<handshake::MulIOp>([&](auto selNode) {
@@ -436,9 +439,9 @@ std::unique_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
         return std::unique_ptr<AdjNode>(nullptr);
       })
       // handshake::CmpIOp operator
-      .Case<handshake::CmpIOp>([&](auto selNode) {
-        
-        return std::unique_ptr<AdjNode>(nullptr);
+      .Case<handshake::CmpIOp>([&](handshake::CmpIOp selNode) {
+        auto node = std::make_unique<CmpiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        return node;
       })
       // handshake::BufferOp operator
       .Case<handshake::BufferOp>([&](handshake::BufferOp selNode) {
@@ -481,18 +484,18 @@ std::unique_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
         return node;
       })
       // handshake::MuxOp operator
-      .Case<handshake::MuxOp>([&](auto selNode) {
+      .Case<handshake::MuxOp>([&](handshake::MuxOp selNode) {
         
         return std::unique_ptr<AdjNode>(nullptr);
       })
       // handshake::ForkOp operator
-      .Case<handshake::ForkOp>([&](auto selNode) {
+      .Case<handshake::ForkOp>([&](handshake::ForkOp selNode) {
         
         return std::unique_ptr<AdjNode>(nullptr);
       })
       // handshake::LazyForkOp operator
-      .Case<handshake::LazyForkOp>([&](auto selNode) {
-        
+      .Case<handshake::LazyForkOp>([&](handshake::LazyForkOp selNode) {
+        // TODO: Add model for lazy fork
         return std::unique_ptr<AdjNode>(nullptr);
       })
       // handshake::TruncIOp operator
@@ -502,8 +505,8 @@ std::unique_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
       })
       // handshake::ExtSIOp operator
       .Case<handshake::ExtSIOp>([&](auto selNode) {
-        
-        return std::unique_ptr<AdjNode>(nullptr);
+        auto node = std::make_unique<ExtsiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        return node;
       })
       // handshake::ExtUIOp operator
       .Case<handshake::ExtUIOp>([&](auto selNode) {
@@ -511,12 +514,12 @@ std::unique_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
         return std::unique_ptr<AdjNode>(nullptr);
       })
       // handshake::ControlMergeOp operator
-      .Case<handshake::ControlMergeOp>([&](auto selNode) {
+      .Case<handshake::ControlMergeOp>([&](handshake::ControlMergeOp selNode) {
         
         return std::unique_ptr<AdjNode>(nullptr);
       })
       // handshake::ConditionalBranchOp operator
-      .Case<handshake::ConditionalBranchOp>([&](auto selNode) {
+      .Case<handshake::ConditionalBranchOp>([&](handshake::ConditionalBranchOp selNode) {
         
         return std::unique_ptr<AdjNode>(nullptr);
       })
@@ -531,14 +534,20 @@ std::unique_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
         return std::unique_ptr<AdjNode>(nullptr);
       })
       // handshake::LoadOp operator
-      .Case<handshake::LoadOp>([&](auto selNode) {
-
-        
-        
-        return std::unique_ptr<AdjNode>(nullptr);
+      .Case<handshake::LoadOp>([&](handshake::LoadOp selNode) {
+        // Check whether this is a LSQ Load or not
+        auto memOp = findMemInterface(selNode.getAddressResult());
+        if (isa_and_present<handshake::LSQOp>(memOp)) {
+          // TODO: Need to change the latency obtaining method for lsq load op
+          auto node = std::make_unique<DLoadNode>(op, pres, sucs, nodeSucsDataWidthMap, 5);
+          return node;
+        } else {
+          auto node = std::make_unique<DLoadNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+          return node;
+        }
       })
       // handshake::StoreOp operator
-      .Case<handshake::StoreOp>([&](auto selNode) {
+      .Case<handshake::StoreOp>([&](handshake::StoreOp selNode) {
         
         return std::unique_ptr<AdjNode>(nullptr);
       })
@@ -554,6 +563,14 @@ std::unique_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
 // Helper Functions
 //
 //===----------------------------------------------------------------------===//
+std::string getHandshakeNodeName(mlir::Value &selRes) {
+  for (mlir::Operation *user : selRes.getUsers()) {
+    // Try to get the successor's name attribute.
+    if (auto nameAttr = user->getAttrOfType<mlir::StringAttr>("handshake.name")) {
+      return nameAttr.getValue().str();
+    }
+  }
+};
 
 void printBEToCFDFCMap(const std::map<std::pair<unsigned, unsigned>, std::vector<unsigned>>& selMap) {
   for (const auto& selPair : selMap) {

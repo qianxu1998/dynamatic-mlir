@@ -423,5 +423,39 @@ def LSQDepthAttr : Handshake_Attr<"LSQDepth", "lsqDepth"> {
   let assemblyFormat = "`[` $loadQueueDepth `,` $storeQueueDepth `]`";
 }
 
+//===----------------------------------------------------------------------===//
+// Buffer Occupancy Results (Currently only support FPGA 20)
+//===----------------------------------------------------------------------===//
+def BufferOccupancyAttr : Handshake_Attr<
+  "BufferOccupancy", "bufOcc"
+> {
+  let summary = "Maps CFDFC index to the buffer occupancy value";
+  let description = [{
+    Holds a map from CFDFC index to the corresponding buffer occupancy value for buffer operations (opaque and transparent). 
+    For example, {"0" : 0.5, "1": 0.25}. This means the corresponding buffer has an occupancy of 0.5 in CFDFC 0 and 
+    an occupancy of 0.25 in CFDFC 1.
+
+    For constructing this attribute, user can directly provide an
+    llvm::MapVector<size_t, double>
+  }];
+
+  let parameters = (ins "mlir::DictionaryAttr":$bufferOccMap);
+
+  let assemblyFormat = " $bufferOccMap ";
+
+  let builders = [
+    // Builder for llvm::MapVector<size_t, double>
+    AttrBuilder<(ins "llvm::MapVector<size_t, double>":$cfdfcBufOccMap), [{
+      llvm::SmallVector<mlir::NamedAttribute, 10> attrs;
+      mlir::Builder builder(context);
+      for (const auto &pair: cfdfcBufOccMap) {
+        mlir::Type doubleType = mlir::FloatType::getF64(context);
+        auto tmpCFDFCThroughputAttr = builder.getFloatAttr(doubleType, pair.second);
+        attrs.push_back({builder.getStringAttr(std::to_string(pair.first)), tmpCFDFCThroughputAttr});
+      }
+      return $_get(context, mlir::DictionaryAttr::get(context, attrs));
+    }]>
+  ];
+}
 
 #endif // DYNAMATIC_DIALECT_HANDSHAKE_HANDSHAKE_ATTRIBUTES_TD
