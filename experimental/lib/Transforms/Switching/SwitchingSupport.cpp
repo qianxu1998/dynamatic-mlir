@@ -204,29 +204,29 @@ void AdjNode::printDetail() {
 
   llvm::dbgs() << "[DEBUG] \t\tSuccessor Channel DataWidth: \n";
   for (const auto& [s, width] : sucsDataWidthMap) {
-    llvm::dbgs() << "\t\t\t\tNode: " << s << ", Data_width: " << width <<"\n";
+    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s << ", Data_width: " << width <<"\n";
   }
 
   llvm::dbgs() << "[DEBUG] \t\tSuccessor Channel Data Value\n";
   for (const auto& [s, valueVec] : dataOut) {
-    llvm::dbgs() << "\t\t\t\tNode: " << s << ", Output Value Vector: \n";
+    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s << ", Output Value Vector: \n";
     printVector(valueVec);
     llvm::dbgs() << "\n";
   }
 
   llvm::dbgs() << "[DEBUG] \t\tValid Channel Switching: \n";
   for (const auto& [s, numSwitches] : validSignal) {
-    llvm::dbgs() << "\t\t\t\tNode: " << s << ", Data_width: " << numSwitches <<"\n";
+    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s << ", Data_width: " << numSwitches <<"\n";
   }
 
   llvm::dbgs() << "[DEBUG] \t\tReady Channel Switching: \n";
   for (const auto& [s, numSwitches] : readySignal) {
-    llvm::dbgs() << "\t\t\t\tNode: " << s << ", Data_width: " << numSwitches <<"\n";
+    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s << ", Data_width: " << numSwitches <<"\n";
   }
 
   llvm::dbgs() << "[DEBUG] \t\tValid Active Range: \n";
   for (const auto& [s, valueVec] : setV) {
-    llvm::dbgs() << "\t\t\t\tNode: " << s << " ; Active Range: [";
+    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [";
     for (const auto& selValue : valueVec) {
       llvm::dbgs() << selValue << " ";
     }
@@ -235,7 +235,7 @@ void AdjNode::printDetail() {
 
   llvm::dbgs() << "[DEBUG] \t\tReady Active Range: \n";
   for (const auto& [s, valueVec] : setR) {
-    llvm::dbgs() << "\t\t\t\tNode: " << s << " ; Active Range: [";
+    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [";
     for (const auto& selValue : valueVec) {
       llvm::dbgs() << selValue << " ";
     }
@@ -250,17 +250,17 @@ void AdjNode::printHandshakeSwitching() {
 
   llvm::dbgs() << "[DEBUG] \t\tValid Channel Switching: \n";
   for (const auto& [s, numSwitches] : validSignal) {
-    llvm::dbgs() << "\t\t\t\tNode: " << s << ", Data_width: " << numSwitches <<"\n";
+    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s << ", Data_width: " << numSwitches <<"\n";
   }
 
   llvm::dbgs() << "[DEBUG] \t\tReady Channel Switching: \n";
   for (const auto& [s, numSwitches] : readySignal) {
-    llvm::dbgs() << "\t\t\t\tNode: " << s << ", Data_width: " << numSwitches <<"\n";
+    llvm::dbgs() << "[DEBUG] [DEBUG] \t\t\t\tNode: " << s << ", Data_width: " << numSwitches <<"\n";
   }
 
   llvm::dbgs() << "[DEBUG] \t\tValid Active Range: \n";
   for (const auto& [s, valueVec] : setV) {
-    llvm::dbgs() << "\t\t\t\tNode: " << s << " ; Active Range: [";
+    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [";
     for (const auto& selValue : valueVec) {
       llvm::dbgs() << selValue << " ";
     }
@@ -269,7 +269,7 @@ void AdjNode::printHandshakeSwitching() {
 
   llvm::dbgs() << "[DEBUG] \t\tReady Active Range: \n";
   for (const auto& [s, valueVec] : setR) {
-    llvm::dbgs() << "\t\t\t\tNode: " << s << " ; Active Range: [";
+    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [";
     for (const auto& selValue : valueVec) {
       llvm::dbgs() << selValue << " ";
     }
@@ -485,23 +485,34 @@ std::unique_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
       })
       // handshake::MuxOp operator
       .Case<handshake::MuxOp>([&](handshake::MuxOp selNode) {
-        
-        return std::unique_ptr<AdjNode>(nullptr);
+        auto node = std::make_unique<MuxNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        return node;
+      })
+      // handshake::OrIOp operator
+      .Case<handshake::OrIOp>([&](handshake::OrIOp selNode) {
+        auto node = std::make_unique<OriNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        return node;
+      })
+      // handshake::AndIOp operator
+      .Case<handshake::AndIOp>([&](handshake::AndIOp selNode) {
+        auto node = std::make_unique<AndiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        return node;
       })
       // handshake::ForkOp operator
       .Case<handshake::ForkOp>([&](handshake::ForkOp selNode) {
-        
-        return std::unique_ptr<AdjNode>(nullptr);
+        auto node = std::make_unique<ForkNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        return node;
       })
       // handshake::LazyForkOp operator
       .Case<handshake::LazyForkOp>([&](handshake::LazyForkOp selNode) {
         // TODO: Add model for lazy fork
+        llvm::dbgs() << "[DEBUG] \t\t Missing Implementation for LAZY FORK NODE\n";
         return std::unique_ptr<AdjNode>(nullptr);
       })
       // handshake::TruncIOp operator
       .Case<handshake::TruncIOp>([&](auto selNode) {
-        
-        return std::unique_ptr<AdjNode>(nullptr);
+        auto node = std::make_unique<TrunciNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        return node;
       })
       // handshake::ExtSIOp operator
       .Case<handshake::ExtSIOp>([&](auto selNode) {
@@ -510,28 +521,28 @@ std::unique_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
       })
       // handshake::ExtUIOp operator
       .Case<handshake::ExtUIOp>([&](auto selNode) {
-        
-        return std::unique_ptr<AdjNode>(nullptr);
+        auto node = std::make_unique<ExtuiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        return node;
       })
       // handshake::ControlMergeOp operator
       .Case<handshake::ControlMergeOp>([&](handshake::ControlMergeOp selNode) {
-        
-        return std::unique_ptr<AdjNode>(nullptr);
+        auto node = std::make_unique<CMergeNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        return node;
       })
       // handshake::ConditionalBranchOp operator
       .Case<handshake::ConditionalBranchOp>([&](handshake::ConditionalBranchOp selNode) {
-        
-        return std::unique_ptr<AdjNode>(nullptr);
+        auto node = std::make_unique<CBrNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        return node;
       })
       // handshake::SourceOp operator
       .Case<handshake::SourceOp>([&](auto selNode) {
-        
-        return std::unique_ptr<AdjNode>(nullptr);
+        auto node = std::make_unique<CBrNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        return node;
       })
       // handshake::ConstantOp operator
       .Case<handshake::ConstantOp>([&](auto selNode) {
-        
-        return std::unique_ptr<AdjNode>(nullptr);
+        auto node = std::make_unique<ConstantNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        return node;
       })
       // handshake::LoadOp operator
       .Case<handshake::LoadOp>([&](handshake::LoadOp selNode) {
@@ -548,8 +559,27 @@ std::unique_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
       })
       // handshake::StoreOp operator
       .Case<handshake::StoreOp>([&](handshake::StoreOp selNode) {
-        
-        return std::unique_ptr<AdjNode>(nullptr);
+        auto node = std::make_unique<DStoreNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        return node;
+      })
+      // handshake::ShLIOp operator
+      .Case<handshake::ShLIOp>([&](auto selNode) {
+        auto node = std::make_unique<ShliNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        return node;
+      })
+      // handshake::ShRSIOp operator
+      .Case<handshake::ShRSIOp>([&](auto selNode) {
+        auto node = std::make_unique<ShrsiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        return node;
+      })
+      // handshake::ShRUIOp operator
+      .Case<handshake::ShRUIOp>([&](auto selNode) {
+        auto node = std::make_unique<ShruiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        return node;
+      })
+      .Case<handshake::SinkOp>([&](auto selNode) {
+        auto node = std::make_unique<SinkNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        return node;
       })
       .Default([](auto selNode) {
           selNode->emitOpError() << "Unknown operation!";

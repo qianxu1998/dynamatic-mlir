@@ -493,7 +493,40 @@ public:
 // Model for CMerge Node
 //
 //===----------------------------------------------------------------------===//
+class CMergeNode : public AdjNode {
+public:
+  // Constructor: Pass the basic information to the base class.
+  // sucDataWidthMap is assumed to map a successor name to its port number.
+  CMergeNode(mlir::Operation *op,
+             const std::vector<std::string> &predecessors,
+             const std::vector<std::string> &successors,
+             const std::map<std::string, unsigned> &sucDataWidthMap,
+             unsigned latency);
 
+  // Handshake signal calculation functions
+  void calValidSwitching(const std::string &sucNodeName, unsigned II);
+  void calValidSet(const std::string &sucNodeName, unsigned nodeStartTime, unsigned II);
+  
+  void calReadySwitching(const std::string &preNodeName);
+  void calReadySet(const std::string &preNodeName, unsigned II);
+
+  // Data channel functions
+  // calDataout: For control merge, the control (conditional) channel output equals the actual data input port index,
+  // and the data channel output is set to an invalid value (-1).
+  void calDataout(int inputValue);
+
+  // updateDataout: for every successor in the node’s successor list,
+  // if it is the condition channel, update using XOR-diff and update toggle counts;
+  // otherwise, set its data to -1.
+  void updateDataout(int inputData);
+
+  // Print details: First call the base class version, then print the control-channel successor name.
+  void printDetail() override;
+
+  // Extra member variables specific to CMergeNode:
+  std::string conSucNodeName;   // The name of the successor on the condition channel (port 1)
+  std::string dataSucNodeName;  // The name of the successor on the data channel (all others)
+};
 
 //===----------------------------------------------------------------------===//
 //
@@ -507,7 +540,58 @@ public:
 // Model for Fork Node
 //
 //===----------------------------------------------------------------------===//
+class ForkNode : public AdjNode {
+public:
+  // Constructor: simply forward arguments to the AdjNode constructor.
+  ForkNode(mlir::Operation *op,
+           const std::vector<std::string> &predecessors,
+           const std::vector<std::string> &successors,
+           const std::map<std::string, unsigned> &sucDataWidthMap,
+           unsigned latency) : AdjNode(op, predecessors, successors, sucDataWidthMap, latency) {}
 
+  // Handshake functions:
+  // calValidSwitching:
+  //   Parameters:
+  //     - sucNodeName: key for a particular successor.
+  //     - numValid: the valid count for the input channel.
+  //     - setRDict: a mapping from successor names to their active ready sets.
+  //     - numReadyDict: a mapping from successor names to their ready counts.
+  //     - sucNodeStart: the starting cycle for this output channel.
+  //     - nodeSteadyStart: the steady‐state start cycle of this node.
+  //     - II: the initiation interval.
+  void calValidSwitching(const std::string &sucNodeName,
+                         unsigned numValid,
+                         const std::map<std::string, std::set<unsigned>> &setRDict,
+                         const std::map<std::string, unsigned> &numReadyDict,
+                         unsigned sucNodeStart,
+                         unsigned nodeSteadyStart,
+                         unsigned II);
+
+  // calValidSet:
+  //   If the valid signal for sucNodeName is 0, assign the full set {0,...,II-1}.
+  //   Otherwise, if numValid > 0, assign {nodeStartTime}; else, assign the ready set from setRDict.
+  void calValidSet(const std::string &sucNodeName,
+                   unsigned nodeStartTime,
+                   unsigned numValid,
+                   const std::map<std::string, std::set<unsigned>> &setRDict,
+                   unsigned II);
+
+  // calReadySwitching:
+  //   Takes a list of ready counts (one per channel) and if any value > 0 sets the ready signal to 2;
+  //   otherwise, if all values are 0, sets it to 0.
+  void calReadySwitching(const std::string &preNodeName,
+                         const std::vector<unsigned> &numReadyList);
+
+  // calReadySet:
+  //   If a ready set (setR) is provided (non-null), use it.
+  //   Otherwise, if readySignal for the predecessor is 0, assign the full set.
+  //   Else, compute the union of all ready sets from all successors and then assign:
+  //     - If the union equals the full set {0,...,II-1}, assign {0};
+  //     - Otherwise, assign the last element of the union.
+  void calReadySet(const std::string &preNodeName,
+                   const std::map<std::string, std::set<unsigned>> &setRDict,
+                   unsigned II);
+};
 
 
 //===----------------------------------------------------------------------===//
@@ -515,19 +599,94 @@ public:
 // Model for CBr Node
 //
 //===----------------------------------------------------------------------===//
+class CBrNode : public AdjNode {
+public:
+  // Constructor with updated signature.
+  CBrNode(mlir::Operation *op,
+          const std::vector<std::string> &predecessors,
+          const std::vector<std::string> &successors,
+          const std::map<std::string, unsigned> &sucDataWidthMap,
+          unsigned latency);
 
+  // Handshake calculation functions:
+  // calValidSwitching: Determines valid switching for a given successor based on the condition value and
+  // input valid counts.
+  void calValidSwitching(const std::string &sucNodeName,
+                         unsigned condValue,
+                         unsigned numValid0,
+                         unsigned numValid1);
+
+  // calValidSet: If valid signal for sucNodeName is 0 (or II==1), then the entire cycle range is active;
+  // otherwise, if condValue matches the port number of sucNodeName then assign an empty set,
+  // else assign a singleton set {nodeStartTime}.
+  void calValidSet(const std::string &sucNodeName,
+                   unsigned nodeStartTime,
+                   unsigned condValue,
+                   unsigned II);
+
+  // calReadySwitching: For the given predecessor, if both numValid and numReady are 0 then ready is 0;
+  // else ready is 2.
+  void calReadySwitching(const std::string &preNodeName,
+                         unsigned numValid,
+                         unsigned numReady);
+
+  // calReadySet: If a ready set is provided (non-null pointer), assign it.
+  // Otherwise, if readySignal for the predecessor is 0, assign the full set {0,...,II-1}.
+  void calReadySet(const std::string &preNodeName,
+                   const std::set<unsigned> *setValid,
+                   const std::set<unsigned> *setReady,
+                   unsigned II);
+
+  // setReadySet: For convenience, choose a successor with nonzero valid switching (if any) and copy its
+  // valid set (from setV) to the ready set for the given predecessor; otherwise, assign full set.
+  void setReadySet(const std::string &preNodeName, unsigned II);
+
+  // updateDataout: Update the data output channels for all successors:
+  // For each successor, if data already exists, compute an XOR difference with the new input and update toggle counts.
+  // Also update the per-channel dataout for channel (1 - condValue).
+  void updateDataout(int inputData, unsigned condValue);
+
+  // Print details: call base class printDetail(), then print extra CBrNode info.
+  void printDetail() override;
+
+  // Extra members.
+  std::string condPreNodeName;  // Condition predecessor name.
+  std::string dataPreNodeName;  // Data predecessor name.
+  std::string trueSucNodeName;  // Succeeding node when the condition evaluated to true
+  std::string falseSucNodeName; // Succeeding node when the condition evaluated to false
+  std::map<std::string, unsigned> outChannelNameToIndexMap;
+  int lastValidDataValue;       // Last valid data value (initialized to -1).
+  std::map<int, std::vector<int>> per_channel_dataout; // Map: channel -> vector of output data.
+};
 
 //===----------------------------------------------------------------------===//
 //
 // Model for Shli Node
 //
 //===----------------------------------------------------------------------===//
-
+class ShliNode : public JoinNode {
+public:
+  ShliNode(mlir::Operation *op,
+           const std::vector<std::string> &predecessors,
+           const std::vector<std::string> &successors,
+           const std::map<std::string, unsigned> &sucDataWidthMap,
+           unsigned latency)
+      : JoinNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+};
 //===----------------------------------------------------------------------===//
 //
 // Model for Shrsi Node
 //
 //===----------------------------------------------------------------------===//
+class ShrsiNode : public JoinNode {
+public:
+  ShrsiNode(mlir::Operation *op,
+            const std::vector<std::string> &predecessors,
+            const std::vector<std::string> &successors,
+            const std::map<std::string, unsigned> &sucDataWidthMap,
+            unsigned latency)
+      : JoinNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+};
 
 
 //===----------------------------------------------------------------------===//
@@ -535,61 +694,253 @@ public:
 // Model for Shrui Node
 //
 //===----------------------------------------------------------------------===//
-
+class ShruiNode : public JoinNode {
+public:
+  ShruiNode(mlir::Operation *op,
+            const std::vector<std::string> &predecessors,
+            const std::vector<std::string> &successors,
+            const std::map<std::string, unsigned> &sucDataWidthMap,
+            unsigned latency)
+      : JoinNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+};
 
 //===----------------------------------------------------------------------===//
 //
 // Model for Mux Node
 //
 //===----------------------------------------------------------------------===//
+// MuxNode represents a mux operator in the CFDFC.
+// - The condition signal selects the input port whose cond_value equals (port_id - 1).
+// - It is assumed that in steady state, the condition input is always 0.
+class MuxNode : public AdjNode {
+public:
+  // Constructor.
+  //   - op: pointer to the MLIR operation.
+  //   - predecessors: a mapping from predecessor names to their port numbers.
+  //   - successors: a vector of successor names.
+  //   - sucDataWidthMap: mapping from successor names to (data) port numbers.
+  //   - latency: the node latency.
+  MuxNode(mlir::Operation *op,
+          const std::vector<std::string> &predecessors,
+          const std::vector<std::string> &successors,
+          const std::map<std::string, unsigned> &sucDataWidthMap,
+          unsigned latency);
 
+  // Handshake functions:
+  // calValidSwitching: If II == 1, the valid signal is 0; otherwise, it is 2.
+  void calValidSwitching(const std::string &sucNodeName, unsigned II);
+
+  // calValidSet: If the valid signal for sucNodeName is 0 then assign full set {0,...,II-1};
+  // otherwise, assign {nodeStartTime}.
+  void calValidSet(const std::string &sucNodeName, unsigned nodeStartTime, unsigned II);
+
+  // calReadySwitching:
+  //   Parameters:
+  //     - preNodeName: name of a predecessor.
+  //     - condValue: the condition value at this node.
+  //     - num_v: an unsigned representing the valid count.
+  //     - setV0: pointer to a set (e.g., active cycles) for one input.
+  //     - setVSelect: pointer to a set for the selected input.
+  //     - setR: pointer to a set for ready.
+  //     - II: initiation interval.
+  void calReadySwitching(const std::string &preNodeName,
+                         unsigned condValue,
+                         unsigned num_v,
+                         const std::set<unsigned> *setV0,
+                         const std::set<unsigned> *setVSelect,
+                         const std::set<unsigned> *setR,
+                         unsigned II);
+
+  // calReadySet:
+  //   Parameters:
+  //     - preNodeName: name of a predecessor.
+  //     - setCond: pointer to a set for the condition.
+  //     - setV: pointer to a valid set.
+  //     - setR: pointer to a ready set.
+  //     - II: initiation interval.
+  // If readySignal for preNodeName is 0, assign full set {0,...,II-1};
+  // else assign the intersection: setCond ∩ setV ∩ setR.
+  void calReadySet(const std::string &preNodeName,
+                   const std::set<unsigned> *setCond,
+                   const std::set<unsigned> *setV,
+                   const std::set<unsigned> *setR,
+                   unsigned II);
+
+  // Print detail: call the base class printDetail() and then print extra info.
+  void printDetail() override;
+
+  // Extra member: The name of the predecessor on the condition channel.
+  std::string conPreNodeName;
+  // Map from node name to the corresponding port index
+  std::map<std::string, unsigned> preNameToPortIdxMap;
+};
 
 //===----------------------------------------------------------------------===//
 //
 // Model for Trunci Node
 //
 //===----------------------------------------------------------------------===//
-
+class TrunciNode : public PassNode {
+public:
+  TrunciNode(mlir::Operation *op,
+             const std::vector<std::string> &predecessors,
+             const std::vector<std::string> &successors,
+             const std::map<std::string, unsigned> &sucDataWidthMap,
+             unsigned latency)
+      : PassNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+};
 
 //===----------------------------------------------------------------------===//
 //
 // Model for Extui Node
 //
 //===----------------------------------------------------------------------===//
+class ExtuiNode : public PassNode {
+public:
+  ExtuiNode(mlir::Operation *op,
+            const std::vector<std::string> &predecessors,
+            const std::vector<std::string> &successors,
+            const std::map<std::string, unsigned> &sucDataWidthMap,
+            unsigned latency)
+      : PassNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+};
 
 //===----------------------------------------------------------------------===//
 //
 // Model for Constant Node
 //
 //===----------------------------------------------------------------------===//
-
+class ConstantNode : public PassNode {
+public:
+  ConstantNode(mlir::Operation *op,
+               const std::vector<std::string> &predecessors,
+               const std::vector<std::string> &successors,
+               const std::map<std::string, unsigned> &sucDataWidthMap,
+               unsigned latency)
+      : PassNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+};
 
 //===----------------------------------------------------------------------===//
 //
 // Model for Ori Node
 //
 //===----------------------------------------------------------------------===//
-
-
+class OriNode : public JoinNode {
+public:
+  OriNode(mlir::Operation *op,
+          const std::vector<std::string> &predecessors,
+          const std::vector<std::string> &successors,
+          const std::map<std::string, unsigned> &sucDataWidthMap,
+          unsigned latency)
+      : JoinNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+};
 //===----------------------------------------------------------------------===//
 //
 // Model for Andi Node
 //
 //===----------------------------------------------------------------------===//
-
+class AndiNode : public JoinNode {
+public:
+  AndiNode(mlir::Operation *op,
+           const std::vector<std::string> &predecessors,
+           const std::vector<std::string> &successors,
+           const std::map<std::string, unsigned> &sucDataWidthMap,
+           unsigned latency)
+      : JoinNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+};
 
 //===----------------------------------------------------------------------===//
 //
 // Model for Source Node
 //
 //===----------------------------------------------------------------------===//
+class SourceNode : public AdjNode {
+public:
+  SourceNode(mlir::Operation *op,
+             const std::vector<std::string> &predecessors,
+             const std::vector<std::string> &successors,
+             const std::map<std::string, unsigned> &sucDataWidthMap,
+             unsigned latency)
+      : AdjNode(op, predecessors, successors, sucDataWidthMap, latency) {}
 
+  void calValidSwitching(const std::string &sucNodeName) {
+    validSignal[sucNodeName] = 0;
+  }
+  
+  void calValidSet(const std::string &sucNodeName, unsigned II) {
+    // Build full set {0, 1, ..., II-1}
+    std::set<unsigned> fullSet;
+    for (unsigned i = 0; i < II; ++i)
+      fullSet.insert(i);
+    setV[sucNodeName] = fullSet;
+  }
+  
+  void calReadySwitching(const std::string &preNodeName) {
+    readySignal[preNodeName] = 0;
+  }
+  
+  void calReadySet(const std::string &preNodeName, unsigned II) {
+    std::set<unsigned> fullSet;
+    for (unsigned i = 0; i < II; ++i)
+      fullSet.insert(i);
+    setR[preNodeName] = fullSet;
+  }
+};
+
+//----------------------------------------------------------------------------
+// SinkNode: Derived directly from AdjNode
+//----------------------------------------------------------------------------
+class SinkNode : public AdjNode {
+public:
+  SinkNode(mlir::Operation *op,
+           const std::vector<std::string> &predecessors,
+           const std::vector<std::string> &successors,
+           const std::map<std::string, unsigned> &sucDataWidthMap,
+           unsigned latency)
+      : AdjNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+
+  // For SinkNode, valid switching and valid set are not defined by hardware;
+  // They are intended to be provided via profiling.
+  void calValidSwitching() {}
+  void calValidSet() {}
+
+  void calReadySwitching(const std::string &preNodeName) {
+    // Sink node is always ready.
+    readySignal[preNodeName] = 0;
+  }
+  
+  void calReadySet(const std::string &preNodeName, unsigned II) {
+    std::set<unsigned> fullSet;
+    for (unsigned i = 0; i < II; ++i)
+      fullSet.insert(i);
+    setR[preNodeName] = fullSet;
+  }
+
+  void calDataout() {}
+};
 
 //===----------------------------------------------------------------------===//
 //
 // Model for Start Node
 //
 //===----------------------------------------------------------------------===//
+class StartNode : public AdjNode {
+public:
+  /// Constructor.
+  StartNode(mlir::Operation *op,
+            const std::vector<std::string> &predecessors,
+            const std::vector<std::string> &successors,
+            const std::map<std::string, unsigned> &sucDataWidthDict,
+            unsigned latency);
 
+  // Handshake functions:
+  /// Set the valid switching value for a given successor to 2.
+  void calValidSwitching(const std::string &sucNodeName);
+
+  /// These methods are not implemented (pass).
+  void calValidSet();
+  void calReadySwitching();
+  void calReadySet();
+};
 
 #endif // EXPERIMENTAL_TRANSFORMS_SWITCHING_EXECUTION_MODEL_H

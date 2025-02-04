@@ -6,6 +6,14 @@
 
 #include "experimental/Transforms/Switching/ExecModel.h"
 
+// Helper: Build a full set {0, 1, ..., II-1}
+static std::set<unsigned> makeFullSet(unsigned II) {
+  std::set<unsigned> fullSet;
+  for (unsigned i = 0; i < II; ++i)
+    fullSet.insert(i);
+  return fullSet;
+}
+
 //===----------------------------------------------------------------------===//
 //
 // Buffer Node
@@ -84,10 +92,7 @@ void JoinNode::calValidSet(const std::string &sucNodeName,
   // Check if validSignal contains sucNodeName.
   if (validSignal.find(sucNodeName) != validSignal.end()) {
     if (validSignal[sucNodeName] == 0 || II == 1) {
-      std::set<unsigned> fullSet;
-      for (unsigned i = 0; i < II; ++i)
-        fullSet.insert(i);
-      setV[sucNodeName] = fullSet;
+      setV[sucNodeName] = makeFullSet(II);
     } else {
       std::set<unsigned> tmp;
       tmp.insert(nodeStartTime);
@@ -119,10 +124,7 @@ void JoinNode::calReadySet(const std::string &preNodeName,
     setR[preNodeName] = finalSet;
   } else if (readySignal.find(preNodeName) != readySignal.end()) {
     if (readySignal[preNodeName] == 0) {
-      std::set<unsigned> fullSet;
-      for (unsigned i = 0; i < II; ++i)
-        fullSet.insert(i);
-      setR[preNodeName] = fullSet;
+      setR[preNodeName] = makeFullSet(II);
     } else if (readySignal[preNodeName] > 0) {
       std::set<unsigned> tmp;
       tmp.insert(nodeStartTime);
@@ -157,10 +159,7 @@ void PassNode::calValidSet(const std::string &sucNodeName,
                            unsigned &II) {
   if (validSignal.find(sucNodeName) != validSignal.end()) {
     if (validSignal[sucNodeName] == 0) {
-      std::set<unsigned> fullSet;
-      for (unsigned i = 0; i < II; ++i)
-        fullSet.insert(i);
-      setV[sucNodeName] = fullSet;
+      setV[sucNodeName] = makeFullSet(II);
     } else {
       std::set<unsigned> tmp;
       tmp.insert(nodeStartTime);
@@ -185,10 +184,7 @@ void PassNode::calReadySet(const std::string &preNodeName,
     setR[preNodeName] = *setReady;
   } else if (readySignal.find(preNodeName) != readySignal.end()) {
     if (readySignal[preNodeName] == 0) {
-      std::set<unsigned> fullSet;
-      for (unsigned i = 0; i < II; ++i)
-        fullSet.insert(i);
-      setR[preNodeName] = fullSet;
+      setR[preNodeName] = makeFullSet(II);
     } else if (readySignal[preNodeName] > 0) {
       std::set<unsigned> tmp;
       tmp.insert(nodeStartTime);
@@ -230,10 +226,11 @@ DLoadNode::DLoadNode(mlir::Operation *op,
   auto loadOp = dyn_cast<handshake::LoadOp>(op);
   auto dataOutRes = loadOp.getDataResult();
   auto addrOutRes = loadOp.getAddressResult();
+  auto addrInRes = loadOp.getAddressInput();
 
   dataOutNodeName = getHandshakeNodeName(dataOutRes);
   addressOutNodeName = getHandshakeNodeName(addrOutRes);
-  addressInNodeName = predecessors[0];
+  addressInNodeName = addrInRes.getDefiningOp()->getAttrOfType<mlir::StringAttr>("handshake.name").getValue().str();
 }
 
 void DLoadNode::calValidSwitching(const std::string &sucNodeName, unsigned &numValid) {
@@ -246,10 +243,7 @@ void DLoadNode::calValidSwitching(const std::string &sucNodeName, unsigned &numV
 void DLoadNode::calValidSet(const std::string &sucNodeName, const std::set<unsigned> *inSetV, unsigned &II) {
   if (validSignal.find(sucNodeName) != validSignal.end()) {
     if (validSignal[sucNodeName] == 0) {
-      std::set<unsigned> fullSet;
-      for (unsigned i = 0; i < II; ++i)
-        fullSet.insert(i);
-      setV[sucNodeName] = fullSet;
+      setV[sucNodeName] = makeFullSet(II);
     } else if (inSetV != nullptr) {
       std::set<unsigned> finalSet;
       for (unsigned v : *inSetV)
@@ -271,10 +265,7 @@ void DLoadNode::calReadySet(const std::string &preNodeName, const std::set<unsig
     setR[preNodeName] = *inSetR;
   } else if (readySignal.find(preNodeName) != readySignal.end()) {
     if (readySignal[preNodeName] == 0) {
-      std::set<unsigned> fullSet;
-      for (unsigned i = 0; i < II; ++i)
-        fullSet.insert(i);
-      setR[preNodeName] = fullSet;
+      setR[preNodeName] = makeFullSet(II);
     } else if (readySignal[preNodeName] > 0) {
       std::set<unsigned> tmp;
       tmp.insert(nodeStartTime);
@@ -339,12 +330,22 @@ DStoreNode::DStoreNode(mlir::Operation *op,
                        const std::map<std::string, unsigned> &sucDataWidthMap,
                        unsigned latency)
     : AdjNode(op, predecessors, successors, sucDataWidthMap, latency) {
-  // Assume that the predecessor list is ordered:
-  // index 0 is the data input, index 1 is the address input.
-  if (!pres.empty())
-    dataInNode = pres[0];
-  if (pres.size() > 1)
-    addressInNode = pres[1];
+  // Add the data channel to the mem_controller
+  unsigned dataWidth = 0;
+  for (const auto& selPair : sucDataWidthMap) {
+    dataWidth = selPair.second;
+    break;
+  }
+  sucsDataWidthMap["mem_data"] = dataWidth;
+  
+  // Get the StoreOp
+  auto storeOp = dyn_cast<handshake::StoreOp>(op);
+  auto dataInValue = storeOp.getDataInput();
+  auto addrInNodeValue = storeOp.getAddressInput();
+
+  dataInNode = dataInValue.getDefiningOp()->getAttrOfType<mlir::StringAttr>("handshake.name").getValue().str();
+  addressInNode = addrInNodeValue.getDefiningOp()->getAttrOfType<mlir::StringAttr>("handshake.name").getValue().str();
+  
   // The "source" nodes for these inputs are to be set externally.
   dataInSrcNode = "";
   addressInSrcNode = "";
@@ -353,14 +354,15 @@ DStoreNode::DStoreNode(mlir::Operation *op,
 void DStoreNode::calValidSwitching(unsigned numValid1, unsigned numValid2) {
   // For the memory controller channel, use key "mc".
   if (numValid1 > 0 || numValid2 > 0)
-    validSignal["mc"] = 4;
+    validSignal["mem"] = 4;
   else if (numValid1 == 0 && numValid2 == 0)
-    validSignal["mc"] = 0;
+    validSignal["mem"] = 0;
   else
-    validSignal["mc"] = 4;
+    validSignal["mem"] = 4;
 }
 
 void DStoreNode::calValidSet(const std::set<unsigned> *setV0, const std::set<unsigned> *setV1, unsigned II) {
+  // TODO: Need to differentiate between addrToMem and dataToMem handshake channels
   if (setV0 != nullptr && setV1 != nullptr) {
     std::set<unsigned> tmp;
     std::set_intersection(setV0->begin(), setV0->end(),
@@ -369,16 +371,14 @@ void DStoreNode::calValidSet(const std::set<unsigned> *setV0, const std::set<uns
     std::set<unsigned> finalSet;
     for (unsigned val : tmp)
       finalSet.insert((val + nodeLatency) % II);
-    setV["mc"] = finalSet;
-  } else if (validSignal.find("mc") != validSignal.end() && validSignal["mc"] == 0) {
-    std::set<unsigned> fullSet;
-    for (unsigned i = 0; i < II; ++i)
-      fullSet.insert(i);
-    setV["mc"] = fullSet;
+    setV["mem"] = finalSet;
+  } else if (validSignal.find("mem") != validSignal.end() && validSignal["mem"] == 0) {
+    setV["mem"] = makeFullSet(II);
   }
 }
 
 void DStoreNode::calReadySwitching(const std::string &preNodeName, unsigned numValid1, unsigned numValid2) {
+  // TODO: May need to change the following modeling as the implementation changed
   if (numValid1 > 0 || numValid2 > 0)
     readySignal[preNodeName] = 2;
   else if (numValid1 == 0 && numValid2 == 0)
@@ -388,6 +388,7 @@ void DStoreNode::calReadySwitching(const std::string &preNodeName, unsigned numV
 }
 
 void DStoreNode::calReadySet(const std::string &preNodeName, const std::set<unsigned> *setV0, const std::set<unsigned> *setV1, unsigned II) {
+  // TODO: Validate the following estimation based on new implementations
   if (setV0 != nullptr && setV1 != nullptr) {
     std::set<unsigned> tmp;
     std::set_intersection(setV0->begin(), setV0->end(),
@@ -399,10 +400,7 @@ void DStoreNode::calReadySet(const std::string &preNodeName, const std::set<unsi
     // Here we store the result into setV for preNodeName.
     setV[preNodeName] = finalSet;
   } else if (validSignal.find(preNodeName) != validSignal.end() && validSignal[preNodeName] == 0) {
-    std::set<unsigned> fullSet;
-    for (unsigned i = 0; i < II; ++i)
-      fullSet.insert(i);
-    setV[preNodeName] = fullSet;
+    setV[preNodeName] = makeFullSet(II);
   }
 }
 
@@ -438,10 +436,10 @@ void DStoreNode::printDetail() {
   // Call the base class printDetail for common node info.
   AdjNode::printDetail();
 
-  llvm::dbgs() << "Address input node: " << addressInNode << "\n";
-  llvm::dbgs() << "Src address input node: " << addressInSrcNode << "\n";
-  llvm::dbgs() << "Data input node: " << dataInNode << "\n";
-  llvm::dbgs() << "Src data input node: " << dataInSrcNode << "\n";
+  llvm::dbgs() << "[DEBUG] \t\tAddress input node: " << addressInNode << "\n";
+  llvm::dbgs() << "[DEBUG] \t\tSrc address input node: " << addressInSrcNode << "\n";
+  llvm::dbgs() << "[DEBUG] \t\tData input node: " << dataInNode << "\n";
+  llvm::dbgs() << "[DEBUG] \t\tSrc data input node: " << dataInSrcNode << "\n";
 }
 
 bool DStoreNode::handshakeSwitchingChecking() {
@@ -454,27 +452,7 @@ bool DStoreNode::handshakeSwitchingChecking() {
 // Merge Node
 //
 //===----------------------------------------------------------------------===//
-//
-// calValidSwitching
-//
-// Python version:
-//   def cal_valid_switching(self, suc_node_name, set_v_list: list, num_v_list: list, II):
-//       if (len(num_v_list) == 1):
-//           if (num_v_list[0] == 0):
-//               self.valid_signal[suc_node_name] = 0
-//           elif (num_v_list[0] > 0):
-//               self.valid_signal[suc_node_name] = 2
-//       else:
-//           if (num_v_list[0] == 0):
-//               self.valid_signal[suc_node_name] = 0
-//           elif (num_v_list[1] == 0):
-//               self.valid_signal[suc_node_name] = 0
-//           elif (set_v_list[0] != None and set_v_list[1] != None):
-//               if ((set_v_list[0] | set_v_list[1]) == set(range(II))):
-//                   self.valid_signal[suc_node_name] = 0
-//           elif (num_v_list[0] > 0 and num_v_list[1] > 0):
-//               self.valid_signal[suc_node_name] = 2 
-//
+
 void MergeNode::calValidSwitching(const std::string &sucNodeName,
                                   const std::vector<std::set<unsigned>> &setVList,
                                   const std::vector<unsigned> &numVList,
@@ -503,8 +481,6 @@ void MergeNode::calValidSwitching(const std::string &sucNodeName,
           fullSet.insert(i);
         if (unionSet == fullSet)
           validSignal[sucNodeName] = 0;
-        else if (numVList[0] > 0 && numVList[1] > 0)
-          validSignal[sucNodeName] = 2;
       } else if (numVList[0] > 0 && numVList[1] > 0) {
         validSignal[sucNodeName] = 2;
       }
@@ -512,24 +488,6 @@ void MergeNode::calValidSwitching(const std::string &sucNodeName,
   }
 }
 
-//
-// calValidSet
-//
-// Python version:
-//   def cal_valid_set(self, suc_node_name, set_v_list: list, II):
-//       if (len(set_v_list) == 1):
-//           if (suc_node_name in self.valid_signal.keys()):
-//               if (self.valid_signal[suc_node_name] == 0):
-//                   self.set_v[suc_node_name] = set(range(II))
-//           elif (set_v_list[0] != None):
-//               self.set_v[suc_node_name] = set_v_list[0]
-//       else:
-//           if (suc_node_name in self.valid_signal.keys()):
-//               if (self.valid_signal[suc_node_name] == 0):
-//                   self.set_v[suc_node_name] = set(range(II))
-//           elif (set_v_list[0] != None and set_v_list[1] != None):
-//               self.set_v[suc_node_name] = set_v_list[0] | set_v_list[1]
-//
 void MergeNode::calValidSet(const std::string &sucNodeName,
                             const std::vector<std::set<unsigned>> &setVList,
                             unsigned II) {
@@ -537,20 +495,14 @@ void MergeNode::calValidSet(const std::string &sucNodeName,
     // One input channel
     if (validSignal.find(sucNodeName) != validSignal.end() &&
         validSignal[sucNodeName] == 0) {
-      std::set<unsigned> fullSet;
-      for (unsigned i = 0; i < II; ++i)
-        fullSet.insert(i);
-      setV[sucNodeName] = fullSet;
+      setV[sucNodeName] = makeFullSet(II);
     } else if (!setVList[0].empty()) {
       setV[sucNodeName] = setVList[0];
     }
   } else {
     if (validSignal.find(sucNodeName) != validSignal.end() &&
         validSignal[sucNodeName] == 0) {
-      std::set<unsigned> fullSet;
-      for (unsigned i = 0; i < II; ++i)
-        fullSet.insert(i);
-      setV[sucNodeName] = fullSet;
+      setV[sucNodeName] = makeFullSet(II);
     } else if (setVList.size() >= 2 && !setVList[0].empty() && !setVList[1].empty()) {
       // Compute the union: in C++ we use std::set_union.
       std::set<unsigned> unionSet;
@@ -562,16 +514,6 @@ void MergeNode::calValidSet(const std::string &sucNodeName,
   }
 }
 
-//
-// calReadySwitching
-//
-// Python version:
-//   def cal_ready_switching(self, pre_node_name, num_ready):
-//       if (num_ready == 0):
-//           self.ready_signal[pre_node_name] = 0
-//       elif (num_ready > 0):
-//           self.ready_signal[pre_node_name] = 2
-//
 void MergeNode::calReadySwitching(const std::string &preNodeName,
                                   unsigned numReady) {
   if (numReady == 0)
@@ -580,17 +522,6 @@ void MergeNode::calReadySwitching(const std::string &preNodeName,
     readySignal[preNodeName] = 2;
 }
 
-//
-// calReadySet
-//
-// Python version:
-//   def cal_ready_set(self, pre_node_name, set_r, II):
-//       if (set_r != None):
-//           self.set_r[pre_node_name] = set_r
-//       elif (pre_node_name in self.ready_signal.keys()):
-//           if (self.ready_signal[pre_node_name] == 0):
-//               self.set_r[pre_node_name] = set(range(II))
-//
 void MergeNode::calReadySet(const std::string &preNodeName,
                             const std::set<unsigned> *setRPtr,
                             unsigned II) {
@@ -598,10 +529,7 @@ void MergeNode::calReadySet(const std::string &preNodeName,
     setR[preNodeName] = *setRPtr;
   } else if (readySignal.find(preNodeName) != readySignal.end()) {
     if (readySignal[preNodeName] == 0) {
-      std::set<unsigned> fullSet;
-      for (unsigned i = 0; i < II; ++i)
-        fullSet.insert(i);
-      setR[preNodeName] = fullSet;
+      setR[preNodeName] = makeFullSet(II);
     }
   }
 }
@@ -611,7 +539,112 @@ void MergeNode::calReadySet(const std::string &preNodeName,
 // CMerge Node
 //
 //===----------------------------------------------------------------------===//
+CMergeNode::CMergeNode(mlir::Operation *op,
+                       const std::vector<std::string> &predecessors,
+                       const std::vector<std::string> &successors,
+                       const std::map<std::string, unsigned> &sucDataWidthMap,
+                       unsigned latency)
+  : AdjNode(op, predecessors, successors, sucDataWidthMap, latency) {
 
+  // Determine the control and data channel successor names.
+  // We assume that the mapping sucDataWidthMap associates each successor name with a port number.
+  conSucNodeName = "";
+  dataSucNodeName = "";
+  for (const auto &pair : sucDataWidthMap) {
+    if (pair.second == 1) {
+      conSucNodeName = pair.first;
+      break;
+    }
+  }
+
+  // For control merge node, we don't have actual data output
+  for (const auto& selNode : successors) {
+    if (selNode != conSucNodeName) dataSucNodeName = selNode;
+  }
+}
+
+void CMergeNode::calValidSwitching(const std::string &sucNodeName, unsigned II) {
+  if (II == 1)
+    validSignal[sucNodeName] = 0;
+  else
+    validSignal[sucNodeName] = 2;
+}
+
+void CMergeNode::calValidSet(const std::string &sucNodeName, unsigned nodeStartTime, unsigned II) {
+  if (validSignal[sucNodeName] == 0) {
+    setV[sucNodeName] = makeFullSet(II);
+  } else {
+    std::set<unsigned> tmp;
+    tmp.insert(nodeStartTime);
+    setV[sucNodeName] = tmp;
+  }
+}
+
+void CMergeNode::calReadySwitching(const std::string &preNodeName) {
+  readySignal[preNodeName] = 0;
+}
+
+void CMergeNode::calReadySet(const std::string &preNodeName, unsigned II) {
+  setR[preNodeName] = makeFullSet(II);
+}
+
+void CMergeNode::calDataout(int inputValue) {
+  // Update the control channel:
+  if (dataOut.find(conSucNodeName) == dataOut.end() || dataOut[conSucNodeName].empty()) {
+    dataOut[conSucNodeName] = { inputValue };
+  } else {
+    dataOut[conSucNodeName].push_back(inputValue);
+  }
+  // For the data channel, simply set its output to [-1]
+  dataOut[dataSucNodeName] = { -1 };
+}
+
+//
+// updateDataout:
+//   For each successor in the node’s successor list, if it is the condition channel,
+//   update using an XOR difference between the last value and the new input and update 
+//   per-channel toggle counts; otherwise, update the data channel with -1.
+//
+void CMergeNode::updateDataout(int inputData) {
+  int valueDiff = 0;
+  // Iterate over the successor names (we assume 'sucs' is available from AdjNode as a vector<string>)
+  for (const std::string &suc : sucs) {
+    // Check if there is already data for this successor.
+    if (dataOut.find(suc) != dataOut.end() && !dataOut[suc].empty()) {
+      if (suc == conSucNodeName) {
+        valueDiff = dataOut[suc].back() ^ inputData;
+        dataOut[suc].push_back(inputData);
+        // Get positions of set bits in the difference (using the inherited getPositionList)
+        std::vector<unsigned> posList = getPositionList(valueDiff);
+        for (unsigned pos : posList) {
+          if (perChannelToggle[suc].find(pos) != perChannelToggle[suc].end())
+            perChannelToggle[suc][pos]++;
+        }
+      } else {
+        dataOut[suc].push_back(-1);
+      }
+    } else {
+      if (suc == conSucNodeName) {
+        valueDiff = inputData;
+        dataOut[suc] = { inputData };
+        std::vector<unsigned> posList = getPositionList(valueDiff);
+        for (unsigned pos : posList) {
+          if (perChannelToggle[suc].find(pos) != perChannelToggle[suc].end())
+            perChannelToggle[suc][pos]++;
+        }
+      } else {
+        dataOut[suc] = { -1 };
+      }
+    }
+  }
+}
+
+void CMergeNode::printDetail() {
+  AdjNode::printDetail();
+
+  llvm::dbgs() << "[DEBUG] \t\tCon_suc_node_name: " << conSucNodeName << "\n";
+  llvm::dbgs() << "[DEBUG] \t\tData_suc_node_name: " << dataSucNodeName << "\n";
+}
 
 //===----------------------------------------------------------------------===//
 //
@@ -626,87 +659,489 @@ void MergeNode::calReadySet(const std::string &preNodeName,
 //
 //===----------------------------------------------------------------------===//
 
+void ForkNode::calValidSwitching(const std::string &sucNodeName,
+                                 unsigned numValid,
+                                 const std::map<std::string, std::set<unsigned>> &setRDict,
+                                 const std::map<std::string, unsigned> &numReadyDict,
+                                 unsigned sucNodeStart,
+                                 unsigned nodeSteadyStart,
+                                 unsigned II) {
+  // If any valid switching occurs at the input, the fork must toggle.
+  if (numValid > 0) {
+    validSignal[sucNodeName] = 2;
+    return;
+  }
 
+  // Case 1: Check if all ready counts are 0.
+  bool allReadyZero = true;
+  for (const auto &entry : numReadyDict) {
+    if (entry.second != 0) {
+      allReadyZero = false;
+      break;
+    }
+  }
+  if (allReadyZero) {
+    validSignal[sucNodeName] = 0;
+    return;
+  }
+
+  // Case 2: Check the active ready set for sucNodeName.
+  unsigned selStartPoint = 0;
+  auto it = setRDict.find(sucNodeName);
+  if (it != setRDict.end()) {
+    const std::set<unsigned> &s = it->second;
+    if (!s.empty()) {
+      if (s.size() == 1)
+        selStartPoint = *s.begin();
+      else {
+        validSignal[sucNodeName] = 2;
+        return;
+      }
+    } else {
+      selStartPoint = 0;
+    }
+  } else {
+    selStartPoint = 0;
+  }
+
+  bool flag = true;
+  bool existFlag = true;
+  // For each entry in setRDict (other than sucNodeName), check if selStartPoint is contained.
+  for (const auto &entry : setRDict) {
+    if (entry.first != sucNodeName) {
+      const std::set<unsigned> &s = entry.second;
+      // In our design, an empty set is equivalent to None.
+      if (s.empty()) {
+        flag = false;
+        existFlag = false;
+      } else if (s.find(selStartPoint) == s.end()) {
+        flag = false;
+      }
+    }
+  }
+
+  if (flag && existFlag) {
+    validSignal[sucNodeName] = 0;
+    return;
+  } else {
+    if (existFlag) {
+      // Case 3: Compute desired cycle time.
+      unsigned desiredCycleTime = (nodeSteadyStart != 0) ? (nodeSteadyStart - 1) : (II - 1);
+      if (selStartPoint == 0)
+        validSignal[sucNodeName] = 0;
+      else
+        validSignal[sucNodeName] = 2;
+    }
+  }
+}
+
+void ForkNode::calValidSet(const std::string &sucNodeName,
+                           unsigned nodeStartTime,
+                           unsigned numValid,
+                           const std::map<std::string, std::set<unsigned>> &setRDict,
+                           unsigned II) {
+  if (validSignal.find(sucNodeName) != validSignal.end()) {
+    if (validSignal[sucNodeName] == 0) {
+      setV[sucNodeName] = makeFullSet(II);
+    } else {
+      if (numValid > 0) {
+        std::set<unsigned> tmp;
+        tmp.insert(nodeStartTime);
+        setV[sucNodeName] = tmp;
+      } else {
+        auto it = setRDict.find(sucNodeName);
+        if (it != setRDict.end())
+          setV[sucNodeName] = it->second;
+      }
+    }
+  }
+}
+
+void ForkNode::calReadySwitching(const std::string &preNodeName,
+                                 const std::vector<unsigned> &numReadyList) {
+  // If any value in numReadyList is greater than 0, set ready signal to 2 and return.
+  for (unsigned value : numReadyList) {
+    if (value > 0) {
+      readySignal[preNodeName] = 2;
+      return;
+    }
+  }
+  // Otherwise, if all values are 0, set ready signal to 0.
+  readySignal[preNodeName] = 0;
+}
+
+void ForkNode::calReadySet(const std::string &preNodeName,
+                           const std::map<std::string, std::set<unsigned>> &setRDict,
+                           unsigned II) {
+  if (readySignal.find(preNodeName) != readySignal.end()) {
+    if (readySignal[preNodeName] == 0) {
+      setR[preNodeName] = makeFullSet(II);
+    } else {
+      // Check existence of all nReady sets for successors.
+      bool exist = true;
+      std::set<unsigned> unionSet;
+      // Start with an empty union.
+      for (const std::string &key : sucs) {
+        auto it = setRDict.find(key);
+        if (it != setRDict.end()) {
+          const std::set<unsigned> &s = it->second;
+          if (s.empty()) {
+            exist = false;
+            unionSet.clear(); // intersection with an empty set remains empty
+          } else {
+            // Compute the union: unionSet = unionSet ∪ s.
+            std::set<unsigned> temp;
+            std::set_union(unionSet.begin(), unionSet.end(),
+                           s.begin(), s.end(),
+                           std::inserter(temp, temp.begin()));
+            unionSet = temp;
+          }
+        }
+      }
+      if (exist) {
+        std::set<unsigned> fullSet;
+        for (unsigned i = 0; i < II; ++i)
+          fullSet.insert(i);
+        if (unionSet == fullSet)
+          setR[preNodeName] = {0};
+        else {
+          // Retrieve the last element of unionSet.
+          unsigned last = 0;
+          if (!unionSet.empty())
+            last = *unionSet.rbegin();
+          setR[preNodeName] = {last};
+        }
+      }
+    }
+  }
+}
 
 //===----------------------------------------------------------------------===//
 //
 // CBr Node
 //
 //===----------------------------------------------------------------------===//
+CBrNode::CBrNode(mlir::Operation *op,
+                 const std::vector<std::string> &predecessors,
+                 const std::vector<std::string> &successors,
+                 const std::map<std::string, unsigned> &sucDataWidthMap,
+                 unsigned latency)
+    : AdjNode(op, predecessors, successors, sucDataWidthMap, latency),
+      lastValidDataValue(-1)
+{
+  // Get the ConditionalBranch node
+  auto CBrOp = dyn_cast<handshake::ConditionalBranchOp>(op);
+  auto condPreOperand = CBrOp.getConditionOperand();
+  auto dataPreOperand = CBrOp.getDataOperand();
+  auto trueSucOperand = CBrOp.getTrueResult();
+  auto falseSucOperand = CBrOp.getFalseResult();
 
+  condPreNodeName = condPreOperand.getDefiningOp()->getAttrOfType<mlir::StringAttr>("handshake.name").getValue().str();
+  dataPreNodeName = dataPreOperand.getDefiningOp()->getAttrOfType<mlir::StringAttr>("handshake.name").getValue().str();
+  trueSucNodeName = getHandshakeNodeName(trueSucOperand);
+  falseSucNodeName = getHandshakeNodeName(falseSucOperand);
 
-//===----------------------------------------------------------------------===//
-//
-// Shli Node
-//
-//===----------------------------------------------------------------------===//
+  // Initialize per_channel_dataout for channels 0 and 1.
+  // In MLIR implementation 
+  // True result port : 0
+  // False result port : 1
+  outChannelNameToIndexMap[trueSucNodeName] = 0;
+  outChannelNameToIndexMap[falseSucNodeName] = 1;
+  per_channel_dataout[0] = std::vector<int>();
+  per_channel_dataout[1] = std::vector<int>();
+}
 
-//===----------------------------------------------------------------------===//
 //
-// Shrsi Node
+// calValidSwitching
 //
-//===----------------------------------------------------------------------===//
+// If the condition value equals the port number of the successor (from outChannelNameToIndexMap),
+// then that channel is not selected so valid signal is 0. Otherwise, if either input valid count is > 0,
+// valid signal is 2; if both are 0, valid signal is 0.
+//
+void CBrNode::calValidSwitching(const std::string &sucNodeName,
+                                unsigned condValue,
+                                unsigned numValid0,
+                                unsigned numValid1) {
+  // TODO: Check the polarity of the cond selection signal
+  if (condValue == outChannelNameToIndexMap[sucNodeName])
+    validSignal[sucNodeName] = 0;
+  else if (numValid0 > 0 || numValid1 > 0)
+    validSignal[sucNodeName] = 2;
+  else if (numValid0 == 0 && numValid1 == 0)
+    validSignal[sucNodeName] = 0;
+}
 
+void CBrNode::calValidSet(const std::string &sucNodeName,
+                          unsigned nodeStartTime,
+                          unsigned condValue,
+                          unsigned II) {
+  if (validSignal.find(sucNodeName) != validSignal.end()) {
+    if (validSignal[sucNodeName] == 0 || II == 1) {
+      setV[sucNodeName] = makeFullSet(II);
+    } else {
+      if (condValue == outChannelNameToIndexMap[sucNodeName])
+        setV[sucNodeName].clear(); // assign empty set
+      else {
+        std::set<unsigned> tmp;
+        tmp.insert(nodeStartTime);
+        setV[sucNodeName] = tmp;
+      }
+    }
+  }
+}
 
-//===----------------------------------------------------------------------===//
-//
-// Shrui Node
-//
-//===----------------------------------------------------------------------===//
+void CBrNode::calReadySwitching(const std::string &preNodeName,
+                                unsigned numValid,
+                                unsigned numReady) {
+  if (numValid == 0 && numReady == 0)
+    readySignal[preNodeName] = 0;
+  else if (numValid > 0 || numReady > 0)
+    readySignal[preNodeName] = 2;
+}
 
+void CBrNode::calReadySet(const std::string &preNodeName,
+                          const std::set<unsigned> *setValid,
+                          const std::set<unsigned> *setReady,
+                          unsigned II) {
+  if (setReady != nullptr && setValid != nullptr) {
+    std::set<unsigned> finalSet;
+    std::set_intersection(setValid->begin(), setValid->end(),
+                          setReady->begin(), setReady->end(),
+                          std::inserter(finalSet, finalSet.begin()));
+    setR[preNodeName] = finalSet;
+  } else if (readySignal.find(preNodeName) != readySignal.end() &&
+             readySignal[preNodeName] == 0) {
+    setR[preNodeName] = makeFullSet(II);
+  }
+}
+
+void CBrNode::setReadySet(const std::string &preNodeName, unsigned II) {
+  std::string selSucName = "";
+  for (const auto &entry : validSignal) {
+    if (entry.second != 0) {
+      selSucName = entry.first;
+      break;
+    }
+  }
+  if (!selSucName.empty())
+    setR[preNodeName] = setV[selSucName];
+  else {
+    setR[preNodeName] = makeFullSet(II);
+  }
+}
+
+void CBrNode::updateDataout(int inputData, unsigned condValue) {
+  if (inputData == -1 && lastValidDataValue != -1)
+    inputData = lastValidDataValue;
+  else
+    lastValidDataValue = inputData;
+
+  int diffValue = 0;
+  for (const std::string &suc : sucs) {
+    if (dataOut.find(suc) != dataOut.end() && !dataOut[suc].empty()) {
+      diffValue = dataOut[suc].back() ^ inputData;
+      dataOut[suc].push_back(inputData);
+    } else {
+      diffValue = inputData;
+      dataOut[suc] = { inputData };
+    }
+    std::vector<unsigned> posList = getPositionList(diffValue);
+    for (unsigned pos : posList) {
+      if (perChannelToggle[suc].find(pos) != perChannelToggle[suc].end())
+        perChannelToggle[suc][pos]++;
+    }
+  }
+  // TODO: Check this assignment strategy
+  // Update per_channel_dataout for channel (1 - condValue)
+  int targetChannel = 1 - static_cast<int>(condValue);
+  per_channel_dataout[targetChannel].push_back(inputData);
+}
+
+void CBrNode::printDetail() {
+  AdjNode::printDetail();
+
+  llvm::dbgs() << "[DEBUG] \t\tCond_pre_node_name: " << condPreNodeName << "\n";
+  llvm::dbgs() << "[DEBUG] \t\tData_pre_node_name: " << dataPreNodeName << "\n";
+  llvm::dbgs() << "[DEBUG] \t\tTrue_suc_node_name: " << trueSucNodeName << "\n";
+  llvm::dbgs() << "[DEBUG] \t\tFalse_suc_node_name: " << falseSucNodeName << "\n";
+  llvm::dbgs() << "[DEBUG] \t\tPer_channel_dataout:\n";
+  for (const auto &entry : per_channel_dataout) {
+    llvm::dbgs() << "[DEBUG] \t\t\tChannel " << entry.first << ": ";
+    for (int v : entry.second)
+      llvm::dbgs() << v << " ";
+    llvm::dbgs() << "\n";
+  }
+}
 
 //===----------------------------------------------------------------------===//
 //
 // Mux Node
 //
 //===----------------------------------------------------------------------===//
+// TODO: Check the port selection condition
+// Assumption it selects the port with cond_value = (port_id - 1)
+MuxNode::MuxNode(mlir::Operation *op,
+                 const std::vector<std::string> &predecessors,
+                 const std::vector<std::string> &successors,
+                 const std::map<std::string, unsigned> &sucDataWidthMap,
+                 unsigned latency)
+    : AdjNode(op,
+              predecessors,
+              successors,
+              sucDataWidthMap,
+              latency)
+{
+  // Get the operator
+  auto muxOp = dyn_cast<handshake::MuxOp>(op);
+  auto condPreValue = muxOp.getSelectOperand();
+  
+  conPreNodeName = condPreValue.getDefiningOp()->getAttrOfType<mlir::StringAttr>("handshake.name").getValue().str();
 
+  // Construct the port map
+  auto opOperands = muxOp.getOperands();
+  for (unsigned i = 0; i < opOperands.size(); i++) {
+    std::string nodeName = opOperands[i].getDefiningOp()->getAttrOfType<mlir::StringAttr>("handshake.name").getValue().str();
+    preNameToPortIdxMap[nodeName] = i;
+  }
+}
 
-//===----------------------------------------------------------------------===//
-//
-// Trunci Node
-//
-//===----------------------------------------------------------------------===//
+void MuxNode::calValidSwitching(const std::string &sucNodeName, unsigned II) {
+  if (II == 1)
+    validSignal[sucNodeName] = 0;
+  else
+    validSignal[sucNodeName] = 2;
+}
 
+void MuxNode::calValidSet(const std::string &sucNodeName,
+                          unsigned nodeStartTime,
+                          unsigned II) {
+  if (validSignal.find(sucNodeName) != validSignal.end() && validSignal[sucNodeName] == 0) {
+    setV[sucNodeName] = makeFullSet(II);
+  } else {
+    std::set<unsigned> tmp;
+    tmp.insert(nodeStartTime);
+    setV[sucNodeName] = tmp;
+  }
+}
 
-//===----------------------------------------------------------------------===//
-//
-// Extui Node
-//
-//===----------------------------------------------------------------------===//
+void MuxNode::calReadySwitching(const std::string &preNodeName,
+                                unsigned condValue,
+                                unsigned num_v,
+                                const std::set<unsigned> *setV0,
+                                const std::set<unsigned> *setVSelect,
+                                const std::set<unsigned> *setReady,
+                                unsigned II) {
+  std::set<unsigned> uSet = makeFullSet(II);
+  if (preNodeName == conPreNodeName) {
+    // Case 1: this channel is used for the condition signal.
+    if (setVSelect != nullptr && setReady != nullptr) {
+      if (*setVSelect == uSet && *setReady == uSet) {
+        readySignal[preNodeName] = 0;
+        return;
+      }
+    }
+    if (setV0 != nullptr && setVSelect != nullptr && setReady != nullptr) {
+      // Compute intersection: (setVSelect ∩ setR)
+      std::set<unsigned> inter;
+      std::set_intersection(setVSelect->begin(), setVSelect->end(),
+                            setReady->begin(), setReady->end(),
+                            std::inserter(inter, inter.begin()));
+      // Check if setV0 is a subset of the intersection.
+      bool subset = std::all_of(setV0->begin(), setV0->end(), [&](unsigned x) {
+        return inter.find(x) != inter.end();
+      });
+      readySignal[preNodeName] = subset ? 0 : 2;
+    }
+  } else {
+    // Case 2: data channel.
+    // TODO: Check the port assignment methods
+    unsigned prePort = (preNodeName == conPreNodeName) ? 1 : 2;
+    if (condValue != (prePort - 1)) {
+      if (num_v == 0)
+        readySignal[preNodeName] = 0;
+      else
+        readySignal[preNodeName] = 2;
+    } else {
+      if (setV0 != nullptr && setReady != nullptr) {
+        if (*setReady == uSet && *setV0 == uSet) {
+          readySignal[preNodeName] = 0;
+          return;
+        }
+      }
+      if (setV0 != nullptr && setVSelect != nullptr && setReady != nullptr) {
+        std::set<unsigned> inter;
+        std::set_intersection(setV0->begin(), setV0->end(),
+                              setReady->begin(), setReady->end(),
+                              std::inserter(inter, inter.begin()));
+        bool subset = std::all_of(setVSelect->begin(), setVSelect->end(), [&](unsigned x) {
+          return inter.find(x) != inter.end();
+        });
+        readySignal[preNodeName] = subset ? 0 : 2;
+      }
+    }
+  }
+}
 
-//===----------------------------------------------------------------------===//
-//
-// Constant Node
-//
-//===----------------------------------------------------------------------===//
+void MuxNode::calReadySet(const std::string &preNodeName,
+                          const std::set<unsigned> *setCond,
+                          const std::set<unsigned> *setValid,
+                          const std::set<unsigned> *setReady,
+                          unsigned II) {
+  if (readySignal.find(preNodeName) != readySignal.end()) {
+    if (readySignal[preNodeName] == 0) {
+      setR[preNodeName] = makeFullSet(II);
+    } else {
+      if (setCond != nullptr && setValid != nullptr && setReady != nullptr) {
+        std::set<unsigned> temp;
+        // Compute setCond ∩ setV.
+        std::set_intersection(setCond->begin(), setCond->end(),
+                              setValid->begin(), setValid->end(),
+                              std::inserter(temp, temp.begin()));
+        std::set<unsigned> finalSet;
+        std::set_intersection(temp.begin(), temp.end(),
+                            setReady->begin(), setReady->end(),
+                            std::inserter(finalSet, finalSet.begin()));
+        setR[preNodeName] = finalSet;
+      }
+      
+    }
+  }
+}
 
+void MuxNode::printDetail() {
+  AdjNode::printDetail();
 
-//===----------------------------------------------------------------------===//
-//
-// Ori Node
-//
-//===----------------------------------------------------------------------===//
-
-
-//===----------------------------------------------------------------------===//
-//
-// Andi Node
-//
-//===----------------------------------------------------------------------===//
-
-
-//===----------------------------------------------------------------------===//
-//
-// Source Node
-//
-//===----------------------------------------------------------------------===//
-
+  llvm::dbgs() << "[DEBUG] \t\tCon_pre_node_name: " << conPreNodeName << "\n";
+}
 
 //===----------------------------------------------------------------------===//
 //
 // Start Node
 //
 //===----------------------------------------------------------------------===//
+StartNode::StartNode(mlir::Operation *op,
+                     const std::vector<std::string> &predecessors,
+                     const std::vector<std::string> &successors,
+                     const std::map<std::string, unsigned> &sucDataWidthDict,
+                     unsigned latency)
+    : AdjNode(op, predecessors, successors, sucDataWidthDict, latency) {
+  // No extra initialization needed.
+}
 
+void StartNode::calValidSwitching(const std::string &sucNodeName) {
+  // In the Start node, set the valid signal for the given successor to 2.
+  validSignal[sucNodeName] = 2;
+}
+
+void StartNode::calValidSet() {
+  // No additional valid-set computation for Start node.
+}
+
+void StartNode::calReadySwitching() {
+  // No ready switching computation for Start node.
+}
+
+void StartNode::calReadySet() {
+  // No ready set computation for Start node.
+}
 

@@ -98,9 +98,6 @@ void SwitchingEstimationPass::runDynamaticPass() {
     AdjGraph tmpAdjGraph(mgInstance, timingDB, switchInfo.cfdfcIIs[mgIndex], mgIndex);
     switchInfo.segToAdjGraphMap.insert_or_assign(std::to_string(mgIndex), &tmpAdjGraph);
   }
-
-  //! Testing
-  printVector(switchInfo.funcOpNames);
 }
 
 
