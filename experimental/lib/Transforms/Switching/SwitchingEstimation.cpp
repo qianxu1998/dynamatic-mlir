@@ -90,6 +90,7 @@ void SwitchingEstimationPass::runDynamaticPass() {
   SCFProfilingResult profilingResults(dataTrace, bbList, switchInfo);
 
   // Step 2: Build Adjacency graph for each CFDFC
+  std::vector<std::pair<std::string, std::string>> allBackedges;
   llvm::dbgs() << "[DEBUG] [Step 2] Build Adjacency Graph for Each Segment\n";
   
   for (const auto& [mgIndex, mgInstance]: switchInfo.cfdfcs) {
@@ -97,6 +98,42 @@ void SwitchingEstimationPass::runDynamaticPass() {
     
     AdjGraph tmpAdjGraph(mgInstance, timingDB, switchInfo.cfdfcIIs[mgIndex], mgIndex);
     switchInfo.segToAdjGraphMap.insert_or_assign(std::to_string(mgIndex), &tmpAdjGraph);
+
+    // Update the backedge list
+    for (const auto& selPair : tmpAdjGraph.backedges) {
+      allBackedges.push_back(selPair);
+    }
+  }
+
+  // Step 3: Build the graph for the entire dataflow graph
+  llvm::dbgs() << "[DEBUG] [STEP 3] Construct the Adj Graph for the entire DFG\n";
+  /// Step 3.1: First store the information of the backedges in the circuit
+  for (const auto& [selSegLabel, segBBList] : switchInfo.segToBBListMap) {
+    if (selSegLabel.find("S") != std::string::npos) {
+      switchInfo.segInvalidBackedgesMap[selSegLabel] = allBackedges;
+    } else if (selSegLabel.find("E") != std::string::npos) {
+      switchInfo.segInvalidBackedgesMap[selSegLabel] = allBackedges;
+    } else if (selSegLabel.find("T") != std::string::npos) {
+      auto sucMg = switchInfo.transToSucMGMap[selSegLabel];
+      std::vector<std::pair<std::string, std::string>> tmpInvalidBackedges; 
+      for (const auto& [selCFDFCIndex, selGraph]: switchInfo.segToAdjGraphMap) {
+        if (selCFDFCIndex != sucMg) {
+          for (const auto& selPair: selGraph->backedges) {
+            tmpInvalidBackedges.push_back(selPair);
+          }
+        }
+      }
+    }
+  }
+
+  //! Testing
+  llvm::dbgs() << "[DEBUG] \tInvalue Backedge list map:\n";
+  for (const auto& [segLabel, edgeList] : switchInfo.segInvalidBackedgesMap) {
+    llvm::dbgs() << "[DEBUG] \t\tsegLabel: " << segLabel << " : ";
+    for (const auto& selPair: edgeList) {
+      llvm::dbgs() << "(" << selPair.first << ", " << selPair.second << "), ";
+    }
+    llvm::dbgs() << "\n";
   }
 }
 

@@ -69,17 +69,11 @@ struct SwitchingInfo {
   std::map<std::string, std::vector<unsigned>> segToBBListMap;
   // Map from Transaction Segment label to the successing MG label
   std::map<std::string, std::string> transToSucMGMap;
-
   // Map storing the subgraph of different segments in the dataflow circuit
   std::map<std::string, AdjGraph*> segToAdjGraphMap;
+  // Map from segment label to the vector of invalid backedges
+  std::map<std::string, std::vector<std::pair<std::string, std::string>>> segInvalidBackedgesMap;
 
-};
-
-
-// Base class for the unit informaiton storing structure.
-// This structure will be used throughout the estimation process
-class NodeInfo {
-  
 };
 
 // Class used to construct the per segment (MG & one-time execution segment)

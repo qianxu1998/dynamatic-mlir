@@ -536,7 +536,7 @@ std::unique_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
       })
       // handshake::SourceOp operator
       .Case<handshake::SourceOp>([&](auto selNode) {
-        auto node = std::make_unique<CBrNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_unique<SourceNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
       // handshake::ConstantOp operator

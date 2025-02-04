@@ -1000,7 +1000,28 @@ MuxNode::MuxNode(mlir::Operation *op,
   // Construct the port map
   auto opOperands = muxOp.getOperands();
   for (unsigned i = 0; i < opOperands.size(); i++) {
-    std::string nodeName = opOperands[i].getDefiningOp()->getAttrOfType<mlir::StringAttr>("handshake.name").getValue().str();
+    std::string nodeName = "inArgument";
+    if (opOperands[i].getDefiningOp()) {
+      nodeName = opOperands[i].getDefiningOp()->getAttrOfType<mlir::StringAttr>("handshake.name").getValue().str();
+    } else if (auto blockArg = opOperands[i].dyn_cast<mlir::BlockArgument>()){
+      // This operand is a block argument
+      unsigned argNumber = blockArg.getArgNumber();
+
+      auto funcOp = blockArg.getOwner()->getParentOp();
+      if (auto handshakeFunc = dyn_cast<handshake::FuncOp>(funcOp)) {
+        // Check whether the argName attributes present
+        auto argNameAttr = handshakeFunc->getAttrOfType<mlir::ArrayAttr>("argNames");
+        if (!argNameAttr) {
+          llvm::errs() << "ERROR: No argNames attributes found on the function!\n";
+        } else {
+          if (argNumber < argNameAttr.size()) {
+            auto strAttr = dyn_cast<mlir::StringAttr>(argNameAttr.getValue()[argNumber]);
+            nodeName = strAttr.getValue().str();
+          }
+        }
+      }
+
+    }
     preNameToPortIdxMap[nodeName] = i;
   }
 }
@@ -1112,6 +1133,10 @@ void MuxNode::printDetail() {
   AdjNode::printDetail();
 
   llvm::dbgs() << "[DEBUG] \t\tCon_pre_node_name: " << conPreNodeName << "\n";
+  llvm::dbgs() << "[DEBUG] \t\tInput Port Mapping: \n";
+  for (const auto& [selName, portIdx] : preNameToPortIdxMap) {
+    llvm::dbgs() << "[DEBUG] \t\t\tNode Name: " << selName << "; Port Index: " << portIdx << ";\n";
+  } 
 }
 
 //===----------------------------------------------------------------------===//
