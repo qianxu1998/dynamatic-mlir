@@ -887,6 +887,21 @@ public:
   }
 };
 
+//===----------------------------------------------------------------------===//
+//
+// Model for End Node
+//
+//===----------------------------------------------------------------------===//
+class EndNode : public AdjNode {
+public:
+  EndNode(mlir::Operation *op,
+           const std::vector<std::string> &predecessors,
+           const std::vector<std::string> &successors,
+           const std::map<std::string, unsigned> &sucDataWidthMap,
+           unsigned latency)
+      : AdjNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+};
+
 //----------------------------------------------------------------------------
 // SinkNode: Derived directly from AdjNode
 //----------------------------------------------------------------------------
@@ -941,6 +956,31 @@ public:
   void calValidSet();
   void calReadySwitching();
   void calReadySet();
+};
+
+//===----------------------------------------------------------------------===//
+//
+// Model for Memory controllers, no concrete implementation for now
+//
+//===----------------------------------------------------------------------===//
+class MemConNode : public AdjNode {
+public:
+  MemConNode(mlir::Operation *op,
+           const std::vector<std::string> &predecessors,
+           const std::vector<std::string> &successors,
+           const std::map<std::string, unsigned> &sucDataWidthMap,
+           unsigned latency)
+      : AdjNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+};
+
+class LSQNode : public AdjNode {
+public:
+  LSQNode(mlir::Operation *op,
+           const std::vector<std::string> &predecessors,
+           const std::vector<std::string> &successors,
+           const std::map<std::string, unsigned> &sucDataWidthMap,
+           unsigned latency)
+      : AdjNode(op, predecessors, successors, sucDataWidthMap, latency) {}
 };
 
 #endif // EXPERIMENTAL_TRANSFORMS_SWITCHING_EXECUTION_MODEL_H

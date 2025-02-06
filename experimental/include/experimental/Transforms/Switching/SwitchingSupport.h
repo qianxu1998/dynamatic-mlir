@@ -40,6 +40,7 @@ using namespace dynamatic::handshake;
 // Declaration
 class AdjNode;
 class AdjGraph;
+class Path;
 
 // Helper datatype for switching estimation. Aggregates all useful information
 // for the swithicng estimation process
@@ -70,9 +71,12 @@ struct SwitchingInfo {
   // Map from Transaction Segment label to the successing MG label
   std::map<std::string, std::string> transToSucMGMap;
   // Map storing the subgraph of different segments in the dataflow circuit
-  std::map<std::string, AdjGraph*> segToAdjGraphMap;
+  std::map<std::string, std::shared_ptr<AdjGraph>> segToAdjGraphMap;
   // Map from segment label to the vector of invalid backedges
   std::map<std::string, std::vector<std::pair<std::string, std::string>>> segInvalidBackedgesMap;
+  // dataflow graph
+  // Below has to be a shared pointer, otherwise need to override the clonePass() implementation in MLIR
+  std::shared_ptr<AdjGraph> dataflowGraph;
 
 };
 
@@ -189,6 +193,11 @@ class AdjGraph {
 public:
   AdjGraph(const buffer::CFDFC& cfdfc, const TimingDatabase& timingDB, 
             const unsigned &II, const unsigned &mgIndex);
+  
+  // Create an AdjGraph from the funcop
+  AdjGraph(const TimingDatabase& timingDB, const unsigned &II, 
+            handshake::FuncOp funcOp,
+            std::vector<std::pair<std::string, std::string>> &allBackedges);
 
   // This function insert a new element to the given map
   void insertToSurroundingList(std::map<std::string, std::vector<std::string>>& selMap, 
@@ -200,13 +209,82 @@ public:
                                                     std::vector<std::string> &pres, std::vector<std::string> &sucs,
                                                     unsigned &nodeLatency);
 
+  // The following function calculates the path latency based on all the information in the MG
+  unsigned calPathLatency(const Path &selPath, bool useGlobalOrder);
+
+  // Find all the paths between the specified src and dst node within the graph
+  std::vector<Path> findPaths(const std::string &srcNode, const std::string &dstNode,
+                              bool noStartingNode, bool useGlobalOrder);
+
+  // The following function calculates the global order of the units and cycle times in the AdjGraph
+  // the results will be stored in graphGlobalOrder
+  void obtainNodeGlobalOrder();
+  // During handshake and path latency analysis, we use those start nodes as the base points for analysis
+  // However, they may not be active at the same time, so we need to take the shifting into account.
+  void analyzeStartNodeShifting();
+
   // 
   //  Internal Storing Variables
   //
+  unsigned cfdfcIndex = 0;                                    // Variable storing the corresponding cfdfc index
+  // TODO: Check the rounding of the II
+  unsigned cfdfcII = 0;                                       // The II of the cfdfc
+  std::string baseNode;                                       // The node that serves as the base point for path calculation
   std::vector<std::string> segStartNodes;                     // Vector storing all starting nodes in the segment
   std::map<std::string, std::unique_ptr<AdjNode>> nodes;      // Map from unit name to the corresponding node storing structure
   std::vector<std::pair<std::string, std::string>> backedges; // Vector storing all backedges in the Adjacency graph;
-  unsigned cfdfcIndex = 0;                                    // Variable storing the corresponding cfdfc index
+  // Map storing the global order (actual start time) of different nodes in the graph
+  // the format is like : {node_name : (start_node, delay)}
+  std::map<std::string, std::pair<std::string, unsigned>> graphGlobalOrder;
+  // Map storing the maximum cycle time from different start node in the graph
+  // This will be used to analyze the shifting between start node
+  std::map<std::string, unsigned> startNodeCycleTimeMap;
+  
+};
+
+//===----------------------------------------------------------------------===//
+//
+// Path class, used to store additional information in the found path
+//
+//===----------------------------------------------------------------------===//
+class Path {
+public:
+  // Constructors
+  Path() = default;
+  Path(const std::vector<std::string> &nodes) : nodeList(nodes) {}
+
+  // Backedge management
+  void add_backedge(const std::pair<std::string, std::string> &be) {
+    contain_backedge = true;
+    backedges.push_back(be);
+  }
+
+  // Latency
+  void set_latency(unsigned lat) { latency = lat; }
+
+  // Printing
+  void printDetail() {
+    llvm::dbgs() << "[DEBUG] \t[Path] \n[DEBUG] \t\t[ ";
+    for (const auto& selNode: nodeList) {
+      llvm::dbgs() << selNode << ", ";
+    }
+    llvm::dbgs() << "]\n";
+
+    //
+    llvm::dbgs() << "[DEBUG] \t\tBackedges: ";
+    for (const auto& selPair: backedges) {
+      llvm::dbgs() << "( " << selPair.first << ", " << selPair.second << " ); ";
+    }
+    llvm::dbgs() << "\n";
+    
+    //
+    llvm::dbgs() << "[DEBUG] \t\tPath Latency: " << latency << "\n";
+  }
+
+  std::vector<std::string> nodeList;
+  std::vector<std::pair<std::string, std::string>> backedges;
+  bool contain_backedge = false;
+  unsigned latency = 0;
 };
 
 //===----------------------------------------------------------------------===//

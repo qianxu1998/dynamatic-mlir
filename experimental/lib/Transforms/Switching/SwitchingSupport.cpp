@@ -320,6 +320,7 @@ void AdjNode::printPerHandshakeChannelToggleNumber() {
 AdjGraph::AdjGraph(const buffer::CFDFC& cfdfc, const TimingDatabase& timingDB, 
                     const unsigned &II, const unsigned &mgIndex) {
   cfdfcIndex = mgIndex;
+  cfdfcII = II;
   
   std::map<std::string, std::vector<std::string>> nodeToPresMap;
   std::map<std::string, std::vector<std::string>> nodeToSucsMap;
@@ -369,6 +370,7 @@ AdjGraph::AdjGraph(const buffer::CFDFC& cfdfc, const TimingDatabase& timingDB,
     //! Testing
     llvm::dbgs() << "[DEBUG] \t=================================\n";
     llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n";
+    llvm::dbgs() << "[DEBUG] \tNode Latency From DataBase: " << nodeLatency << "\n";
 
     // Step 2.1: Construct the node storing structure
     auto newNode = createNodeFromOperation(
@@ -376,13 +378,67 @@ AdjGraph::AdjGraph(const buffer::CFDFC& cfdfc, const TimingDatabase& timingDB,
 
     if (!newNode) continue;
 
+    //! Testing
     newNode->printDetail();
 
     // Store the new node
     nodes[unitName] = std::move(newNode);
-
   }
 
+}
+
+AdjGraph::AdjGraph(const TimingDatabase& timingDB, const unsigned &II, 
+            handshake::FuncOp funcOp,
+            std::vector<std::pair<std::string, std::string>> &allBackedges) : backedges(allBackedges) {
+  cfdfcII = II;
+  // Iterate over all the ops in the funcop
+  for (Operation &op: funcOp.getOps()) {
+    std::string unitName = op.getAttrOfType<StringAttr>("handshake.name").str();
+    // For now, we exclude lsq and mem_controller
+    if (unitName.find("lsq") != std::string::npos || unitName.find("mem_controller") != std::string::npos) continue;
+
+    //! Testing
+    // llvm::dbgs() << "[DEBUG] \t=================================\n";
+    // llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n";
+
+    std::vector<std::string> pres;
+    std::vector<std::string> sucs;
+    // Construct the sucs
+    for (OpResult res: op.getResults()) {
+      assert(std::distance(res.getUsers().begin(), res.getUsers().end()) == 1 &&
+             "value must have unique user");
+
+      Operation *user = *res.getUsers().begin();
+      std::string dstName = user->getAttrOfType<StringAttr>("handshake.name").str();
+
+      // Excluding lsq and mem_controller
+      if (dstName.find("lsq") == std::string::npos && dstName.find("mem_controller") == std::string::npos)
+        sucs.push_back(dstName);
+    }
+
+    // Construct pres
+    for (auto operand: op.getOperands()) {
+      // TODO: Need to check do we need to include the block argument in the graph or not
+      if (operand.getDefiningOp()) {
+        std::string preName = operand.getDefiningOp()->getAttrOfType<StringAttr>("handshake.name").str();
+        if (preName.find("lsq") == std::string::npos && preName.find("mem_controller") == std::string::npos)
+          pres.push_back(preName);
+      }
+    }
+
+    unsigned nodeLatency = extractNodeLatency(&op, timingDB);
+
+    auto newNode = createNodeFromOperation(
+      &op, pres, sucs, nodeLatency); 
+    
+    if (!newNode) continue;
+
+    //! Testing
+    // newNode->printDetail();
+
+    // Store the new node
+    nodes[unitName] = std::move(newNode);
+  }
 }
 
 void AdjGraph::insertToSurroundingList(std::map<std::string, std::vector<std::string>>& selMap, 
@@ -415,7 +471,8 @@ std::unique_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
           if (auto nameAttr = user->getAttrOfType<mlir::StringAttr>("handshake.name")) {
             nodeSucsDataWidthMap[nameAttr.getValue().str()] = dataWidth;
 
-            llvm::dbgs() << "[DEBUG] \t\t" << nameAttr.getValue() << "\n";
+            //! Testing
+            // llvm::dbgs() << "[DEBUG] \t\t" << nameAttr.getValue() << "\n";
           }
         }
       }
@@ -435,8 +492,8 @@ std::unique_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
       })
       // handshake::MulIOp operator
       .Case<handshake::MulIOp>([&](auto selNode) {
-        
-        return std::unique_ptr<AdjNode>(nullptr);
+        auto node = std::make_unique<MuliNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        return node;
       })
       // handshake::CmpIOp operator
       .Case<handshake::CmpIOp>([&](handshake::CmpIOp selNode) {
@@ -550,7 +607,7 @@ std::unique_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
         auto memOp = findMemInterface(selNode.getAddressResult());
         if (isa_and_present<handshake::LSQOp>(memOp)) {
           // TODO: Need to change the latency obtaining method for lsq load op
-          auto node = std::make_unique<DLoadNode>(op, pres, sucs, nodeSucsDataWidthMap, 5);
+          auto node = std::make_unique<DLoadNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
           return node;
         } else {
           auto node = std::make_unique<DLoadNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
@@ -577,8 +634,14 @@ std::unique_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
         auto node = std::make_unique<ShruiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
+      // handshake::SinkOp operator
       .Case<handshake::SinkOp>([&](auto selNode) {
         auto node = std::make_unique<SinkNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        return node;
+      })
+      // handshake::EndOp operator
+      .Case<handshake::EndOp>([&](auto selNode) {
+        auto node = std::make_unique<EndNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
       .Default([](auto selNode) {
@@ -586,6 +649,176 @@ std::unique_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
 
           return std::unique_ptr<AdjNode>(nullptr);
       });
+}
+
+unsigned AdjGraph::calPathLatency(const Path &selPath, bool useGlobalOrder) {
+  unsigned latencySum = 0;
+
+  for (const auto& selNode: selPath.nodeList) {
+    latencySum += nodes[selNode]->nodeLatency;
+
+    if (useGlobalOrder) {
+      if ((std::find(segStartNodes.begin(), segStartNodes.end(), selNode) == segStartNodes.end()) &&
+            latencySum < graphGlobalOrder[selNode].second) {
+        latencySum = graphGlobalOrder[selNode].second;
+      }
+    }
+  }
+
+  // Check backedges
+  if (selPath.contain_backedge) {
+    latencySum -= (selPath.backedges.size() * cfdfcII);
+  }
+
+  return latencySum;
+}
+
+void AdjGraph::obtainNodeGlobalOrder() {
+  // Iterate over all nodes in the AdjGraph
+  for (const auto& [name, node]: nodes) {
+    if (std::find(segStartNodes.begin() , segStartNodes.end(), name) != segStartNodes.end()) {
+      continue;
+    } else {
+      unsigned maxLatency = 0;
+      std::string finalStartNode = "";
+
+      for (const auto& selStartNode: segStartNodes) {
+        auto foundPaths = findPaths(selStartNode, name, true, false);
+
+        if (foundPaths.size() > 0) {
+          for (const auto& selPath: foundPaths) {
+            auto tmpPathLat = selPath.latency;
+            if (tmpPathLat >= maxLatency) {
+              maxLatency = tmpPathLat;
+              finalStartNode = selStartNode;
+            }
+          }
+        }
+      }
+      // Store the global order
+      graphGlobalOrder[name] = std::make_pair(finalStartNode, maxLatency);
+
+      //! Testing
+      llvm::dbgs() << "[DEBUG] \tNode: " << name << "; Global Order: (" << finalStartNode << ", " << maxLatency << ");\n";
+    }
+  }
+}
+
+//! Testing
+// 1) Print mainStack
+static void printMainStack(const std::vector<std::string> &mainStack) {
+  llvm::dbgs() << "mainStack: [ ";
+  for (const auto &node : mainStack) {
+    llvm::dbgs() << node << " ";
+  }
+  llvm::dbgs() << "]\n";
+}
+
+// 2) Print adjStack
+static void printAdjStack(const std::vector<std::vector<std::string>> &adjStack) {
+  llvm::dbgs() << "adjStack:\n";
+  // Each element of adjStack is a vector of strings
+  for (size_t i = 0; i < adjStack.size(); ++i) {
+    llvm::dbgs() << "  Level " << i << ": [ ";
+    for (const auto &node : adjStack[i]) {
+     llvm::dbgs() << node << " ";
+    }
+    llvm::dbgs() << "]\n";
+  }
+}
+
+//
+std::vector<Path> AdjGraph::findPaths(const std::string &srcNode, const std::string &dstNode,
+                              bool noStartingNode, bool useGlobalOrder) {
+  // Build excluding list
+  // TODO: replace noStartingNode with an actual excluding list
+  std::set<std::string> excludingSet;
+  if (noStartingNode) {
+    for (const auto &sn : segStartNodes) {
+      if (sn != dstNode) excludingSet.insert(sn);
+    }
+  }
+
+  // Define storing structure
+  std::vector<std::string> mainStack;
+  std::vector<std::vector<std::string>> adjStack;
+  std::vector<Path> foundPaths;
+
+  // Initialization
+  mainStack.push_back(srcNode);
+  adjStack.push_back(nodes[srcNode]->sucs);
+
+  //
+  while (!mainStack.empty()) {
+    std::vector<std::string> curAdjList = adjStack.back();
+    adjStack.pop_back();
+
+    if (!curAdjList.empty()) {
+      std::string curNode = curAdjList.back();
+      curAdjList.pop_back();
+
+      mainStack.push_back(curNode);
+      adjStack.push_back(curAdjList);
+
+      // Insert new adj_list
+      std::vector<std::string> tmpAdjList;
+      std::vector<std::string> newAdjList = nodes[curNode]->sucs;
+
+      // If node not in the mainStack and the excluding list
+      for (const auto &n : newAdjList) {
+        bool inStack = (std::find(mainStack.begin(), mainStack.end(), n) != mainStack.end());
+        bool isExcluded = (excludingSet.find(n) != excludingSet.end());
+        if (!inStack && !isExcluded) {
+          tmpAdjList.push_back(n);
+        }
+      }
+
+      adjStack.push_back(tmpAdjList);      
+    } else {
+      mainStack.pop_back();
+    }
+
+    // Found a path
+    if (!mainStack.empty() && mainStack.back() == dstNode) {
+      std::vector<std::string> pathList = mainStack;
+
+      // Build edge list
+      std::vector<std::pair<std::string, std::string>> edgeList;
+      edgeList.reserve(pathList.size() > 1 ? pathList.size() - 1 : 0);
+      for (size_t i = 0; i < pathList.size() - 1; ++i) {
+        edgeList.push_back({pathList[i], pathList[i + 1]});
+      }
+
+      Path selPath(pathList);
+
+      // Retrieve all the backedges in the path
+      for (auto &edge: edgeList) {
+        if (std::find(backedges.begin(), backedges.end(), edge) != backedges.end()) selPath.add_backedge(edge);
+      }
+
+      // store the path
+      foundPaths.push_back(selPath);
+      unsigned tmpPathLatency = calPathLatency(selPath, useGlobalOrder);
+      foundPaths.back().set_latency(tmpPathLatency);
+
+      //
+      mainStack.pop_back();
+      if (!adjStack.empty()) adjStack.pop_back();
+    }
+  }
+
+  return foundPaths;
+}
+
+void AdjGraph::analyzeStartNodeShifting() {
+  // Find the largest value in the global order map
+  unsigned tmpMaxValue = 0;
+  for (const auto& [nodeName, delayPair]: graphGlobalOrder) {
+    if (delayPair.second > tmpMaxValue) {
+      tmpMaxValue = delayPair.second;
+      baseNode = delayPair.first;
+    }
+  }
 }
 
 //===----------------------------------------------------------------------===//

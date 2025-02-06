@@ -96,11 +96,12 @@ void SwitchingEstimationPass::runDynamaticPass() {
   for (const auto& [mgIndex, mgInstance]: switchInfo.cfdfcs) {
     llvm::dbgs() << "[DEBUG] \tMG : " << mgIndex << "\n";
     
-    AdjGraph tmpAdjGraph(mgInstance, timingDB, switchInfo.cfdfcIIs[mgIndex], mgIndex);
-    switchInfo.segToAdjGraphMap.insert_or_assign(std::to_string(mgIndex), &tmpAdjGraph);
+    auto adj = std::make_shared<AdjGraph>(mgInstance, timingDB, switchInfo.cfdfcIIs[mgIndex], mgIndex);
+    // AdjGraph tmpAdjGraph(mgInstance, timingDB, switchInfo.cfdfcIIs[mgIndex], mgIndex);
+    switchInfo.segToAdjGraphMap.insert_or_assign(std::to_string(mgIndex), adj);
 
     // Update the backedge list
-    for (const auto& selPair : tmpAdjGraph.backedges) {
+    for (const auto& selPair : adj->backedges) {
       allBackedges.push_back(selPair);
     }
   }
@@ -135,6 +136,45 @@ void SwitchingEstimationPass::runDynamaticPass() {
     }
     llvm::dbgs() << "\n";
   }
+  
+  // Step 3.2: Create the storing structure for the entire dataflow graph
+  for (handshake::FuncOp funcOp : topModule.getOps<handshake::FuncOp>()) {
+    // Contruct the Adj graph for the entire dataflow circuit
+    switchInfo.dataflowGraph = std::make_shared<AdjGraph>(timingDB, switchInfo.cfdfcIIs[0], funcOp, allBackedges);
+  }
+
+  llvm::dbgs() << "[DEBUG] [STEP 4] Determining the Global start time and shifting for each MG\n";
+  for (auto& [mgIndex, selGraph]: switchInfo.segToAdjGraphMap) {
+    // Step 4.1: Determining the latest start time for each node cfdfc
+    selGraph->obtainNodeGlobalOrder();
+
+    // Step 4.2: Check the shifting between different start node within a graph
+    //! Testing
+    llvm::dbgs() << "[DEBUG] \t[Cycle Time]\n";
+    for (const auto& [startNode, cycleTime]: selGraph->startNodeCycleTimeMap) {
+      llvm::dbgs() << "[DEBUG] \t\tStart Node: " << startNode << ", Cycle Time: " << cycleTime << "\n";
+    }
+
+    auto back1 = selGraph->findPaths("mux0", "cond_br1", false, true);
+    auto back2 = selGraph->findPaths("mux1", "cond_br2", false, true);
+    auto back3 = selGraph->findPaths("control_merge0", "cond_br3", false, true);
+
+    llvm::dbgs() << "[DEBUG] \t[Back1]\n";
+    for (auto selPath: back1) {
+      selPath.printDetail();
+    }
+    llvm::dbgs() << "[DEBUG] \t[Back2]\n";
+    for (auto selPath: back2) {
+      selPath.printDetail();
+    }
+    llvm::dbgs() << "[DEBUG] \t[Back3]\n";
+    for (auto selPath: back3) {
+      selPath.printDetail();
+    }
+  }
+
+  
+
 }
 
 
