@@ -42,6 +42,16 @@ class AdjNode;
 class AdjGraph;
 class Path;
 
+// Struct used to store all the data source nodes in differernt segments in the dfg
+// We have this kind of definiton as we obtain the profiling results from scf level
+// If we have handshake level simulator one day, we can get rid of the entire
+// data channel estimation process.
+struct DataBaseNodesTriple {
+  std::vector<std::string> all;
+  std::vector<std::string> control;
+  std::vector<std::string> data;
+};
+
 // Helper datatype for switching estimation. Aggregates all useful information
 // for the swithicng estimation process
 struct SwitchingInfo {
@@ -78,6 +88,14 @@ struct SwitchingInfo {
   // Below has to be a shared pointer, otherwise need to override the clonePass() implementation in MLIR
   std::shared_ptr<AdjGraph> dataflowGraph;
 
+  // 
+  //  Variables for data channel switching calculation
+  //
+  // Map from pair of BB sequence to the corresponding control_merge output
+  // Format: {(preBB, curBB) : [(control_merge_node, output_value)]}
+  std::map<std::pair<unsigned, unsigned>, std::vector<std::pair<std::string, unsigned>>> bbPairToCMResultMap;
+  // Map from segment index to dataBaseNode struct
+  std::map<std::string, DataBaseNodesTriple> segToDataBaseVecMap;
 };
 
 // Class used to construct the per segment (MG & one-time execution segment)
@@ -155,6 +173,13 @@ public:
   void printPerDataChannelToggleNumber();
   void printPerHandshakeChannelToggleNumber();
 
+  // Support LLVM node casting
+  // Following enum class is needed for isa<> and dyn_cast<>
+  enum class NodeKind {AdjNodeKind, BufferNodeKind, JoinNodeKind, PassNodeKind, CmpiNodeKind, AddiNodeKind,
+                        SubiNodeKind, MuliNodeKind, ExtsiNodeKind, DLoadNodeKind, DStoreNodeKind, MergeNodeKind,
+                        CMergeNode, ForkNode, CBrNode, ShliNode, ShrsiNode, ShruiNode, MuxNode, TrunciNode,
+                        ExtuiNode, ConstantNode, OriNode, AndiNode, SourceNode, EndNode, SinkNode, StartNode};
+
   // 
   //  Internal Storing Variables
   //
@@ -215,6 +240,10 @@ public:
   // Find all the paths between the specified src and dst node within the graph
   std::vector<Path> findPaths(const std::string &srcNode, const std::string &dstNode,
                               bool noStartingNode, bool useGlobalOrder);
+  
+  // This function conducts backtracking in the dfg starting from the specified node.
+  // The search will stop: (1) No node left; (2)Base node encountered
+  std::string graphBacktrack(std::string srcNode, std::unordered_set<std::string> &baseNodeSet);
 
   // The following function calculates the global order of the units and cycle times in the AdjGraph
   // the results will be stored in graphGlobalOrder
@@ -222,6 +251,14 @@ public:
   // During handshake and path latency analysis, we use those start nodes as the base points for analysis
   // However, they may not be active at the same time, so we need to take the shifting into account.
   void analyzeStartNodeShifting();
+
+  //===----------------------------------------------------------------------===//
+  // Data Channel Switching Calculation
+  //===----------------------------------------------------------------------===//
+  // Data Base nodes used for data propagation through data channels (from scf level profiling)
+  std::unordered_set<std::string> profileBaseNodes;
+  // Data + Control base nodes
+  std::unordered_set<std::string> allDataBaseNode;
 
   // 
   //  Internal Storing Variables
@@ -238,7 +275,11 @@ public:
   std::map<std::string, std::pair<std::string, unsigned>> graphGlobalOrder;
   // Map storing the maximum cycle time from different start node in the graph
   // This will be used to analyze the shifting between start node
-  std::map<std::string, unsigned> startNodeCycleTimeMap;
+  std::map<std::string, unsigned> cycleTimeMap;
+  // Map storing the shifting between different different start node and the base node
+  std::map<std::string, int> startBaseNodeShiftMap;
+  // List storing the name of nodes in the graph in program order
+  std::vector<std::string> orderedNodeName;
   
 };
 

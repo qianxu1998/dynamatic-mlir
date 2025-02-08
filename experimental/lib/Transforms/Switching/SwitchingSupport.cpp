@@ -364,6 +364,9 @@ AdjGraph::AdjGraph(const buffer::CFDFC& cfdfc, const TimingDatabase& timingDB,
     std::string unitType = selNode->getName().getStringRef().str();
     std::string unitName = selNode->getAttrOfType<StringAttr>("handshake.name").str();
 
+    // Preserve the relative order of nodes
+    orderedNodeName.push_back(unitName);
+
     // Get the unit latency
     unsigned nodeLatency = extractNodeLatency(selNode, timingDB);
 
@@ -396,6 +399,9 @@ AdjGraph::AdjGraph(const TimingDatabase& timingDB, const unsigned &II,
     std::string unitName = op.getAttrOfType<StringAttr>("handshake.name").str();
     // For now, we exclude lsq and mem_controller
     if (unitName.find("lsq") != std::string::npos || unitName.find("mem_controller") != std::string::npos) continue;
+
+    // Preserve the relative order of nodes
+    orderedNodeName.push_back(unitName);
 
     //! Testing
     // llvm::dbgs() << "[DEBUG] \t=================================\n";
@@ -699,7 +705,7 @@ void AdjGraph::obtainNodeGlobalOrder() {
       graphGlobalOrder[name] = std::make_pair(finalStartNode, maxLatency);
 
       //! Testing
-      llvm::dbgs() << "[DEBUG] \tNode: " << name << "; Global Order: (" << finalStartNode << ", " << maxLatency << ");\n";
+      // llvm::dbgs() << "[DEBUG] \tNode: " << name << "; Global Order: (" << finalStartNode << ", " << maxLatency << ");\n";
     }
   }
 }
@@ -810,6 +816,69 @@ std::vector<Path> AdjGraph::findPaths(const std::string &srcNode, const std::str
   return foundPaths;
 }
 
+std::string AdjGraph::graphBacktrack(std::string srcNode, std::unordered_set<std::string> &baseNodeSet) {
+  // If srcNode is in baseNodes => return it
+  if (baseNodeSet.find(srcNode) != baseNodeSet.end()) {
+    return srcNode;
+  }
+
+  // Define storing structure
+  std::vector<std::string> mainStack;
+  std::vector<std::vector<std::string>> adjStack;
+
+  // Initialization
+  mainStack.push_back(srcNode);
+  if (srcNode.find("cond_br") != std::string::npos) {
+    if (auto *cbrNode = dyn_cast<CBrNode>(nodes[srcNode].get())) {
+      std::string tmpDataPreNode = cbrNode->dataPreNodeName;
+      adjStack.push_back({ tmpDataPreNode });
+    }
+  } else {
+    adjStack.push_back(nodes[srcNode]->pres);
+  }
+
+  //
+  while (!mainStack.empty()) {
+    std::vector<std::string> curAdjList = adjStack.back();
+    adjStack.pop_back();
+
+    if (!curAdjList.empty()) {
+      //
+      std::string curNode = curAdjList.back();
+      curAdjList.pop_back();
+      adjStack.push_back(curAdjList);
+
+      if (baseNodeSet.find(curNode) != baseNodeSet.end()) {
+        return curNode;
+      } else {
+        mainStack.push_back(curNode);
+
+        if (curNode.find("cond_br") != std::string::npos) {
+          if (auto *cbrNode = dyn_cast<CBrNode>(nodes[curNode].get())){
+            std::string tmpDataPreNode = cbrNode->dataPreNodeName;
+            if (std::find(mainStack.begin(), mainStack.end(), tmpDataPreNode) == mainStack.end()) {
+              adjStack.push_back({ tmpDataPreNode });
+            } 
+          }
+        } else {
+          std::vector<std::string> tmpAdjList;
+          std::vector<std::string> newAdjList = nodes[curNode]->pres;
+
+          for (const auto&n : newAdjList) {
+            bool inStack = (std::find(mainStack.begin(), mainStack.end(), n) != mainStack.end());
+            if (!inStack) tmpAdjList.push_back(n);
+          }
+
+          adjStack.push_back(tmpAdjList);
+        }
+      }
+    } else {
+      mainStack.pop_back();
+    }
+  }
+
+}
+
 void AdjGraph::analyzeStartNodeShifting() {
   // Find the largest value in the global order map
   unsigned tmpMaxValue = 0;
@@ -817,6 +886,42 @@ void AdjGraph::analyzeStartNodeShifting() {
     if (delayPair.second > tmpMaxValue) {
       tmpMaxValue = delayPair.second;
       baseNode = delayPair.first;
+    }
+  }
+
+  // Update the cycle time of the MG
+  for (const auto& selBackedge: backedges) {
+    unsigned tmpLonPath = 0;
+    auto tmpPaths = findPaths(selBackedge.second, selBackedge.first, false, true);
+
+    for (auto selPath: tmpPaths) {
+      if (selPath.latency > tmpLonPath) {
+        tmpLonPath = selPath.latency;
+      }
+    }
+    cycleTimeMap[selBackedge.second] = tmpLonPath;
+  }
+
+  // Analyze the shifting between different start ndoes and the base node
+  for (const auto& selStart : segStartNodes) {
+    auto nodeVal = cycleTimeMap[selStart];
+    auto baseVal = cycleTimeMap[baseNode];
+
+    if (selStart == baseNode) {
+      startBaseNodeShiftMap[selStart] = baseVal % cfdfcII;
+      continue;
+    }
+
+    if ((nodeVal % cfdfcII) == (baseVal % cfdfcII)) {
+      startBaseNodeShiftMap[selStart] = 0;
+    } else {
+      if (nodeVal > baseVal) {
+        int tmpDiff = nodeVal - baseVal;
+        startBaseNodeShiftMap[selStart] = tmpDiff % cfdfcII;
+      } else {
+        int tmpDiff = baseVal - nodeVal;
+        startBaseNodeShiftMap[selStart] = -1 * (tmpDiff % cfdfcII);
+      }
     }
   }
 }

@@ -8,6 +8,7 @@
 #include "experimental/Transforms/Switching/SwitchingEstimation.h"
 #include "experimental/Transforms/Switching/SwitchingSupport.h"
 #include "experimental/Transforms/Switching/ProfilingAnalyzer.h"
+#include "experimental/Transforms/Switching/DataChannelCal.h"
 #include "dynamatic/Dialect/Handshake/HandshakeOps.h"
 #include "dynamatic/Dialect/Handshake/HandshakeAttributes.h"
 #include "dynamatic/Support/DynamaticPass.h"
@@ -66,7 +67,16 @@ struct SwitchingEstimationPass
   // Extract all op names of the alus in order
   void extractHandshakeOpNames(handshake::FuncOp& topFunc);
 
+  // 
+  //  DataChannel Switching Calculation
+  //
+  // Function calculates the number of switches in the data channels
+  void calDataChannelSwitching(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults);
 
+  // 
+  //  Handshake Channel Switching Calculation
+  //
+  void calHSChannelSwitching(mlir::ModuleOp& topModule);
 };
 } // namespace 
 
@@ -149,38 +159,63 @@ void SwitchingEstimationPass::runDynamaticPass() {
     selGraph->obtainNodeGlobalOrder();
 
     // Step 4.2: Check the shifting between different start node within a graph
-    //! Testing
-    llvm::dbgs() << "[DEBUG] \t[Cycle Time]\n";
-    for (const auto& [startNode, cycleTime]: selGraph->startNodeCycleTimeMap) {
-      llvm::dbgs() << "[DEBUG] \t\tStart Node: " << startNode << ", Cycle Time: " << cycleTime << "\n";
-    }
+    selGraph->analyzeStartNodeShifting();
+  }
 
-    auto back1 = selGraph->findPaths("mux0", "cond_br1", false, true);
-    auto back2 = selGraph->findPaths("mux1", "cond_br2", false, true);
-    auto back3 = selGraph->findPaths("control_merge0", "cond_br3", false, true);
+  // Step 5: Calculate switches in data channel
+  llvm::dbgs() << "[DEBUG] [STEP 5] Calculate Data Channel Switching\n";
+  calDataChannelSwitching(topModule, profilingResults);
 
-    llvm::dbgs() << "[DEBUG] \t[Back1]\n";
-    for (auto selPath: back1) {
-      selPath.printDetail();
-    }
-    llvm::dbgs() << "[DEBUG] \t[Back2]\n";
-    for (auto selPath: back2) {
-      selPath.printDetail();
-    }
-    llvm::dbgs() << "[DEBUG] \t[Back3]\n";
-    for (auto selPath: back3) {
-      selPath.printDetail();
-    }
+  // Step 6: Calculate switches in handshake channels
+  llvm::dbgs() << "[DEBUG] [STEP 6] Calculate Handshake Channel Switching\n";
+  llvm::dbgs() << "[DEBUG] \tOngoing\n";
+
+}
+
+//===----------------------------------------------------------------------===//
+//
+// Data Channel Switching
+//
+//===----------------------------------------------------------------------===//
+void SwitchingEstimationPass::calDataChannelSwitching(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults) {
+  // Step 1: Get the iteration index for the frist execution of each segment
+  llvm::dbgs() << "[DEBUG]  [SS1] Get the BB Pair to Control Merge Output Map\n";
+  constructBBPairToCMResMap(switchInfo);
+
+  //! Testing
+  // for (const auto& [pair1, cmVec]: switchInfo.bbPairToCMResultMap) {
+  //   llvm::dbgs() << "[DEBUG] \t(" << pair1.first << ", " << pair1.second << ") : \n";
+  //   for (auto selPair: cmVec) {
+  //     llvm::dbgs() << "[DEBUG] \t\t[" << selPair.first << " " << selPair.second << "]\n";
+  //   }
+  // }
+
+  // Step 2: Construct the list of all data source nodes from scf-level profiling 
+  llvm::dbgs() << "[DEBUG]  [SS2] Get all the database nodes in each segments\n";
+  getDataBaseNodes(switchInfo, profileResults);
+  //! Testing
+  for (auto& [segLabel, selDB]: switchInfo.segToDataBaseVecMap) {
+    llvm::dbgs() << "[DEBUG] \t[SEGMENT] " << segLabel << "\n";
+    printDataBaseNodesTriple(selDB);
   }
 
   
-
 }
+
+
 
 
 //===----------------------------------------------------------------------===//
 //
-// Internal Function Definitions
+// Information Extraction
+//
+//===----------------------------------------------------------------------===//
+
+
+
+//===----------------------------------------------------------------------===//
+//
+// Information Extraction
 //
 //===----------------------------------------------------------------------===//
 

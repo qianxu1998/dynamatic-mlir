@@ -1,0 +1,72 @@
+//===- DataChannelCal.h - Switching Estimation -----*- C++ -*-===//
+//
+// Dynamatic is under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// This file declares all functions used for data channel switching calculation
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef EXPERIMENTAL_TRANSFORMS_DATACHANNEL_SWITCHING_H
+#define EXPERIMENTAL_TRANSFORMS_DATACHANNEL_SWITCHING_H
+
+#include "experimental/Transforms/Switching/SwitchingSupport.h"
+#include "experimental/Transforms/Switching/ProfilingAnalyzer.h"
+#include "experimental/Transforms/Switching/ExecModel.h"
+#include "dynamatic/Transforms/BufferPlacement/CFDFC.h"
+#include "mlir/IR/Attributes.h"
+#include "dynamatic/Dialect/Handshake/HandshakeAttributes.h"
+#include "experimental/Support/StdProfiler.h"
+#include "dynamatic/Support/TimingModels.h"
+#include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/Debug.h"
+
+#include <unordered_set>
+#include <algorithm>
+#include <cmath>
+#include <vector>
+#include <set>
+#include <regex>
+#include <string>
+#include <cctype>
+#include <typeinfo>
+#include <optional>
+
+
+using namespace mlir;
+using namespace dynamatic;
+using namespace dynamatic::handshake;
+
+// This function builds the map from BB pair to the corresponding control_merge output
+// Format: {(preBB, curBB) : (control_merge_node, output_value)}
+// The results will be stored in a SwitchingInfo instance
+void constructBBPairToCMResMap(SwitchingInfo &switchInfo);
+
+// This function finds all base nodes in the dataflow circuit and will contruct two level storing
+// We will have 4 types of MG in a given dfg:
+//     - "S" : MG contain starting BBs of the program
+//     - "Tn": The nth transition section, will have the same invalid backedges as the successing MG (e.x. "T1", "T2")
+//     - "n" : Actual CFDFC in the dataflow circuit (e.x. 1, 2, )
+//     - "E" : MG contain ending BBs of the program 
+
+// Two types of base nodes will be extracted for each of the MG:
+//     - Control base nodes:
+//         -- Control_Merge Nodes
+//         -- Mux nodes
+//     - Data path nodes:
+//         -- All units from the mapped unit list
+//         -- Start Nodes
+void getDataBaseNodes(SwitchingInfo &switchInfo, SCFProfilingResult &profileResults);
+
+//===----------------------------------------------------------------------===//
+//
+// Helper function for debuging
+//
+//===----------------------------------------------------------------------===//
+// Function to print the contents of a DataBaseNodesTriple
+void printDataBaseNodesTriple(DataBaseNodesTriple dbnt);
+
+#endif // EXPERIMENTAL_TRANSFORMS_DATACHANNEL_SWITCHING_H

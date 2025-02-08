@@ -45,6 +45,7 @@ SCFProfilingResult::SCFProfilingResult(StringRef dataTrace, StringRef bbList, Sw
 void SCFProfilingResult::constructSegExeCount() {
   unsigned segCounter = 0;
   unsigned numExecPhase = 0;
+  unsigned globalCounter = 0;
   std::string prevSeg = "S";
 
   for (const auto& selSeg: executedSegTrace) {
@@ -56,6 +57,13 @@ void SCFProfilingResult::constructSegExeCount() {
     } else {
       segCounter++;
     }
+
+    if (segToStartIterIndexMap.find(selSeg) == segToStartIterIndexMap.end()) {
+      segToStartIterIndexMap[selSeg] = globalCounter;
+    }
+
+    // Update the globalCounter
+    globalCounter++;
   }
 
   // Add the ending section
