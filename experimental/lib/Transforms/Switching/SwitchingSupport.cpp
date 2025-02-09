@@ -682,7 +682,7 @@ unsigned AdjGraph::calPathLatency(const Path &selPath, bool useGlobalOrder) {
 
 void AdjGraph::obtainNodeGlobalOrder() {
   // Iterate over all nodes in the AdjGraph
-  for (const auto& [name, node]: nodes) {
+  for (const auto& name: orderedNodeName) {
     if (std::find(segStartNodes.begin() , segStartNodes.end(), name) != segStartNodes.end()) {
       continue;
     } else {
@@ -818,7 +818,7 @@ std::vector<Path> AdjGraph::findPaths(const std::string &srcNode, const std::str
 }
 
 std::string AdjGraph::graphBacktrack(std::string srcNode, std::unordered_set<std::string> &baseNodeSet) {
-  //! Testing
+  // //! Testing
   // llvm::dbgs() << "[DEBUG] [BASE NODE SET]\n[DEBUG]\t\t";
   // for (const auto& selNode: baseNodeSet) {
   //   llvm::dbgs() << selNode << ", ";
@@ -844,6 +844,11 @@ std::string AdjGraph::graphBacktrack(std::string srcNode, std::unordered_set<std
   } else {
     adjStack.push_back(nodes[srcNode]->pres);
   }
+
+  // //! Testing
+  // llvm::dbgs() << "=================Initial==================\n";
+  // printMainStack(mainStack);
+  // printAdjStack(adjStack);
 
   //
   while (!mainStack.empty()) {
@@ -880,6 +885,11 @@ std::string AdjGraph::graphBacktrack(std::string srcNode, std::unordered_set<std
           adjStack.push_back(tmpAdjList);
         }
       }
+
+      // //! Testing
+      // llvm::dbgs() << "=================Internal==================\n";
+      // printMainStack(mainStack);
+      // printAdjStack(adjStack);
     } else {
       mainStack.pop_back();
     }
@@ -941,6 +951,9 @@ void AdjGraph::buildMuxSrcMap() {
   for (const auto& selNode: orderedNodeName) {
     // If this is a mux node
     if (selNode.find("mux") != std::string::npos) {
+      //! Testing
+      llvm::dbgs() << "[DEBUG] \t\tMux Node Name: " << selNode << "\n";
+
       // Ger the mux node storing structure
       auto *selMuxNode = dyn_cast<MuxNode>(nodes[selNode].get());
       // 
@@ -989,6 +1002,34 @@ void AdjGraph::buildMuxSrcMap() {
       } else {
         srcNodeToMuxMap[dataPre1SrcName] = {std::make_pair(selNode, 1)};
       }
+    }
+  }
+}
+
+void AdjGraph::buildCondandStoreSrcMap() {
+  // Traverse all nodes in the dataflow graph
+  for (const auto& selNode: orderedNodeName) {
+    // If this is a cond_br node
+    if (selNode.find("cond_br") != std::string::npos) {
+      // Ger the cond_br node storing structure
+      auto *selCBrNode = dyn_cast<CBrNode>(nodes[selNode].get());
+
+      std::string controlSrcNode = graphBacktrack(selCBrNode->condPreNodeName, allDataBaseNode);
+      condBrToConSrcMap[selNode] = controlSrcNode;
+    } else if (selNode.find("store") != std::string::npos) {
+      auto *selStoreNode = dyn_cast<DStoreNode>(nodes[selNode].get());
+
+      std::string addrPreNode = selStoreNode->addressInNode;
+      std::string dataPreNode = selStoreNode->dataInNode;
+
+      selStoreNode->addressInSrcNode = graphBacktrack(addrPreNode, allDataBaseNode);
+      selStoreNode->dataInSrcNode = graphBacktrack(dataPreNode, allDataBaseNode);
+
+      //! Testing
+      llvm::dbgs() << "[DEBUG] \tStore Node: " << selNode << "\n";
+      llvm::dbgs() << "[DEBUG] \t\tData Src Node: " << selStoreNode->dataInSrcNode << "\n";
+      llvm::dbgs() << "[DEBUG] \t\tAddr Src Node: " << selStoreNode->addressInSrcNode << "\n";
+
     }
   }
 }

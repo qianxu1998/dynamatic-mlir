@@ -312,13 +312,25 @@ void SCFProfilingResult::parseDataLogFile(StringRef dataTrace, SwitchingInfo& sw
 
       std::string opName = scfToHandshakeNameMap[scfOPName];
 
-      // TODO: Remove the [ARG] in the data profiler
       if (lineSplit.size() > 1) {
         int opValue = std::stoi(opValueTuple.back());
         insertValuePair(opValue, curIter, opName);
       } else {
         continue;
       }
+    } else if (lineSplit[0] == "[ARG]") {
+      // Get the (op_name, value) tuple
+      std::string opValueStr = strip(lineSplit[1], "(");
+      opValueStr = strip(opValueStr, ")");
+
+      auto opValueTuple = split(opValueStr, ",");
+      std::string argName = strip(opValueTuple[0], "\"");
+
+      int opValue = std::stoi(opValueTuple.back());
+      insertValuePair(opValue, curIter, argName);
+
+      // Record the name of the arguments
+      argNamesVec.push_back(argName);
     } else if (lineSplit[0] == "[Edge]") {
       unsigned edgeIndex = std::stoul(lineSplit[1]);
 

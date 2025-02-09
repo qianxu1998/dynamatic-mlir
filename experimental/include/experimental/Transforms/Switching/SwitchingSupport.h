@@ -267,6 +267,8 @@ public:
   // This function constructs the src map for all mux nodes in the dfg
   // While building the src dict, this function also update the mapping from src node to the corresponding mux node with the following format
   void buildMuxSrcMap();
+  // This funciton finds the cond_src node for all cond_br nodes and data/address src for store nodes in the dfg
+  void buildCondandStoreSrcMap();
 
   //===----------------------------------------------------------------------===//
   // Data Channel Switching Calculation Variables
@@ -284,6 +286,8 @@ public:
   // Control_merge to mux node map
   // The control port of the mux node is always connecting to a control_merge node
   std::map<std::string, std::vector<std::string>> cmToMuxMap;
+  // CondBr to control source node map
+  std::map<std::string, std::string> condBrToConSrcMap;
 
   // 
   //  Internal Storing Variables

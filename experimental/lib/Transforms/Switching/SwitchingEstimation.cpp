@@ -202,10 +202,16 @@ void SwitchingEstimationPass::calDataChannelSwitching(mlir::ModuleOp& topModule,
   // Step 3: Contruct the data source node info of mux, condbr and mem node
   llvm::dbgs() << "[DEBUG]  [SS3] Construct the data source node storing structure for different nodes in the dataflow graph\n";
   switchInfo.dataflowGraph->buildMuxSrcMap();
+  switchInfo.dataflowGraph->buildCondandStoreSrcMap();
 
   //! Testing
   printMuxToSrcNodeMap(switchInfo.dataflowGraph->muxToSrcNodeMap);
   printSrcNodeToMuxMap(switchInfo.dataflowGraph->srcNodeToMuxMap);
+  llvm::dbgs() << "[DEBUG] \tcondBr Node to control src map: \n";
+  for (const auto& [cbrNode, controlSrc]: switchInfo.dataflowGraph->condBrToConSrcMap) {
+    llvm::dbgs() << "[DEBUG] \t\t(" << cbrNode << ", " << controlSrc << ")\n";
+  }
+
 
 }
 

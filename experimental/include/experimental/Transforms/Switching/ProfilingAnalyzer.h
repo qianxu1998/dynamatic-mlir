@@ -98,6 +98,9 @@ public:
   // Map from the segment label to the first iteration that the segment starts execution
   std::map<std::string, unsigned> segToStartIterIndexMap;
 
+  // Vector of arguments names
+  std::vector<std::string> argNamesVec;
+
 };
 
 

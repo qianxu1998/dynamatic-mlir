@@ -835,8 +835,8 @@ LogicalResult simulate(func::FuncOp funcOp, ArrayRef<std::string> inputArgs,
       valueMap[blockArgs[i]] = value;
       timeMap[blockArgs[i]] = 0.0;
 
-      //! Testing, get input arguments
-      *trace_logger << "[ARG] " << any_cast<APInt>(value) <<"\n";
+      // Get input arguments
+      *trace_logger << "[ARG] (" << funcOp.getArgAttrOfType<mlir::StringAttr>(i, "handshake.arg_name") << "," << any_cast<APInt>(value) <<")\n";
     }
   }
 

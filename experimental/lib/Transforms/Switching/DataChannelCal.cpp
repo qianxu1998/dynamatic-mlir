@@ -22,8 +22,8 @@
 #include "llvm/Support/Debug.h"
 
 void constructBBPairToCMResMap(SwitchingInfo &switchInfo) {
-  for (const auto& [nodeName, node]: switchInfo.dataflowGraph->nodes) {
-   if (auto CMOp = dyn_cast<handshake::ControlMergeOp>(node->op)) {
+  for (const auto& nodeName: switchInfo.dataflowGraph->orderedNodeName) {
+   if (auto CMOp = dyn_cast<handshake::ControlMergeOp>(switchInfo.dataflowGraph->nodes[nodeName]->op)) {
     // Get the BB of the control_merge node
     unsigned CMBB;
     if (std::optional<unsigned> optBB = getLogicBB(CMOp); !optBB.has_value())
@@ -62,9 +62,9 @@ void getDataBaseNodes(SwitchingInfo &switchInfo, SCFProfilingResult &profileResu
   }
 
   // Traverse all the nodes in the dataflow graph
-  for (const auto& [nodeName, node]: switchInfo.dataflowGraph->nodes) {
+  for (const auto& nodeName: switchInfo.dataflowGraph->orderedNodeName) {
     unsigned nodeBB;
-    if (std::optional<unsigned> optBB = getLogicBB(node->op); !optBB.has_value())
+    if (std::optional<unsigned> optBB = getLogicBB(switchInfo.dataflowGraph->nodes[nodeName]->op); !optBB.has_value())
       continue;
     else
       nodeBB = *optBB;
@@ -109,6 +109,13 @@ void getDataBaseNodes(SwitchingInfo &switchInfo, SCFProfilingResult &profileResu
       switchInfo.dataflowGraph->allDataBaseNode.insert(nodeName);
     }
   }
+
+  // Add all arguments into data base nodes
+  for (const auto& selArg: profileResults.argNamesVec) {
+
+    switchInfo.dataflowGraph->profileBaseNodes.insert(selArg);
+    switchInfo.dataflowGraph->allDataBaseNode.insert(selArg);
+  }
 }
 
 
@@ -152,32 +159,32 @@ void printDataBaseNodesTriple(DataBaseNodesTriple dbnt) {
 // 1) Print the muxToSrcNodeMap
 // Format: {"mux_node_name" : {"control" : ctrlSrcName, "0" : srcName0, "1" : srcName1}}
 void printMuxToSrcNodeMap(const std::map<std::string, std::map<std::string, std::string>> &muxToSrcNodeMap) {
-  llvm::dbgs() << "muxToSrcNodeMap:\n";
+  llvm::dbgs() << "[DEBUG] \tmuxToSrcNodeMap:\n";
   for (const auto &muxEntry : muxToSrcNodeMap) {
     // muxEntry.first => mux node name
     // muxEntry.second => map from { "control", "0", "1" } to source node name
     const std::string &muxNodeName = muxEntry.first;
     const auto &innerMap = muxEntry.second;
 
-    llvm::dbgs() << "  Mux Node: " << muxNodeName << " => {\n";
+    llvm::dbgs() << "[DEBUG] \t\tMux Node: " << muxNodeName << " => {\n";
     for (const auto &kv : innerMap) {
-      llvm::dbgs() << "    \"" << kv.first << "\" : \"" << kv.second << "\",\n";
+      llvm::dbgs() << "[DEBUG] \t\t\t\"" << kv.first << "\" : \"" << kv.second << "\",\n";
     }
-    llvm::dbgs() << "  }\n";
+    llvm::dbgs() << "[DEBUG] \t\t}\n";
   }
 }
 
 // 2) Print the srcNodeToMuxMap
 // Format: {"src_node_name" : [ (mux_node_name, portId), ... ]}
 void printSrcNodeToMuxMap(const std::map<std::string, std::vector<std::pair<std::string, unsigned>>> &srcNodeToMuxMap) {
-  llvm::dbgs() << "srcNodeToMuxMap:\n";
+  llvm::dbgs() << "[DEBUG] \tsrcNodeToMuxMap:\n";
   for (const auto &srcEntry : srcNodeToMuxMap) {
     // srcEntry.first => source node name
     // srcEntry.second => vector of pairs
     const std::string &srcNodeName = srcEntry.first;
     const auto &muxList = srcEntry.second;
 
-    llvm::dbgs() << "  Source Node: " << srcNodeName << " => [";
+    llvm::dbgs() << "[DEBUG] \t\tSource Node: " << srcNodeName << " => [";
     for (size_t i = 0; i < muxList.size(); ++i) {
       const auto &pairVal = muxList[i];
       llvm::dbgs() << "(" << pairVal.first << ", " << pairVal.second << ")";
