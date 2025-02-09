@@ -118,6 +118,60 @@ void getDataBaseNodes(SwitchingInfo &switchInfo, SCFProfilingResult &profileResu
   }
 }
 
+//===----------------------------------------------------------------------===//
+//
+// Class for storing data channel values
+//
+//===----------------------------------------------------------------------===//
+DataBase::DataBase(const std::string &node): nodeName(node), lastUpdateIndex(0), skipControlCal(false) {}
+
+void DataBase::printDetail() {
+  llvm::dbgs() << "Node Name: " << nodeName << "\n";
+
+  // Print originalDataOut
+  llvm::dbgs() << "\tOriginal Dataout:\n";
+  for (const auto &kv : originalDataOut) {
+    llvm::dbgs() << "\t\tIter " << kv.first << ": ("
+              << kv.second.value << ", " << kv.second.iterIndex << ")\n";
+  }
+
+  // Print mg_suc_node_dict, which is a map<mg_label, MgInfo>
+  for (const auto &mgPair : segSucNodeMap) {
+    const std::string &mgLabel = mgPair.first;
+    const MgNodeInfo &info = mgPair.second;
+
+    llvm::dbgs() << "\tCFDFC/Segment Label: " << mgLabel << "\n";
+    // Print "original"
+    llvm::dbgs() << "\t\toriginal = [";
+    for (size_t i = 0; i < info.original.size(); ++i) {
+      llvm::dbgs() << info.original[i];
+      if (i + 1 < info.original.size()) llvm::dbgs() << ", ";
+    }
+    llvm::dbgs() << "]\n";
+    // Print "glitch"
+    llvm::dbgs() << "\t\tglitch = [";
+    for (size_t i = 0; i < info.glitch.size(); ++i) {
+      llvm::dbgs() << info.glitch[i];
+      if (i + 1 < info.glitch.size()) llvm::dbgs() << ", ";
+    }
+    llvm::dbgs() << "]\n";
+    // Print data_width
+    llvm::dbgs() << "\t\tdata_width:\n";
+    for (const auto &dw : info.dataWidthMap) {
+      llvm::dbgs() << "\t\t  " << dw.first << " => " << dw.second << "\n";
+    }
+  }
+
+  // if this is a control merge node
+  if (controlDataOut.size()) {
+    llvm::dbgs() << "\tControl Dataout:\n";
+    for (const auto &kv : controlDataOut) {
+      llvm::dbgs() << "\t\tIter " << kv.first << ": ("
+                << kv.second.value << ", " << kv.second.iterIndex << ")\n";
+    }
+  }
+}
+
 
 //===----------------------------------------------------------------------===//
 //

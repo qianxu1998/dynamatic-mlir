@@ -205,14 +205,16 @@ void SwitchingEstimationPass::calDataChannelSwitching(mlir::ModuleOp& topModule,
   switchInfo.dataflowGraph->buildCondandStoreSrcMap();
 
   //! Testing
-  printMuxToSrcNodeMap(switchInfo.dataflowGraph->muxToSrcNodeMap);
-  printSrcNodeToMuxMap(switchInfo.dataflowGraph->srcNodeToMuxMap);
-  llvm::dbgs() << "[DEBUG] \tcondBr Node to control src map: \n";
-  for (const auto& [cbrNode, controlSrc]: switchInfo.dataflowGraph->condBrToConSrcMap) {
-    llvm::dbgs() << "[DEBUG] \t\t(" << cbrNode << ", " << controlSrc << ")\n";
-  }
+  // printMuxToSrcNodeMap(switchInfo.dataflowGraph->muxToSrcNodeMap);
+  // printSrcNodeToMuxMap(switchInfo.dataflowGraph->srcNodeToMuxMap);
+  // llvm::dbgs() << "[DEBUG] \tcondBr Node to control src map: \n";
+  // for (const auto& [cbrNode, controlSrc]: switchInfo.dataflowGraph->condBrToConSrcMap) {
+  //   llvm::dbgs() << "[DEBUG] \t\t(" << cbrNode << ", " << controlSrc << ")\n";
+  // }
 
-
+  // Step 4: Update value for all data base nodes
+  llvm::dbgs() << "[DEBUG]  [SS4] Update the value for data base nodes\n";
+  
 }
 
 

@@ -1026,9 +1026,9 @@ void AdjGraph::buildCondandStoreSrcMap() {
       selStoreNode->dataInSrcNode = graphBacktrack(dataPreNode, allDataBaseNode);
 
       //! Testing
-      llvm::dbgs() << "[DEBUG] \tStore Node: " << selNode << "\n";
-      llvm::dbgs() << "[DEBUG] \t\tData Src Node: " << selStoreNode->dataInSrcNode << "\n";
-      llvm::dbgs() << "[DEBUG] \t\tAddr Src Node: " << selStoreNode->addressInSrcNode << "\n";
+      // llvm::dbgs() << "[DEBUG] \tStore Node: " << selNode << "\n";
+      // llvm::dbgs() << "[DEBUG] \t\tData Src Node: " << selStoreNode->dataInSrcNode << "\n";
+      // llvm::dbgs() << "[DEBUG] \t\tAddr Src Node: " << selStoreNode->addressInSrcNode << "\n";
 
     }
   }
