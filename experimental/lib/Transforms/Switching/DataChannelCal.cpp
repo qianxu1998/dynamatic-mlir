@@ -54,62 +54,62 @@ void constructBBPairToCMResMap(SwitchingInfo &switchInfo) {
   }
 }
 
-// void getDataBaseNodes(SwitchingInfo &switchInfo, SCFProfilingResult &profileResults) {
-//   // Instantiate all DataBaseNodesTriple for all segments
-//   for (const auto& [segLabel, BBVec]: switchInfo.segToBBListMap) {
-//     DataBaseNodesTriple tmpDataBaseNodes;
-//     switchInfo.segToDataBaseVecMap[segLabel] = tmpDataBaseNodes;
-//   }
+void getDataBaseNodes(SwitchingInfo &switchInfo, SCFProfilingResult &profileResults) {
+  // Instantiate all DataBaseNodesTriple for all segments
+  for (const auto& [segLabel, BBVec]: switchInfo.segToBBListMap) {
+    DataBaseNodesTriple tmpDataBaseNodes;
+    switchInfo.segToDataBaseVecMap[segLabel] = tmpDataBaseNodes;
+  }
 
-//   // Traverse all the nodes in the dataflow graph
-//   for (const auto& [nodeName, node]: switchInfo.dataflowGraph->nodes) {
-//     unsigned nodeBB;
-//     if (std::optional<unsigned> optBB = getLogicBB(node->op); !optBB.has_value())
-//       continue;
-//     else
-//       nodeBB = *optBB;
+  // Traverse all the nodes in the dataflow graph
+  for (const auto& [nodeName, node]: switchInfo.dataflowGraph->nodes) {
+    unsigned nodeBB;
+    if (std::optional<unsigned> optBB = getLogicBB(node->op); !optBB.has_value())
+      continue;
+    else
+      nodeBB = *optBB;
 
-//     auto dataflowGraph = switchInfo.dataflowGraph;
-//     // Check the types of the nodes
-//     // TYPE 1: DATA nodes from scf profiling
-//     if (profileResults.opNameToValueListMap.find(nodeName) != profileResults.opNameToValueListMap.end() ||
-//           (nodeName.find("constant") != std::string::npos) ||
-//           (nodeName.find("source") != std::string::npos)) {
-//       // Check each segment
-//       for (const auto& [segLabel, BBVec]: switchInfo.segToBBListMap) {
-//         if (std::find(BBVec.begin(), BBVec.end(), nodeBB) != BBVec.end()) {
-//           // If this is a MG
-//           if (switchInfo.segToAdjGraphMap.find(segLabel) != switchInfo.segToAdjGraphMap.end()) {
-//             switchInfo.segToAdjGraphMap[segLabel]->profileBaseNodes.insert(nodeName);
-//             switchInfo.segToAdjGraphMap[segLabel]->allDataBaseNode.insert(nodeName);
-//           }
+    auto dataflowGraph = switchInfo.dataflowGraph;
+    // Check the types of the nodes
+    // TYPE 1: DATA nodes from scf profiling
+    if (profileResults.opNameToValueListMap.find(nodeName) != profileResults.opNameToValueListMap.end() ||
+          (nodeName.find("constant") != std::string::npos) ||
+          (nodeName.find("source") != std::string::npos)) {
+      // Check each segment
+      for (const auto& [segLabel, BBVec]: switchInfo.segToBBListMap) {
+        if (std::find(BBVec.begin(), BBVec.end(), nodeBB) != BBVec.end()) {
+          // If this is a MG
+          if (switchInfo.segToAdjGraphMap.find(segLabel) != switchInfo.segToAdjGraphMap.end()) {
+            switchInfo.segToAdjGraphMap[segLabel]->profileBaseNodes.insert(nodeName);
+            switchInfo.segToAdjGraphMap[segLabel]->allDataBaseNode.insert(nodeName);
+          }
 
-//           switchInfo.segToDataBaseVecMap[segLabel].data.push_back(nodeName);
-//           switchInfo.segToDataBaseVecMap[segLabel].all.push_back(nodeName);
-//         }
-//       }
-//     // TYPE 2: Control Nodes
-//     } else if ((nodeName.find("control_merge") != std::string::npos) ||
-//                 (nodeName.find("mux") != std::string::npos)) {
-//       // Check each segment
-//       for (const auto& [segLabel, BBVec]: switchInfo.segToBBListMap) {
-//         if (std::find(BBVec.begin(), BBVec.end(), nodeBB) != BBVec.end()) {
-//           // If this is a MG
-//           if (switchInfo.segToAdjGraphMap.find(segLabel) != switchInfo.segToAdjGraphMap.end()) {
-//             switchInfo.segToAdjGraphMap[segLabel]->allDataBaseNode.insert(nodeName);
-//           }
+          switchInfo.segToDataBaseVecMap[segLabel].data.push_back(nodeName);
+          switchInfo.segToDataBaseVecMap[segLabel].all.push_back(nodeName);
+        }
+      }
+      switchInfo.dataflowGraph->profileBaseNodes.insert(nodeName);
+      switchInfo.dataflowGraph->allDataBaseNode.insert(nodeName);
+    // TYPE 2: Control Nodes
+    } else if ((nodeName.find("control_merge") != std::string::npos) ||
+                (nodeName.find("mux") != std::string::npos)) {
+      // Check each segment
+      for (const auto& [segLabel, BBVec]: switchInfo.segToBBListMap) {
+        if (std::find(BBVec.begin(), BBVec.end(), nodeBB) != BBVec.end()) {
+          // If this is a MG
+          if (switchInfo.segToAdjGraphMap.find(segLabel) != switchInfo.segToAdjGraphMap.end()) {
+            switchInfo.segToAdjGraphMap[segLabel]->allDataBaseNode.insert(nodeName);
+          }
 
-//           switchInfo.segToDataBaseVecMap[segLabel].control.push_back(nodeName);
-//           switchInfo.segToDataBaseVecMap[segLabel].all.push_back(nodeName);
-//         }
-//       }
-//     }
-//   }
-// }
+          switchInfo.segToDataBaseVecMap[segLabel].control.push_back(nodeName);
+          switchInfo.segToDataBaseVecMap[segLabel].all.push_back(nodeName);
+        }
+      }
 
-
-
-
+      switchInfo.dataflowGraph->allDataBaseNode.insert(nodeName);
+    }
+  }
+}
 
 
 //===----------------------------------------------------------------------===//
@@ -147,4 +147,44 @@ void printDataBaseNodesTriple(DataBaseNodesTriple dbnt) {
     }
   }
   llvm::dbgs() << "]\n";
+}
+
+// 1) Print the muxToSrcNodeMap
+// Format: {"mux_node_name" : {"control" : ctrlSrcName, "0" : srcName0, "1" : srcName1}}
+void printMuxToSrcNodeMap(const std::map<std::string, std::map<std::string, std::string>> &muxToSrcNodeMap) {
+  llvm::dbgs() << "muxToSrcNodeMap:\n";
+  for (const auto &muxEntry : muxToSrcNodeMap) {
+    // muxEntry.first => mux node name
+    // muxEntry.second => map from { "control", "0", "1" } to source node name
+    const std::string &muxNodeName = muxEntry.first;
+    const auto &innerMap = muxEntry.second;
+
+    llvm::dbgs() << "  Mux Node: " << muxNodeName << " => {\n";
+    for (const auto &kv : innerMap) {
+      llvm::dbgs() << "    \"" << kv.first << "\" : \"" << kv.second << "\",\n";
+    }
+    llvm::dbgs() << "  }\n";
+  }
+}
+
+// 2) Print the srcNodeToMuxMap
+// Format: {"src_node_name" : [ (mux_node_name, portId), ... ]}
+void printSrcNodeToMuxMap(const std::map<std::string, std::vector<std::pair<std::string, unsigned>>> &srcNodeToMuxMap) {
+  llvm::dbgs() << "srcNodeToMuxMap:\n";
+  for (const auto &srcEntry : srcNodeToMuxMap) {
+    // srcEntry.first => source node name
+    // srcEntry.second => vector of pairs
+    const std::string &srcNodeName = srcEntry.first;
+    const auto &muxList = srcEntry.second;
+
+    llvm::dbgs() << "  Source Node: " << srcNodeName << " => [";
+    for (size_t i = 0; i < muxList.size(); ++i) {
+      const auto &pairVal = muxList[i];
+      llvm::dbgs() << "(" << pairVal.first << ", " << pairVal.second << ")";
+      if (i + 1 < muxList.size()) {
+        llvm::dbgs() << ", ";
+      }
+    }
+    llvm::dbgs() << "]\n";
+  }
 }

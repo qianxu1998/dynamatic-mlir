@@ -371,9 +371,9 @@ AdjGraph::AdjGraph(const buffer::CFDFC& cfdfc, const TimingDatabase& timingDB,
     unsigned nodeLatency = extractNodeLatency(selNode, timingDB);
 
     //! Testing
-    llvm::dbgs() << "[DEBUG] \t=================================\n";
-    llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n";
-    llvm::dbgs() << "[DEBUG] \tNode Latency From DataBase: " << nodeLatency << "\n";
+    // llvm::dbgs() << "[DEBUG] \t=================================\n";
+    // llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n";
+    // llvm::dbgs() << "[DEBUG] \tNode Latency From DataBase: " << nodeLatency << "\n";
 
     // Step 2.1: Construct the node storing structure
     auto newNode = createNodeFromOperation(
@@ -382,10 +382,10 @@ AdjGraph::AdjGraph(const buffer::CFDFC& cfdfc, const TimingDatabase& timingDB,
     if (!newNode) continue;
 
     //! Testing
-    newNode->printDetail();
+    // newNode->printDetail();
 
     // Store the new node
-    nodes[unitName] = std::move(newNode);
+    nodes[unitName] = newNode;
   }
 
 }
@@ -404,8 +404,9 @@ AdjGraph::AdjGraph(const TimingDatabase& timingDB, const unsigned &II,
     orderedNodeName.push_back(unitName);
 
     //! Testing
-    // llvm::dbgs() << "[DEBUG] \t=================================\n";
-    // llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n";
+    //! Testing
+    llvm::dbgs() << "[DEBUG] \t=================================\n";
+    llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n";
 
     std::vector<std::string> pres;
     std::vector<std::string> sucs;
@@ -440,10 +441,10 @@ AdjGraph::AdjGraph(const TimingDatabase& timingDB, const unsigned &II,
     if (!newNode) continue;
 
     //! Testing
-    // newNode->printDetail();
+    newNode->printDetail();
 
     // Store the new node
-    nodes[unitName] = std::move(newNode);
+    nodes[unitName] = newNode;
   }
 }
 
@@ -458,7 +459,7 @@ void AdjGraph::insertToSurroundingList(std::map<std::string, std::vector<std::st
 
 }
 
-std::unique_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
+std::shared_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
                                                     std::vector<std::string> &pres, std::vector<std::string> &sucs,
                                                     unsigned &nodeLatency) {
     std::map<std::string, unsigned> nodeSucsDataWidthMap;
@@ -485,25 +486,25 @@ std::unique_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
     }
     
     // Return a unique pointer
-    return llvm::TypeSwitch<Operation *, std::unique_ptr<AdjNode>>(op)
+    return llvm::TypeSwitch<Operation *, std::shared_ptr<AdjNode>>(op)
       // handshake::AddIOp operator
       .Case<handshake::AddIOp>([&](auto selNode) {
-        auto node = std::make_unique<AddiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<AddiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
       // handshake::SubIOp operator
       .Case<handshake::SubIOp>([&](auto selNode) {
-        auto node = std::make_unique<SubiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<SubiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
       // handshake::MulIOp operator
       .Case<handshake::MulIOp>([&](auto selNode) {
-        auto node = std::make_unique<MuliNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<MuliNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
       // handshake::CmpIOp operator
       .Case<handshake::CmpIOp>([&](handshake::CmpIOp selNode) {
-        auto node = std::make_unique<CmpiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<CmpiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
       // handshake::BufferOp operator
@@ -537,7 +538,7 @@ std::unique_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
           exit(-1);
         }
 
-        auto node = std::make_unique<BufferNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<BufferNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
 
         // Update the desired inforamtion for the buffer node
         node->occupancy = occValue;
@@ -548,63 +549,63 @@ std::unique_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
       })
       // handshake::MuxOp operator
       .Case<handshake::MuxOp>([&](handshake::MuxOp selNode) {
-        auto node = std::make_unique<MuxNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<MuxNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
       // handshake::OrIOp operator
       .Case<handshake::OrIOp>([&](handshake::OrIOp selNode) {
-        auto node = std::make_unique<OriNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<OriNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
       // handshake::AndIOp operator
       .Case<handshake::AndIOp>([&](handshake::AndIOp selNode) {
-        auto node = std::make_unique<AndiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<AndiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
       // handshake::ForkOp operator
       .Case<handshake::ForkOp>([&](handshake::ForkOp selNode) {
-        auto node = std::make_unique<ForkNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<ForkNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
       // handshake::LazyForkOp operator
       .Case<handshake::LazyForkOp>([&](handshake::LazyForkOp selNode) {
         // TODO: Add model for lazy fork
         llvm::dbgs() << "[DEBUG] \t\t Missing Implementation for LAZY FORK NODE\n";
-        return std::unique_ptr<AdjNode>(nullptr);
+        return std::shared_ptr<AdjNode>(nullptr);
       })
       // handshake::TruncIOp operator
       .Case<handshake::TruncIOp>([&](auto selNode) {
-        auto node = std::make_unique<TrunciNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<TrunciNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
       // handshake::ExtSIOp operator
       .Case<handshake::ExtSIOp>([&](auto selNode) {
-        auto node = std::make_unique<ExtsiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<ExtsiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
       // handshake::ExtUIOp operator
       .Case<handshake::ExtUIOp>([&](auto selNode) {
-        auto node = std::make_unique<ExtuiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<ExtuiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
       // handshake::ControlMergeOp operator
       .Case<handshake::ControlMergeOp>([&](handshake::ControlMergeOp selNode) {
-        auto node = std::make_unique<CMergeNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<CMergeNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
       // handshake::ConditionalBranchOp operator
       .Case<handshake::ConditionalBranchOp>([&](handshake::ConditionalBranchOp selNode) {
-        auto node = std::make_unique<CBrNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<CBrNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
       // handshake::SourceOp operator
       .Case<handshake::SourceOp>([&](auto selNode) {
-        auto node = std::make_unique<SourceNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<SourceNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
       // handshake::ConstantOp operator
       .Case<handshake::ConstantOp>([&](auto selNode) {
-        auto node = std::make_unique<ConstantNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<ConstantNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
       // handshake::LoadOp operator
@@ -613,47 +614,47 @@ std::unique_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
         auto memOp = findMemInterface(selNode.getAddressResult());
         if (isa_and_present<handshake::LSQOp>(memOp)) {
           // TODO: Need to change the latency obtaining method for lsq load op
-          auto node = std::make_unique<DLoadNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+          auto node = std::make_shared<DLoadNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
           return node;
         } else {
-          auto node = std::make_unique<DLoadNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+          auto node = std::make_shared<DLoadNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
           return node;
         }
       })
       // handshake::StoreOp operator
       .Case<handshake::StoreOp>([&](handshake::StoreOp selNode) {
-        auto node = std::make_unique<DStoreNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<DStoreNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
       // handshake::ShLIOp operator
       .Case<handshake::ShLIOp>([&](auto selNode) {
-        auto node = std::make_unique<ShliNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<ShliNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
       // handshake::ShRSIOp operator
       .Case<handshake::ShRSIOp>([&](auto selNode) {
-        auto node = std::make_unique<ShrsiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<ShrsiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
       // handshake::ShRUIOp operator
       .Case<handshake::ShRUIOp>([&](auto selNode) {
-        auto node = std::make_unique<ShruiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<ShruiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
       // handshake::SinkOp operator
       .Case<handshake::SinkOp>([&](auto selNode) {
-        auto node = std::make_unique<SinkNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<SinkNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
       // handshake::EndOp operator
       .Case<handshake::EndOp>([&](auto selNode) {
-        auto node = std::make_unique<EndNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<EndNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
         return node;
       })
       .Default([](auto selNode) {
           selNode->emitOpError() << "Unknown operation!";
 
-          return std::unique_ptr<AdjNode>(nullptr);
+          return std::shared_ptr<AdjNode>(nullptr);
       });
 }
 
@@ -817,6 +818,13 @@ std::vector<Path> AdjGraph::findPaths(const std::string &srcNode, const std::str
 }
 
 std::string AdjGraph::graphBacktrack(std::string srcNode, std::unordered_set<std::string> &baseNodeSet) {
+  //! Testing
+  // llvm::dbgs() << "[DEBUG] [BASE NODE SET]\n[DEBUG]\t\t";
+  // for (const auto& selNode: baseNodeSet) {
+  //   llvm::dbgs() << selNode << ", ";
+  // }
+  // llvm::dbgs() << "\n";
+
   // If srcNode is in baseNodes => return it
   if (baseNodeSet.find(srcNode) != baseNodeSet.end()) {
     return srcNode;
@@ -877,6 +885,8 @@ std::string AdjGraph::graphBacktrack(std::string srcNode, std::unordered_set<std
     }
   }
 
+  llvm::dbgs() << "[ERROR] Could not find base node for " << srcNode << "\n";
+  return "";
 }
 
 void AdjGraph::analyzeStartNodeShifting() {
@@ -921,6 +931,63 @@ void AdjGraph::analyzeStartNodeShifting() {
       } else {
         int tmpDiff = baseVal - nodeVal;
         startBaseNodeShiftMap[selStart] = -1 * (tmpDiff % cfdfcII);
+      }
+    }
+  }
+}
+
+void AdjGraph::buildMuxSrcMap() {
+  // Traverse all nodes in the dataflow graph
+  for (const auto& selNode: orderedNodeName) {
+    // If this is a mux node
+    if (selNode.find("mux") != std::string::npos) {
+      // Ger the mux node storing structure
+      auto *selMuxNode = dyn_cast<MuxNode>(nodes[selNode].get());
+      // 
+      std::map<std::string, std::string> tmpMuxPortMap;
+      std::string conPreNodeName = selMuxNode->conPreNodeName;
+      std::string dataPre0NodeName = "";
+      std::string dataPre1NodeName = "";
+
+      for (const auto& [nodeName, portIdx]: selMuxNode->preNameToPortIdxMap) {
+        if (portIdx == 1) {
+          dataPre0NodeName = nodeName;
+        } else if (portIdx == 2) {
+          dataPre1NodeName = nodeName;
+        }
+      }
+
+      // Get the source node for all three ports
+      std::string conSrcNodeName = graphBacktrack(conPreNodeName, allDataBaseNode);
+      std::string dataPre0SrcName = graphBacktrack(dataPre0NodeName, allDataBaseNode);
+      std::string dataPre1SrcName = graphBacktrack(dataPre1NodeName, allDataBaseNode);
+
+      // Update the control_merge to mux map
+      if (cmToMuxMap.find(conSrcNodeName) != cmToMuxMap.end()) {
+        cmToMuxMap[conSrcNodeName].push_back(selNode);
+      } else {
+        cmToMuxMap[conSrcNodeName] = { selNode };
+      }
+
+      // Build mux src map
+      tmpMuxPortMap["control"] = conSrcNodeName;
+      tmpMuxPortMap["0"] = dataPre0SrcName;
+      tmpMuxPortMap["1"] = dataPre1SrcName;
+
+      // Update the global map
+      muxToSrcNodeMap[selNode] = tmpMuxPortMap;
+
+      // Update the src to mux map
+      if (srcNodeToMuxMap.find(dataPre0SrcName) != srcNodeToMuxMap.end()) {
+        srcNodeToMuxMap[dataPre0SrcName].push_back(std::make_pair(selNode, 0));
+      } else {
+        srcNodeToMuxMap[dataPre0SrcName] = {std::make_pair(selNode, 0)};
+      }
+
+      if (srcNodeToMuxMap.find(dataPre1SrcName) != srcNodeToMuxMap.end()) {
+        srcNodeToMuxMap[dataPre1SrcName].push_back(std::make_pair(selNode, 1));
+      } else {
+        srcNodeToMuxMap[dataPre1SrcName] = {std::make_pair(selNode, 1)};
       }
     }
   }

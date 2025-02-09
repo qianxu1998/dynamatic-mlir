@@ -69,4 +69,12 @@ void getDataBaseNodes(SwitchingInfo &switchInfo, SCFProfilingResult &profileResu
 // Function to print the contents of a DataBaseNodesTriple
 void printDataBaseNodesTriple(DataBaseNodesTriple dbnt);
 
+// 1) Print the muxToSrcNodeMap
+// Format: {"mux_node_name" : {"control" : ctrlSrcName, "0" : srcName0, "1" : srcName1}}
+void printMuxToSrcNodeMap(const std::map<std::string, std::map<std::string, std::string>> &muxToSrcNodeMap);
+
+// 2) Print the srcNodeToMuxMap
+// Format: {"src_node_name" : [ (mux_node_name, portId), ... ]}
+void printSrcNodeToMuxMap(const std::map<std::string, std::vector<std::pair<std::string, unsigned>>> &srcNodeToMuxMap);
+
 #endif // EXPERIMENTAL_TRANSFORMS_DATACHANNEL_SWITCHING_H

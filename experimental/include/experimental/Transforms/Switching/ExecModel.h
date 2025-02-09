@@ -48,6 +48,14 @@ public:
   // Override printDetail function
   void printDetail() override;
 
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::BufferNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::BufferNodeKind;
+  }
+
   //
   /// Internal variable
   //
@@ -392,6 +400,14 @@ public:
 
   void printDetail() override;
 
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::DLoadNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::DLoadNodeKind;
+  }
+
   // Extra members for DLoad nodes
   std::string dataOutNodeName;    // Name for the data out channel
   std::string addressOutNodeName; // this should be the corresponding name of the mem_controller
@@ -435,6 +451,14 @@ public:
 
   // Handshake checking (e.g. comparing size of readySignal with number of predecessors)
   bool handshakeSwitchingChecking();
+
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::DStoreNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::DStoreNodeKind;
+  }
 
   // Extra members for DStoreNode.
   std::string dataInNode;
@@ -522,6 +546,14 @@ public:
 
   // Print details: First call the base class version, then print the control-channel successor name.
   void printDetail() override;
+
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::CMergeNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::CMergeNodeKind;
+  }
 
   // Extra member variables specific to CMergeNode:
   std::string conSucNodeName;   // The name of the successor on the condition channel (port 1)
@@ -649,6 +681,14 @@ public:
   // Print details: call base class printDetail(), then print extra CBrNode info.
   void printDetail() override;
 
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::CBrNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::CBrNodeKind;
+  }
+
   // Extra members.
   std::string condPreNodeName;  // Condition predecessor name.
   std::string dataPreNodeName;  // Data predecessor name.
@@ -768,6 +808,14 @@ public:
 
   // Print detail: call the base class printDetail() and then print extra info.
   void printDetail() override;
+
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::MuxNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::MuxNodeKind;
+  }
 
   // Extra member: The name of the predecessor on the condition channel.
   std::string conPreNodeName;

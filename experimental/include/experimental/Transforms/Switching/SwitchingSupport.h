@@ -177,8 +177,18 @@ public:
   // Following enum class is needed for isa<> and dyn_cast<>
   enum class NodeKind {AdjNodeKind, BufferNodeKind, JoinNodeKind, PassNodeKind, CmpiNodeKind, AddiNodeKind,
                         SubiNodeKind, MuliNodeKind, ExtsiNodeKind, DLoadNodeKind, DStoreNodeKind, MergeNodeKind,
-                        CMergeNode, ForkNode, CBrNode, ShliNode, ShrsiNode, ShruiNode, MuxNode, TrunciNode,
-                        ExtuiNode, ConstantNode, OriNode, AndiNode, SourceNode, EndNode, SinkNode, StartNode};
+                        CMergeNodeKind, ForkNodeKind, CBrNodeKind, ShliNodeKind, ShrsiNodeKind, ShruiNodeKind, MuxNodeKind, TrunciNodeKind,
+                        ExtuiNodeKind, ConstantNodeKind, OriNodeKind, AndiNodeKind, SourceNodeKind, EndNodeKind, SinkNodeKind, StartNodeKind};
+
+  // By default, an AdjNode has kind = AdjNodeKind
+  virtual NodeKind getKind() const { return NodeKind::AdjNodeKind; }
+
+  // "classof" used by llvm casting
+  static bool classof(const AdjNode *node) {
+    // We claim "yes" if node->getKind() == AdjNodeKind
+    // Usually it's trivial for the base class
+    return node->getKind() == NodeKind::AdjNodeKind;
+  }
 
   // 
   //  Internal Storing Variables
@@ -230,7 +240,7 @@ public:
 
   // This function create the corresponding storing structure for a node based on the mlir op type
   // and returns a unique pointer to it.
-  std::unique_ptr<AdjNode> createNodeFromOperation(mlir::Operation *op,
+  std::shared_ptr<AdjNode> createNodeFromOperation(mlir::Operation *op,
                                                     std::vector<std::string> &pres, std::vector<std::string> &sucs,
                                                     unsigned &nodeLatency);
 
@@ -245,20 +255,35 @@ public:
   // The search will stop: (1) No node left; (2)Base node encountered
   std::string graphBacktrack(std::string srcNode, std::unordered_set<std::string> &baseNodeSet);
 
+  //===----------------------------------------------------------------------===//
+  // Data Channel Switching Calculation Functions
+  //===----------------------------------------------------------------------===//
   // The following function calculates the global order of the units and cycle times in the AdjGraph
   // the results will be stored in graphGlobalOrder
   void obtainNodeGlobalOrder();
   // During handshake and path latency analysis, we use those start nodes as the base points for analysis
   // However, they may not be active at the same time, so we need to take the shifting into account.
   void analyzeStartNodeShifting();
+  // This function constructs the src map for all mux nodes in the dfg
+  // While building the src dict, this function also update the mapping from src node to the corresponding mux node with the following format
+  void buildMuxSrcMap();
 
   //===----------------------------------------------------------------------===//
-  // Data Channel Switching Calculation
+  // Data Channel Switching Calculation Variables
   //===----------------------------------------------------------------------===//
   // Data Base nodes used for data propagation through data channels (from scf level profiling)
   std::unordered_set<std::string> profileBaseNodes;
   // Data + Control base nodes
   std::unordered_set<std::string> allDataBaseNode;
+  // mux node to data source map
+  // Format: {"mux_node_name" : {"control" : control_src_node_name, 0 : src_node_name_0, 1 : src_node_name_1}}
+  std::map<std::string, std::map<std::string, std::string>> muxToSrcNodeMap;
+  // Source node to vector of mux and port pair map
+  // Format: {"src_node_name" : [(mux_node_name, corresponding_input_port_id)]}.
+  std::map<std::string, std::vector<std::pair<std::string, unsigned>>> srcNodeToMuxMap;
+  // Control_merge to mux node map
+  // The control port of the mux node is always connecting to a control_merge node
+  std::map<std::string, std::vector<std::string>> cmToMuxMap;
 
   // 
   //  Internal Storing Variables
@@ -268,7 +293,7 @@ public:
   unsigned cfdfcII = 0;                                       // The II of the cfdfc
   std::string baseNode;                                       // The node that serves as the base point for path calculation
   std::vector<std::string> segStartNodes;                     // Vector storing all starting nodes in the segment
-  std::map<std::string, std::unique_ptr<AdjNode>> nodes;      // Map from unit name to the corresponding node storing structure
+  std::map<std::string, std::shared_ptr<AdjNode>> nodes;      // Map from unit name to the corresponding node storing structure
   std::vector<std::pair<std::string, std::string>> backedges; // Vector storing all backedges in the Adjacency graph;
   // Map storing the global order (actual start time) of different nodes in the graph
   // the format is like : {node_name : (start_node, delay)}
@@ -280,7 +305,6 @@ public:
   std::map<std::string, int> startBaseNodeShiftMap;
   // List storing the name of nodes in the graph in program order
   std::vector<std::string> orderedNodeName;
-  
 };
 
 //===----------------------------------------------------------------------===//

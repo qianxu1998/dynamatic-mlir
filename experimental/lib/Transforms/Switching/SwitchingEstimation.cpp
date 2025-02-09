@@ -194,12 +194,19 @@ void SwitchingEstimationPass::calDataChannelSwitching(mlir::ModuleOp& topModule,
   llvm::dbgs() << "[DEBUG]  [SS2] Get all the database nodes in each segments\n";
   getDataBaseNodes(switchInfo, profileResults);
   //! Testing
-  for (auto& [segLabel, selDB]: switchInfo.segToDataBaseVecMap) {
-    llvm::dbgs() << "[DEBUG] \t[SEGMENT] " << segLabel << "\n";
-    printDataBaseNodesTriple(selDB);
-  }
+  // for (auto& [segLabel, selDB]: switchInfo.segToDataBaseVecMap) {
+  //   llvm::dbgs() << "[DEBUG] \t[SEGMENT] " << segLabel << "\n";
+  //   printDataBaseNodesTriple(selDB);
+  // }
 
-  
+  // Step 3: Contruct the data source node info of mux, condbr and mem node
+  llvm::dbgs() << "[DEBUG]  [SS3] Construct the data source node storing structure for different nodes in the dataflow graph\n";
+  switchInfo.dataflowGraph->buildMuxSrcMap();
+
+  //! Testing
+  printMuxToSrcNodeMap(switchInfo.dataflowGraph->muxToSrcNodeMap);
+  printSrcNodeToMuxMap(switchInfo.dataflowGraph->srcNodeToMuxMap);
+
 }
 
 
