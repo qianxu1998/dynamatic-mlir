@@ -16,6 +16,7 @@
 #include "dynamatic/Transforms/BufferPlacement/CFDFC.h"
 #include "mlir/IR/Attributes.h"
 #include "dynamatic/Dialect/Handshake/HandshakeAttributes.h"
+#include "experimental/Transforms/Switching/DataChannelCal.h"
 #include "experimental/Support/StdProfiler.h"
 #include "dynamatic/Support/TimingModels.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -96,6 +97,8 @@ struct SwitchingInfo {
   std::map<std::pair<unsigned, unsigned>, std::vector<std::pair<std::string, unsigned>>> bbPairToCMResultMap;
   // Map from segment index to dataBaseNode struct
   std::map<std::string, DataBaseNodesTriple> segToDataBaseVecMap;
+  // Map from node name to DataBase class
+  std::map<std::string, DataBase> dfgBaseNodeValueMap;
 };
 
 // Class used to construct the per segment (MG & one-time execution segment)

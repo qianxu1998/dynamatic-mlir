@@ -172,6 +172,13 @@ void DataBase::printDetail() {
   }
 }
 
+void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo, SCFProfilingResult &profileResults) {
+  // Iterate all profile base node in the dataflow graph
+  for (const auto& selNode: switchInfo.dataflowGraph->profileBaseNodes) {
+    
+  }
+}
+
 
 //===----------------------------------------------------------------------===//
 //

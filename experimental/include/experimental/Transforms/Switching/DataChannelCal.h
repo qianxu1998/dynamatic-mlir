@@ -61,7 +61,8 @@ void constructBBPairToCMResMap(SwitchingInfo &switchInfo);
 //         -- Start Nodes
 void getDataBaseNodes(SwitchingInfo &switchInfo, SCFProfilingResult &profileResults);
 
-
+// This funcitonn updates the ori_data for all base nodes in the dfg
+void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo, SCFProfilingResult &profileResults);
 
 //===----------------------------------------------------------------------===//
 //
