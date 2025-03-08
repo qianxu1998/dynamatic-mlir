@@ -16,7 +16,6 @@
 #include "dynamatic/Transforms/BufferPlacement/CFDFC.h"
 #include "mlir/IR/Attributes.h"
 #include "dynamatic/Dialect/Handshake/HandshakeAttributes.h"
-#include "experimental/Transforms/Switching/DataChannelCal.h"
 #include "experimental/Support/StdProfiler.h"
 #include "dynamatic/Support/TimingModels.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -42,6 +41,7 @@ using namespace dynamatic::handshake;
 class AdjNode;
 class AdjGraph;
 class Path;
+class DataBase;
 
 // Struct used to store all the data source nodes in differernt segments in the dfg
 // We have this kind of definiton as we obtain the profiling results from scf level
@@ -94,11 +94,11 @@ struct SwitchingInfo {
   //
   // Map from pair of BB sequence to the corresponding control_merge output
   // Format: {(preBB, curBB) : [(control_merge_node, output_value)]}
-  std::map<std::pair<unsigned, unsigned>, std::vector<std::pair<std::string, unsigned>>> bbPairToCMResultMap;
+  std::map<std::pair<unsigned, unsigned>, std::vector<std::pair<std::string, int>>> bbPairToCMResultMap;
   // Map from segment index to dataBaseNode struct
   std::map<std::string, DataBaseNodesTriple> segToDataBaseVecMap;
   // Map from node name to DataBase class
-  std::map<std::string, DataBase> dfgBaseNodeValueMap;
+  std::map<std::string, std::shared_ptr<DataBase>> dfgBaseNodeValueMap;
 };
 
 // Class used to construct the per segment (MG & one-time execution segment)
@@ -384,6 +384,108 @@ const std::set<std::string> NAME_SENSE_LIST = {
   "shli",
   "shrsi"
 };
+
+
+//===----------------------------------------------------------------------===//
+//
+// Class for storing data channel values
+//
+//===----------------------------------------------------------------------===//
+// A small sruct for storing a single "(value, iterIndex)" pair
+struct ValueIter {
+  int value;
+  unsigned iterIndex;
+};
+
+// Struct storing the list of nodes used for data value updates
+struct MgNodeInfo {
+  // "original" => vector of strings
+  std::vector<std::string> original;
+  // "glitch" => vector of strings
+  std::vector<std::string> glitch;
+  // Following two vectors are specific for control_merge nodes
+  std::vector<std::string> control;
+  std::vector<std::string> data;
+  // "datawidth" => map from string to unsigned
+  std::map<std::string, unsigned> dataWidthMap;
+};
+
+// Class used to store information for the finished node that's needed for data propagation
+// The instances of this class shall be stored globally, as this will be used for the update of all segments
+class DataBase {
+public:
+
+  DataBase(const std::string &node);
+
+  virtual ~DataBase() = default;
+
+  void printDetail();
+
+  // 
+  //  Internal Storing Variables
+  //
+  // Node name
+  std::string nodeName;
+
+  // Key: iteration_index -> single (value, iteration) pair
+  // TODO: remove the redudant index information
+  std::map<unsigned, ValueIter> originalDataOut;
+  
+  // Map from iter_index to value Vec with glitch values
+  std::map<unsigned, std::vector<int>> oriGlitchDataOut;
+
+  // Map from segindex to succeeding node storing structure
+  std::map<std::string, MgNodeInfo> segSucNodeMap;
+
+  // For control merge node, we need to store the controlDataOut info as well
+  std::map<unsigned, ValueIter> controlDataOut;
+
+  // Support LLVM node casting
+  enum class NodeKind {DataBaseKind, CMergeDataKind};
+
+  // By default, an DataBase has kind = DataBaseKind
+  virtual NodeKind getKind() const { return NodeKind::DataBaseKind; }
+
+  // "classof " used by llvm casting
+  static bool classof(const DataBase *node) {
+    return node->getKind() == NodeKind::DataBaseKind;
+  }
+
+  //
+  unsigned lastUpdateIndex;
+  bool skipControlCal;
+};
+
+class CMergeData: public DataBase {
+public:
+  CMergeData(const std::string &nodeName): DataBase(nodeName) {}
+
+  void printDetail();
+
+  // LLVM casting support
+  NodeKind getKind() const override { return NodeKind::CMergeDataKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const DataBase *node) {
+    return node->getKind() == NodeKind::CMergeDataKind;
+  }
+
+  // 
+  //  Internal Storing Variables
+  //
+  // ControlMerge node has one more data out port: control dataout
+  std::map<unsigned, ValueIter> controlDataOut;
+
+  // Per CFDFC storing structure
+  // Format:
+  // {"mg_label": {"control": control_dataout_node_list; "data": data_channel_node_list}}
+  std::map<std::string, MgNodeInfo> mgSucNodeDict;
+
+  // Vector to store the control glitch value
+  std::vector<int> controlGlitchVec;
+};
+
+
 
 //===----------------------------------------------------------------------===//
 //

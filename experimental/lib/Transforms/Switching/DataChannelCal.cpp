@@ -35,7 +35,7 @@ void constructBBPairToCMResMap(SwitchingInfo &switchInfo) {
     // The input of a control_merge node will not be from a block argument, 
     // so we don't check it
     auto opOperands = CMOp.getOperands();
-    for (unsigned i = 0; i < opOperands.size(); i++) {
+    for (int i = 0; i < opOperands.size(); i++) {
       auto inputSrcOp = opOperands[i].getDefiningOp();
       unsigned preBB;
       if (std::optional<unsigned> optBB = getLogicBB(inputSrcOp); !optBB.has_value())
@@ -172,11 +172,174 @@ void DataBase::printDetail() {
   }
 }
 
+void CMergeData::printDetail() {
+  llvm::dbgs() << "Node Name: " << nodeName << "\n";
+
+  // Print originalDataOut
+  llvm::dbgs() << "\tOriginal Dataout:\n";
+  for (const auto &kv : originalDataOut) {
+    llvm::dbgs() << "\t\tIter " << kv.first << ": ("
+              << kv.second.value << ", " << kv.second.iterIndex << ")\n";
+  }
+
+  llvm::dbgs() << "\tControl Dataout:\n";
+  for (const auto &kv : controlDataOut) {
+    llvm::dbgs() << "\t\tIter " << kv.first << ": ("
+              << kv.second.value << ", " << kv.second.iterIndex << ")\n";
+  }
+
+  // Print mg_suc_node_dict, which is a map<mg_label, MgInfo>
+  for (const auto &mgPair : mgSucNodeDict) {
+    const std::string &mgLabel = mgPair.first;
+    const MgNodeInfo &info = mgPair.second;
+
+    llvm::dbgs() << "\tCFDFC/Segment Label: " << mgLabel << "\n";
+    // Print "original"
+    llvm::dbgs() << "\t\tcontrol = [";
+    for (size_t i = 0; i < info.original.size(); ++i) {
+      llvm::dbgs() << info.original[i];
+      if (i + 1 < info.original.size()) llvm::dbgs() << ", ";
+    }
+    llvm::dbgs() << "]\n";
+    // Print "glitch"
+    llvm::dbgs() << "\t\tdata = [";
+    for (size_t i = 0; i < info.glitch.size(); ++i) {
+      llvm::dbgs() << info.glitch[i];
+      if (i + 1 < info.glitch.size()) llvm::dbgs() << ", ";
+    }
+    llvm::dbgs() << "]\n";
+    // Print data_width
+    llvm::dbgs() << "\t\tdata_width:\n";
+    for (const auto &dw : info.dataWidthMap) {
+      llvm::dbgs() << "\t\t  " << dw.first << " => " << dw.second << "\n";
+    }
+  }
+
+  // if this is a control merge node
+  if (controlGlitchVec.size()) {
+    llvm::dbgs() << "\tControl glitch Dataout:\n\t";
+    for (const auto &kv : controlGlitchVec) {
+      llvm::dbgs() << std::to_string(kv) << " ,";
+    }
+    llvm::dbgs() << "\n";
+  }
+}
+
+unsigned getExecutionIter(unsigned bbIndex, unsigned curBB, SCFProfilingResult &profileResults) {
+  unsigned iterIndex = profileResults.bbToIterMap[bbIndex];
+
+  if (curBB == profileResults.executedBBTrace[iterIndex - 1] || (bbIndex == 1)) {
+    return iterIndex - 1;
+  }
+  return iterIndex;
+}
+
 void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo, SCFProfilingResult &profileResults) {
+  // [Step 1]
   // Iterate all profile base node in the dataflow graph
   for (const auto& selNode: switchInfo.dataflowGraph->profileBaseNodes) {
-    
+    // Define tmp storing structure
+    switchInfo.dfgBaseNodeValueMap[selNode] = std::make_shared<DataBase>(selNode);
+
+    // Check the type of node
+    if (selNode.find("cmp") != std::string::npos) {
+      for (const auto& [value, iterIdx] : profileResults.opNameToValueListMap[selNode]) {
+        // Create the value struct
+        ValueIter tmpValuePair = {std::abs(value), iterIdx};
+        switchInfo.dfgBaseNodeValueMap[selNode]->originalDataOut[iterIdx] = tmpValuePair;
+      }
+
+      //! Testing
+      // switchInfo.dfgBaseNodeValueMap[selNode]->printDetail();
+    } else if (selNode.find("constant") != std::string::npos) {
+      // We need to get the constant value from the attribute
+      // Get the mlir op
+      auto nodeOp = dyn_cast<handshake::ConstantOp>(switchInfo.dataflowGraph->nodes[selNode]->op);
+      auto valueAttr = nodeOp->getAttrOfType<IntegerAttr>("value");
+      if (!valueAttr) {
+        llvm::errs() << "[ERROR] Can't get the value for the constant op\n";
+      }
+      int constantValue = valueAttr.getInt();
+      
+      // Update the value in the vec list
+      ValueIter tmpValuePair = {constantValue, 0};
+      switchInfo.dfgBaseNodeValueMap[selNode]->originalDataOut[0] = tmpValuePair;
+
+      //! Testing
+      // switchInfo.dfgBaseNodeValueMap[selNode]->printDetail();
+    } else if (selNode.find("source") != std::string::npos) {
+      ValueIter tmpValuePair = {0, 0};
+      switchInfo.dfgBaseNodeValueMap[selNode]->originalDataOut[0] = tmpValuePair;
+    } else {
+      for (const auto& [value, iterIdx] : profileResults.opNameToValueListMap[selNode]) {
+        ValueIter tmpValuePair = {value, iterIdx};
+        switchInfo.dfgBaseNodeValueMap[selNode]->originalDataOut[iterIdx] = tmpValuePair;
+      }
+
+      //! Testing
+      // switchInfo.dfgBaseNodeValueMap[selNode]->printDetail();
+    }
   }
+
+  // [Step 2]
+  // Iterate over all CMerge and MUX node
+  for (const auto& selNode: switchInfo.dataflowGraph->allDataBaseNode) {
+    // Check the type of the nodes
+    if (selNode.find("control_merge") != std::string::npos) {
+      switchInfo.dfgBaseNodeValueMap[selNode] = std::make_shared<CMergeData>(selNode);
+    } else if (selNode.find("mux") != std::string::npos) {
+      switchInfo.dfgBaseNodeValueMap[selNode] = std::make_shared<DataBase>(selNode);
+    }
+  }
+
+
+
+  // [Step 3]
+  // Define 
+  // Traverse the executed BB trace
+  // Skip the first BB, as it will always be BB 0
+  for (unsigned i = 1; i < profileResults.executedBBTrace.size(); i++) {
+    unsigned preBB = profileResults.executedBBTrace[i - 1];
+    unsigned curBB = profileResults.executedBBTrace[i];
+
+    std::pair<unsigned,unsigned> key_pair(preBB, curBB);
+
+    // Get the corresponding control merge value
+    // [Step 3.1] We first update the value of all influenced control_merge node in the circuit
+    auto itCM = switchInfo.bbPairToCMResultMap.find(key_pair);
+    if (itCM != switchInfo.bbPairToCMResultMap.end()) {
+      // Iterate over all (CMNode, output value) pairs
+      // TODO: Check whether the value stored match the simulation or not
+      for (auto selValuePair : itCM->second) {
+        auto nodeName = selValuePair.first;
+        int  outValue = selValuePair.second;
+        unsigned iterIndex = getExecutionIter(i, curBB, profileResults);
+        
+        //! Testing
+        llvm::dbgs() << "[DEBUG] \t\tConMerge Node: " << nodeName << "\n";
+        llvm::dbgs() << "[DEBUG] \t\t\tCon output Value: " << outValue << "\n";
+        llvm::dbgs() << "[DEBUG] \t\t\tIter Index: " << iterIndex << "\n";
+
+        // Update the value
+        auto selConMergeNode = dyn_cast<CMergeData>(switchInfo.dfgBaseNodeValueMap[nodeName].get());
+
+        // Data output for the control merge node, we assign -1 to it 
+        ValueIter tmpDataValuePair = {-1, iterIndex};
+        selConMergeNode->originalDataOut[iterIndex] = tmpDataValuePair;
+
+        // Control output
+        ValueIter tmpConValuePair = {outValue, iterIndex};
+        selConMergeNode->controlDataOut[iterIndex] = tmpConValuePair;
+
+        // [Step 3.2] Update all related MUX node
+        // Get the list of influenced mux node
+        std::vector<std::string> selMuxVec = switchInfo.dataflowGraph->cmToMuxMap[nodeName];
+        // We may encounter different situation when updating the value for MUX nodes
+        // 
+      }
+    }
+  }
+
 }
 
 

@@ -90,7 +90,7 @@ public:
   std::vector<std::string> executedSegTrace;                  // Vector used to store the execution trace consists of segment labels
   std::map<unsigned, unsigned> bbToIterMap;                   // Map from the index of a BB in the executedBBTrace to the corresponding Iteration index
   std::map<unsigned, std::pair<std::string, unsigned>> execPhaseToSegExecNumMap;     // Map from execution stage to (segLabel, numExec) pair
-  std::map<std::string, std::vector<std::pair<int, unsigned>>> opNameToValueListMap; // Map from Hndshake level opName to the list of value in the data profiling process
+  std::map<std::string, std::vector<std::pair<int, unsigned>>> opNameToValueListMap; // Map from Hndshake level opName to the list of value in the data profiling process, format: (value, iterIdx)
 
   // Map from SCF level op name to Handshake level op name
   std::map<std::string, std::string> scfToHandshakeNameMap;

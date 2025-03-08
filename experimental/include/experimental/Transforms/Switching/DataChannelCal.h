@@ -64,61 +64,8 @@ void getDataBaseNodes(SwitchingInfo &switchInfo, SCFProfilingResult &profileResu
 // This funcitonn updates the ori_data for all base nodes in the dfg
 void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo, SCFProfilingResult &profileResults);
 
-//===----------------------------------------------------------------------===//
-//
-// Class for storing data channel values
-//
-//===----------------------------------------------------------------------===//
-// A small sruct for storing a single "(value, iterIndex)" pair
-struct ValueIter {
-  int value;
-  int iterIndex;
-};
-
-// Struct storing the list of nodes used for 
-struct MgNodeInfo {
-  // "original" => vector of strings
-  std::vector<std::string> original;
-  // "glitch" => vector of strings
-  std::vector<std::string> glitch;
-  // "datawidth" => map from string to unsigned
-  std::map<std::string, unsigned> dataWidthMap;
-};
-
-// Class used to store information for the finished node that's needed for data propagation
-// The instances of this class shall be stored globally, as this will be used for the update of all segments
-class DataBase {
-public:
-
-  DataBase(const std::string &node);
-
-  virtual ~DataBase() = default;
-
-  void printDetail();
-
-  // 
-  //  Internal Storing Variables
-  //
-  // Node name
-  std::string nodeName;
-
-  // Key: iteration_index -> single (value, iteration) pair
-  std::map<unsigned, ValueIter> originalDataOut;
-  
-  // Map from iter_index to value Vec with glitch values
-  std::map<unsigned, std::vector<int>> oriGlitchDataOut;
-
-  // Map from segindex to succeeding node storing structure
-  std::map<std::string, MgNodeInfo> segSucNodeMap;
-
-  // For control merge node, we need to store the controlDataOut info as well
-  std::map<unsigned, ValueIter> controlDataOut;
-
-  //
-  unsigned lastUpdateIndex;
-  bool skipControlCal;
-};
-
+// This function returns the execution iter index based on the given bb_index
+unsigned getExecutionIter(unsigned bbIndex, unsigned curBB, SCFProfilingResult &profileResults);
 //===----------------------------------------------------------------------===//
 //
 // Helper function for debuging

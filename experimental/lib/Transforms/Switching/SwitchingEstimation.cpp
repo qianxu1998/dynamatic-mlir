@@ -201,6 +201,7 @@ void SwitchingEstimationPass::calDataChannelSwitching(mlir::ModuleOp& topModule,
 
   // Step 3: Contruct the data source node info of mux, condbr and mem node
   llvm::dbgs() << "[DEBUG]  [SS3] Construct the data source node storing structure for different nodes in the dataflow graph\n";
+  // TODO: Sometimes the source node of a mux node is from the block argumnet, need to add new nodes in the grpah.
   switchInfo.dataflowGraph->buildMuxSrcMap();
   switchInfo.dataflowGraph->buildCondandStoreSrcMap();
 
@@ -214,6 +215,7 @@ void SwitchingEstimationPass::calDataChannelSwitching(mlir::ModuleOp& topModule,
 
   // Step 4: Update value for all data base nodes
   llvm::dbgs() << "[DEBUG]  [SS4] Update the value for data base nodes\n";
+  dataChannelBaseNodesValueUpdate(switchInfo, profileResults);
   
 }
 
