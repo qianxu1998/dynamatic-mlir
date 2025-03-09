@@ -216,17 +216,11 @@ void SwitchingEstimationPass::calDataChannelSwitching(mlir::ModuleOp& topModule,
   // Step 4: Update value for all data base nodes
   llvm::dbgs() << "[DEBUG]  [SS4] Update the value for data base nodes\n";
   dataChannelBaseNodesValueUpdate(switchInfo, profileResults);
-  
+
+  // Step 5: Build succeeding node list for data base nodes in different segments
+  llvm::dbgs() << "[DEBUG]  [SS5] Build succeeding node list\n";
+  conSegSuccNodesList(switchInfo, profileResults);
 }
-
-
-
-
-//===----------------------------------------------------------------------===//
-//
-// Information Extraction
-//
-//===----------------------------------------------------------------------===//
 
 
 

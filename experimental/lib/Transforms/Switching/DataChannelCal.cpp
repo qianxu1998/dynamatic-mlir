@@ -292,7 +292,8 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo, SCFProfilingResu
     }
   }
 
-
+  // Define temporary storing structure
+  std::map<std::string, int> tmpMuxOutputMap;
 
   // [Step 3]
   // Define 
@@ -316,9 +317,10 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo, SCFProfilingResu
         unsigned iterIndex = getExecutionIter(i, curBB, profileResults);
         
         //! Testing
-        llvm::dbgs() << "[DEBUG] \t\tConMerge Node: " << nodeName << "\n";
-        llvm::dbgs() << "[DEBUG] \t\t\tCon output Value: " << outValue << "\n";
-        llvm::dbgs() << "[DEBUG] \t\t\tIter Index: " << iterIndex << "\n";
+        // llvm::dbgs() << "[DEBUG] \t\tConMerge Node: " << nodeName << "\n";
+        // llvm::dbgs() << "[DEBUG] \t\t\tCon output Value: " << outValue << "\n";
+        // llvm::dbgs() << "[DEBUG] \t\t\tIter Index: " << iterIndex << "\n";
+        // llvm::dbgs() << "[DEBUG] \t\t\tIter Index: " << iterIndex << "\n";
 
         // Update the value
         auto selConMergeNode = dyn_cast<CMergeData>(switchInfo.dfgBaseNodeValueMap[nodeName].get());
@@ -331,14 +333,223 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo, SCFProfilingResu
         ValueIter tmpConValuePair = {outValue, iterIndex};
         selConMergeNode->controlDataOut[iterIndex] = tmpConValuePair;
 
+        // Define the Vector for unupdated mux
+        std::vector<std::string> tmpUnUpdatedMux;
         // [Step 3.2] Update all related MUX node
         // Get the list of influenced mux node
         std::vector<std::string> selMuxVec = switchInfo.dataflowGraph->cmToMuxMap[nodeName];
         // We may encounter different situation when updating the value for MUX nodes
-        // 
+        for (const auto& selMuxNode: selMuxVec) {
+          auto selMuxSrcMap = switchInfo.dataflowGraph->muxToSrcNodeMap[selMuxNode];
+          std::string selMuxDataSrcNode = selMuxSrcMap[std::to_string(outValue)];
+
+          int tmpMuxOutput = 0;
+
+          //! Testing
+          // llvm::dbgs() << "[DEBUG] \t\t\t\tMux Node: " << selMuxNode << "; Sel Data Src Node: " << selMuxDataSrcNode << "\n";
+
+          if (selMuxDataSrcNode.find("constant") != std::string::npos || (selMuxDataSrcNode.find("source") != std::string::npos)) {
+            tmpMuxOutput = switchInfo.dfgBaseNodeValueMap[selMuxDataSrcNode]->originalDataOut[0].value;
+          } else {
+            // If the src node is a mux node
+            // TODO: Check the following update logic
+            if (selMuxDataSrcNode.find("mux") != std::string::npos) {
+              // Case 1: the source node is the mux node itself
+              if (selMuxDataSrcNode == selMuxNode){
+                // Use the previous value
+                if (tmpMuxOutputMap.find(selMuxDataSrcNode) != tmpMuxOutputMap.end()) {
+                  tmpMuxOutput = tmpMuxOutputMap[selMuxDataSrcNode];
+                } else {
+                  llvm::dbgs() << "[ERROR-line367] Data src(" << selMuxDataSrcNode << ") of Mux Node: " << selMuxDataSrcNode << ", not found in tmpMuxOutputMap.\n";
+                }
+              } else if (switchInfo.dfgBaseNodeValueMap[selMuxDataSrcNode]->originalDataOut.find(iterIndex) != switchInfo.dfgBaseNodeValueMap[selMuxDataSrcNode]->originalDataOut.end()) {
+                tmpMuxOutput = switchInfo.dfgBaseNodeValueMap[selMuxDataSrcNode]->originalDataOut[iterIndex].value;
+              } else if (tmpMuxOutputMap.find(selMuxDataSrcNode) != tmpMuxOutputMap.end()) {
+                tmpMuxOutput = tmpMuxOutputMap[selMuxDataSrcNode];
+              } else {
+                // TODO: Check the following update logic
+                ValueIter tmpInnerMuxValuePair = {tmpMuxOutput, iterIndex - 1};
+                switchInfo.dfgBaseNodeValueMap[selMuxDataSrcNode]->originalDataOut[iterIndex - 1] = tmpInnerMuxValuePair;
+                tmpUnUpdatedMux.push_back(selMuxNode);
+
+                continue;
+              }
+            } else {
+              tmpMuxOutput = switchInfo.dfgBaseNodeValueMap[selMuxDataSrcNode]->originalDataOut[iterIndex].value;
+            }
+          }
+
+          // Update the storing structure and the tmp dict
+          //! Testing
+          // llvm::dbgs() << "[DEBUG] \t\t\t\t[OutValue] " << tmpMuxOutput << "\n";
+
+          ValueIter tmpMuxValuePair = {tmpMuxOutput, iterIndex};
+          switchInfo.dfgBaseNodeValueMap[selMuxNode]->originalDataOut[iterIndex] = tmpMuxValuePair;
+          tmpMuxOutputMap[selMuxNode] = tmpMuxOutput;
+        }
+
+        //! Testing
+        // llvm::dbgs() << "[DEBUG] \t\t\tRemaining Mux Nodes:\n";
+        // llvm::dbgs() << "[DEBUG] \t\t\t\tTmp Mux Output Map\n";
+        // for (const auto& [key, value] : tmpMuxOutputMap) {
+        //   llvm::dbgs() << "[DEBUG] \t\t\t\t\tNode: " << key << ", Value: " << value << "\n";
+        // }
+
+        // Update all remaining mux nodes
+        // TODO: This maybe useless, please check
+        for (const auto& leftMuxNode: tmpUnUpdatedMux) {
+          auto selMuxSrcMap = switchInfo.dataflowGraph->muxToSrcNodeMap[leftMuxNode];
+          std::string selMuxDataSrcNode = selMuxSrcMap[std::to_string(outValue)];
+          int tmpMuxOutput = 0;
+
+          if (tmpMuxOutputMap.find(selMuxDataSrcNode) != tmpMuxOutputMap.end()) {
+            tmpMuxOutput = tmpMuxOutputMap[selMuxDataSrcNode];
+          } else {
+            llvm::dbgs() << "[ERROR-line407] Data src(" << selMuxDataSrcNode << ") of Mux Node: " << leftMuxNode << ", not found in tmpMuxOutputMap.\n";
+          }
+          
+          ValueIter tmpMuxValuePair = {tmpMuxOutput, iterIndex};
+          switchInfo.dfgBaseNodeValueMap[leftMuxNode]->originalDataOut[iterIndex] = tmpMuxValuePair;
+        }
       }
     }
   }
+
+}
+
+void conSegSuccNodesList(SwitchingInfo &switchInfo, SCFProfilingResult &profileResults) {
+  //! Testing
+  for (const auto& [label, bblist]: switchInfo.segToBBListMap) {
+    llvm::dbgs() << "[DEBUG] \t\tSeg Label: " << label << "\n";
+    llvm::dbgs() << "[DEBUG] \t\t\tBB List: ";
+    for (const auto& selBB : bblist) {
+      llvm::dbgs() << selBB << ", ";
+    }
+    llvm::dbgs() << "\n";
+  }
+
+  for (const auto& selBaseNode: switchInfo.dataflowGraph->allDataBaseNode) {
+    if (selBaseNode.find("control_merge") != std::string::npos) {
+      // If this is a control_merge node
+      auto selCMNode = dyn_cast<CMergeNode>(switchInfo.dataflowGraph->nodes[selBaseNode].get());
+
+      std::string dataSucNode = selCMNode->dataSucNodeName;
+      std::string conSucNode = selCMNode->conSucNodeName;
+
+      for (const auto& [label, bblist]: switchInfo.segToBBListMap) {
+        MgNodeInfo tmpMGInfo;
+        
+      }
+    }
+  }
+  
+}
+
+//===----------------------------------------------------------------------===//
+//
+// Functions for finding the data source node in different segments
+//
+//===----------------------------------------------------------------------===//
+std::vector<std::string> segConMergeSuccSearch(SwitchingInfo &switchInfo, std::string startNode, 
+                                                std::vector<std::string> &excludingList, std::string segLabel) {
+  std::vector<std::string> succNodeList;
+
+  // DFS STACK: None recrusive approach
+  std::vector<std::string> mainStack;
+  std::vector<std::vector<std::string>> adjStack;
+  std::vector<unsigned> segBBList = switchInfo.segToBBListMap[segLabel];
+
+  // Initialization
+  mainStack.push_back(startNode);
+
+  // Construct AdjList
+  std::vector<std::string> initAdjList;
+  for (const auto& selNode: switchInfo.dataflowGraph->nodes[startNode]->sucs) {
+    if (std::find(excludingList.begin(), excludingList.end(), selNode) == excludingList.end() &&
+        (switchInfo.dataflowGraph->allDataBaseNode.find(selNode) == switchInfo.dataflowGraph->allDataBaseNode.end())) initAdjList.push_back(selNode);
+  }
+  adjStack.push_back(initAdjList);
+
+  // We conduct dfs starting from the specified start node in the dfg
+  // The search will stop when encountered following situations:
+  //  - Encountered a node in the data base node list
+  //  - Entering a cond_br / mux node through the conditional channel
+  //  - No node left
+  // We also check all buffer nodes, whether it's inside a specific cfdfc or not
+  while (!mainStack.empty()) {
+    std::vector<std::string> curAdjList = adjStack.back();
+    adjStack.pop_back();
+
+    if (!curAdjList.empty()) {
+      std::string curNode = curAdjList.back();
+      curAdjList.pop_back();
+
+      // Update the adjStack
+      adjStack.push_back(curAdjList);
+
+      // Flag for conditional port
+      bool nonCondFlag = true;
+      bool computeFlag = false;
+
+      // Update compute flag
+      if (switchInfo.dataflowGraph->allDataBaseNode.find(curNode) == switchInfo.dataflowGraph->allDataBaseNode.end()) {
+        // This is not a invalid backedge
+        auto selInvalidBEList = switchInfo.segInvalidBackedgesMap[segLabel];
+        std::pair<std::string, std::string> selPair = std::make_pair(mainStack.back(), curNode);
+        if (std::find(selInvalidBEList.begin(), selInvalidBEList.end(), selPair) == selInvalidBEList.end()) computeFlag = true;
+      }
+
+      // Check whether we can update mainStack or not
+      if (computeFlag) {
+        std::string preNode = mainStack.back();
+
+        if (curNode.find("cond_br") != std::string::npos) {
+          // Check whether this is the conditional channel
+          auto selNode = dyn_cast<CBrNode>(switchInfo.dataflowGraph->nodes[curNode].get());
+          if (preNode == selNode->condPreNodeName) {
+            // TODO: Check this updating condition
+            if (selNode->dataPreNodeName != "") {
+              nonCondFlag = false;
+            }
+          }
+        } else if (curNode.find("mux") != std::string::npos) {
+          // Check whether this is the conditional channel
+          auto selNode = dyn_cast<MuxNode>(switchInfo.dataflowGraph->nodes[curNode].get());
+          if (preNode == selNode->conPreNodeName) nonCondFlag = false;
+        } else if (curNode.find("buffer") != std::string::npos) {
+          unsigned curNodeBB = switchInfo.dataflowGraph->nodes[curNode]->bbindex;
+
+          if (std::find(segBBList.begin(), segBBList.end(), curNodeBB) == segBBList.end()) nonCondFlag = false;
+        }
+
+        // If this is the data channel
+        if (nonCondFlag) {
+          mainStack.push_back(curNode);
+          succNodeList.push_back(curNode);
+
+          // Insert new adjStack
+          std::vector<std::string> tmpAdjList;
+          auto newAdjList = switchInfo.dataflowGraph->nodes[curNode]->sucs;
+
+          for (const auto& selNextNode: newAdjList) {
+            bool inStack = (std::find(mainStack.begin(), mainStack.end(), selNextNode) != mainStack.end());
+            bool inBaseNodeList = (switchInfo.dataflowGraph->allDataBaseNode.find(selNextNode) != switchInfo.dataflowGraph->allDataBaseNode.end());
+            bool isExcluded = (std::find(excludingList.begin(), excludingList.end(), selNextNode) != excludingList.end());
+            if (!inStack && !inBaseNodeList && !isExcluded) tmpAdjList.push_back(selNextNode);
+          }
+
+          adjStack.push_back(tmpAdjList);
+        }
+      }
+    } else {
+      mainStack.pop_back();
+    }
+  }
+
+  return succNodeList;
+}
+
+MgNodeInfo segGeneralSuccSearch(SwitchingInfo &switchInfo, std::string startNode, std::string segLabel) {
 
 }
 

@@ -141,7 +141,7 @@ public:
   // Constructer
   AdjNode(mlir::Operation* selOp, 
           const std::vector<std::string>& predecessors, const std::vector<std::string>& successors, 
-          const std::map<std::string, unsigned>& sucDataWidthMap, const unsigned& latency);
+          const std::map<std::string, unsigned>& sucDataWidthMap, const unsigned& latency, const unsigned& bbIndex);
 
   // This funciton checks whether the handshake channel swiching information updating is finished or not
   bool handshakeUpdateFinished();
@@ -198,6 +198,7 @@ public:
   //
   unsigned nodeLatency = 0;       // Used to store the latency of the chosen node
   mlir::Operation* op;            // Pointer to the operation in the mlir file
+  unsigned bbindex;               // BB index for the node
   // Memory controller is exclueded from the pres and sucs
   std::vector<std::string> pres;  // Vector storing the predecessors of the node in the segemnt
   std::vector<std::string> sucs;  // Vector storing the successors of the node in the segement
@@ -245,7 +246,7 @@ public:
   // and returns a unique pointer to it.
   std::shared_ptr<AdjNode> createNodeFromOperation(mlir::Operation *op,
                                                     std::vector<std::string> &pres, std::vector<std::string> &sucs,
-                                                    unsigned &nodeLatency);
+                                                    unsigned &nodeLatency, unsigned &bbIndex);
 
   // The following function calculates the path latency based on all the information in the MG
   unsigned calPathLatency(const Path &selPath, bool useGlobalOrder);
@@ -291,6 +292,7 @@ public:
   std::map<std::string, std::vector<std::string>> cmToMuxMap;
   // CondBr to control source node map
   std::map<std::string, std::string> condBrToConSrcMap;
+  // Map storing succeeding node list for all data base nodes in each 
 
   // 
   //  Internal Storing Variables

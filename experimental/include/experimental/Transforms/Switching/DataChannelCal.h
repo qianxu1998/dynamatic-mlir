@@ -64,8 +64,24 @@ void getDataBaseNodes(SwitchingInfo &switchInfo, SCFProfilingResult &profileResu
 // This funcitonn updates the ori_data for all base nodes in the dfg
 void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo, SCFProfilingResult &profileResults);
 
+// This function constructs the succeeding node list for different segments (not only MGs)
+void conSegSuccNodesList(SwitchingInfo &switchInfo, SCFProfilingResult &profileResults);
+
 // This function returns the execution iter index based on the given bb_index
 unsigned getExecutionIter(unsigned bbIndex, unsigned curBB, SCFProfilingResult &profileResults);
+
+//===----------------------------------------------------------------------===//
+//
+// Functions for finding the data source node in different segments
+//
+//===----------------------------------------------------------------------===//
+// This function builds the succlist for control merge nodes
+std::vector<std::string> segConMergeSuccSearch(SwitchingInfo &switchInfo, std::string startNode, 
+                                                std::vector<std::string> &excludingList, std::string segLabel);
+
+// This function builds the succlist for general nodes
+MgNodeInfo segGeneralSuccSearch(SwitchingInfo &switchInfo, std::string startNode, std::string segLabel);
+
 //===----------------------------------------------------------------------===//
 //
 // Helper function for debuging

@@ -34,7 +34,7 @@ public:
              const std::vector<std::string> &predecessors,
              const std::vector<std::string> &successors,
              const std::map<std::string, unsigned> &sucDataWidthMap,
-             const unsigned &latency);
+             const unsigned &latency, const unsigned& bbIndex);
 
   // Handshake Counting functions
   void calValidSwitching(const std::string &sucNodeName, unsigned II);
@@ -77,8 +77,8 @@ public:
            const std::vector<std::string> &predecessors,
            const std::vector<std::string> &successors,
            const std::map<std::string, unsigned> &sucDataWidthMap,
-           unsigned latency)
-      : AdjNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+           unsigned latency, const unsigned& bbIndex)
+      : AdjNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
   
   // - calValidSwitching: if either numValid0 or numValid1 > 0, set valid signal to 2;
   //   if both are 0, then set valid signal to 0; if II==1, then also set to 0; otherwise, set to 2.
@@ -125,8 +125,8 @@ public:
            const std::vector<std::string> &predecessors,
            const std::vector<std::string> &successors,
            const std::map<std::string, unsigned> &sucDataWidthMap,
-           unsigned latency)
-      : AdjNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+           unsigned latency, const unsigned& bbIndex)
+      : AdjNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 
   // Handshake counting functions:
   // calValidSwitching: if numValid is 0, set valid signal to 0; else to 2.
@@ -169,8 +169,8 @@ public:
            const std::vector<std::string> &predecessors,
            const std::vector<std::string> &successors,
            const std::map<std::string, unsigned> &sucDataWidthMap,
-           unsigned latency)
-      : JoinNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+           unsigned latency, const unsigned& bbIndex)
+      : JoinNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 
   void calValidSwitching(const std::string &sucNodeName,
                          unsigned &numValid0,
@@ -211,8 +211,8 @@ public:
            const std::vector<std::string> &predecessors,
            const std::vector<std::string> &successors,
            const std::map<std::string, unsigned> &sucDataWidthMap,
-           unsigned latency)
-      : JoinNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+           unsigned latency, const unsigned& bbIndex)
+      : JoinNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 
   void calValidSwitching(const std::string &sucNodeName,
                          unsigned &numValid0,
@@ -253,8 +253,8 @@ public:
            const std::vector<std::string> &predecessors,
            const std::vector<std::string> &successors,
            const std::map<std::string, unsigned> &sucDataWidthMap,
-           unsigned latency)
-      : JoinNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+           unsigned latency, const unsigned& bbIndex)
+      : JoinNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 
   void calValidSwitching(const std::string &sucNodeName,
                          unsigned &numValid0,
@@ -295,8 +295,8 @@ public:
            const std::vector<std::string> &predecessors,
            const std::vector<std::string> &successors,
            const std::map<std::string, unsigned> &sucDataWidthMap,
-           unsigned latency)
-      : JoinNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+           unsigned latency, const unsigned& bbIndex)
+      : JoinNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 
   void calValidSwitching(const std::string &sucNodeName,
                          unsigned &numValid0,
@@ -337,8 +337,8 @@ public:
             const std::vector<std::string> &predecessors,
             const std::vector<std::string> &successors,
             const std::map<std::string, unsigned> &sucDataWidthMap,
-            unsigned latency)
-      : PassNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+            unsigned latency, const unsigned& bbIndex)
+      : PassNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 
   void calValidSwitching(const std::string &sucNodeName,
                          unsigned &numValid) override {
@@ -375,7 +375,7 @@ public:
             const std::vector<std::string> &predecessors,
             const std::vector<std::string> &successors,
             const std::map<std::string, unsigned> &sucDataWidthMap,
-            const unsigned &latency);
+            const unsigned &latency, const unsigned& bbIndex);
 
   // Handshake functions:
   // For valid switching: if num_valid == 0, valid signal is 0; else if > 0, valid signal is 2.
@@ -427,7 +427,7 @@ public:
              const std::vector<std::string> &predecessors,
              const std::vector<std::string> &successors,
              const std::map<std::string, unsigned> &sucDataWidthMap,
-             unsigned latency);
+             unsigned latency, const unsigned& bbIndex);
 
   // Handshake functions for d_store.
   // For valid switching on the memory controller channel (key "mc").
@@ -480,8 +480,8 @@ public:
             const std::vector<std::string> &predecessors,
             const std::vector<std::string> &successors,
             const std::map<std::string, unsigned> &sucDataWidthMap,
-            unsigned latency)
-      : AdjNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+            unsigned latency, const unsigned& bbIndex)
+      : AdjNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 
   // calValidSwitching:
   //   setVList: vector of active valid sets for each input channel.
@@ -525,7 +525,7 @@ public:
              const std::vector<std::string> &predecessors,
              const std::vector<std::string> &successors,
              const std::map<std::string, unsigned> &sucDataWidthMap,
-             unsigned latency);
+             unsigned latency, const unsigned& bbIndex);
 
   // Handshake signal calculation functions
   void calValidSwitching(const std::string &sucNodeName, unsigned II);
@@ -579,7 +579,7 @@ public:
            const std::vector<std::string> &predecessors,
            const std::vector<std::string> &successors,
            const std::map<std::string, unsigned> &sucDataWidthMap,
-           unsigned latency) : AdjNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+           unsigned latency, const unsigned& bbIndex) : AdjNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 
   // Handshake functions:
   // calValidSwitching:
@@ -638,7 +638,7 @@ public:
           const std::vector<std::string> &predecessors,
           const std::vector<std::string> &successors,
           const std::map<std::string, unsigned> &sucDataWidthMap,
-          unsigned latency);
+          unsigned latency, const unsigned& bbIndex);
 
   // Handshake calculation functions:
   // calValidSwitching: Determines valid switching for a given successor based on the condition value and
@@ -710,8 +710,8 @@ public:
            const std::vector<std::string> &predecessors,
            const std::vector<std::string> &successors,
            const std::map<std::string, unsigned> &sucDataWidthMap,
-           unsigned latency)
-      : JoinNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+           unsigned latency, const unsigned& bbIndex)
+      : JoinNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 };
 //===----------------------------------------------------------------------===//
 //
@@ -724,8 +724,8 @@ public:
             const std::vector<std::string> &predecessors,
             const std::vector<std::string> &successors,
             const std::map<std::string, unsigned> &sucDataWidthMap,
-            unsigned latency)
-      : JoinNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+            unsigned latency, const unsigned& bbIndex)
+      : JoinNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 };
 
 
@@ -740,8 +740,8 @@ public:
             const std::vector<std::string> &predecessors,
             const std::vector<std::string> &successors,
             const std::map<std::string, unsigned> &sucDataWidthMap,
-            unsigned latency)
-      : JoinNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+            unsigned latency, const unsigned& bbIndex)
+      : JoinNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 };
 
 //===----------------------------------------------------------------------===//
@@ -764,7 +764,7 @@ public:
           const std::vector<std::string> &predecessors,
           const std::vector<std::string> &successors,
           const std::map<std::string, unsigned> &sucDataWidthMap,
-          unsigned latency);
+          unsigned latency, const unsigned& bbIndex);
 
   // Handshake functions:
   // calValidSwitching: If II == 1, the valid signal is 0; otherwise, it is 2.
@@ -834,8 +834,8 @@ public:
              const std::vector<std::string> &predecessors,
              const std::vector<std::string> &successors,
              const std::map<std::string, unsigned> &sucDataWidthMap,
-             unsigned latency)
-      : PassNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+             unsigned latency, const unsigned& bbIndex)
+      : PassNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 };
 
 //===----------------------------------------------------------------------===//
@@ -849,8 +849,8 @@ public:
             const std::vector<std::string> &predecessors,
             const std::vector<std::string> &successors,
             const std::map<std::string, unsigned> &sucDataWidthMap,
-            unsigned latency)
-      : PassNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+            unsigned latency, const unsigned& bbIndex)
+      : PassNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 };
 
 //===----------------------------------------------------------------------===//
@@ -864,8 +864,8 @@ public:
                const std::vector<std::string> &predecessors,
                const std::vector<std::string> &successors,
                const std::map<std::string, unsigned> &sucDataWidthMap,
-               unsigned latency)
-      : PassNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+               unsigned latency, const unsigned& bbIndex)
+      : PassNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 };
 
 //===----------------------------------------------------------------------===//
@@ -879,8 +879,8 @@ public:
           const std::vector<std::string> &predecessors,
           const std::vector<std::string> &successors,
           const std::map<std::string, unsigned> &sucDataWidthMap,
-          unsigned latency)
-      : JoinNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+          unsigned latency, const unsigned& bbIndex)
+      : JoinNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 };
 //===----------------------------------------------------------------------===//
 //
@@ -893,8 +893,8 @@ public:
            const std::vector<std::string> &predecessors,
            const std::vector<std::string> &successors,
            const std::map<std::string, unsigned> &sucDataWidthMap,
-           unsigned latency)
-      : JoinNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+           unsigned latency, const unsigned& bbIndex)
+      : JoinNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 };
 
 //===----------------------------------------------------------------------===//
@@ -908,8 +908,8 @@ public:
              const std::vector<std::string> &predecessors,
              const std::vector<std::string> &successors,
              const std::map<std::string, unsigned> &sucDataWidthMap,
-             unsigned latency)
-      : AdjNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+             unsigned latency, const unsigned& bbIndex)
+      : AdjNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 
   void calValidSwitching(const std::string &sucNodeName) {
     validSignal[sucNodeName] = 0;
@@ -946,8 +946,8 @@ public:
            const std::vector<std::string> &predecessors,
            const std::vector<std::string> &successors,
            const std::map<std::string, unsigned> &sucDataWidthMap,
-           unsigned latency)
-      : AdjNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+           unsigned latency, const unsigned& bbIndex)
+      : AdjNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 };
 
 //----------------------------------------------------------------------------
@@ -959,8 +959,8 @@ public:
            const std::vector<std::string> &predecessors,
            const std::vector<std::string> &successors,
            const std::map<std::string, unsigned> &sucDataWidthMap,
-           unsigned latency)
-      : AdjNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+           unsigned latency, const unsigned& bbIndex)
+      : AdjNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 
   // For SinkNode, valid switching and valid set are not defined by hardware;
   // They are intended to be provided via profiling.
@@ -994,7 +994,7 @@ public:
             const std::vector<std::string> &predecessors,
             const std::vector<std::string> &successors,
             const std::map<std::string, unsigned> &sucDataWidthDict,
-            unsigned latency);
+            unsigned latency, const unsigned& bbIndex);
 
   // Handshake functions:
   /// Set the valid switching value for a given successor to 2.
@@ -1017,8 +1017,8 @@ public:
            const std::vector<std::string> &predecessors,
            const std::vector<std::string> &successors,
            const std::map<std::string, unsigned> &sucDataWidthMap,
-           unsigned latency)
-      : AdjNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+           unsigned latency, const unsigned& bbIndex)
+      : AdjNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 };
 
 class LSQNode : public AdjNode {
@@ -1027,8 +1027,8 @@ public:
            const std::vector<std::string> &predecessors,
            const std::vector<std::string> &successors,
            const std::map<std::string, unsigned> &sucDataWidthMap,
-           unsigned latency)
-      : AdjNode(op, predecessors, successors, sucDataWidthMap, latency) {}
+           unsigned latency, const unsigned& bbIndex)
+      : AdjNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 };
 
 #endif // EXPERIMENTAL_TRANSFORMS_SWITCHING_EXECUTION_MODEL_H

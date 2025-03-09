@@ -23,8 +23,8 @@ BufferNode::BufferNode(mlir::Operation *op,
                        const std::vector<std::string> &predecessors,
                        const std::vector<std::string> &successors,
                        const std::map<std::string, unsigned> &sucDataWidthMap,
-                       const unsigned &latency)
-    : AdjNode(op, predecessors, successors, sucDataWidthMap, latency),
+                       const unsigned &latency, const unsigned& bbIndex)
+    : AdjNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex),
       START(0), occupancy(0.0), numSlots(0), transparent(false) {}
 
 
@@ -220,8 +220,8 @@ DLoadNode::DLoadNode(mlir::Operation *op,
                      const std::vector<std::string> &predecessors,
                      const std::vector<std::string> &successors,
                      const std::map<std::string, unsigned> &sucDataWidthMap,
-                     const unsigned &latency)
-  : AdjNode(op, predecessors, successors, sucDataWidthMap, latency) {
+                     const unsigned &latency, const unsigned &bbIndex)
+  : AdjNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {
   // Get the LoadOp
   auto loadOp = dyn_cast<handshake::LoadOp>(op);
   auto dataOutRes = loadOp.getDataResult();
@@ -328,8 +328,8 @@ DStoreNode::DStoreNode(mlir::Operation *op,
                        const std::vector<std::string> &predecessors,
                        const std::vector<std::string> &successors,
                        const std::map<std::string, unsigned> &sucDataWidthMap,
-                       unsigned latency)
-    : AdjNode(op, predecessors, successors, sucDataWidthMap, latency) {
+                       unsigned latency, const unsigned& bbIndex)
+    : AdjNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {
   // Add the data channel to the mem_controller
   unsigned dataWidth = 0;
   for (const auto& selPair : sucDataWidthMap) {
@@ -543,8 +543,8 @@ CMergeNode::CMergeNode(mlir::Operation *op,
                        const std::vector<std::string> &predecessors,
                        const std::vector<std::string> &successors,
                        const std::map<std::string, unsigned> &sucDataWidthMap,
-                       unsigned latency)
-  : AdjNode(op, predecessors, successors, sucDataWidthMap, latency) {
+                       unsigned latency, const unsigned &bbIndex)
+  : AdjNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {
 
   // Determine the control and data channel successor names.
   // We assume that the mapping sucDataWidthMap associates each successor name with a port number.
@@ -825,8 +825,8 @@ CBrNode::CBrNode(mlir::Operation *op,
                  const std::vector<std::string> &predecessors,
                  const std::vector<std::string> &successors,
                  const std::map<std::string, unsigned> &sucDataWidthMap,
-                 unsigned latency)
-    : AdjNode(op, predecessors, successors, sucDataWidthMap, latency),
+                 unsigned latency, const unsigned &bbIndex)
+    : AdjNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex),
       lastValidDataValue(-1)
 {
   // Get the ConditionalBranch node
@@ -984,12 +984,13 @@ MuxNode::MuxNode(mlir::Operation *op,
                  const std::vector<std::string> &predecessors,
                  const std::vector<std::string> &successors,
                  const std::map<std::string, unsigned> &sucDataWidthMap,
-                 unsigned latency)
+                 unsigned latency, const unsigned& bbIndex)
     : AdjNode(op,
               predecessors,
               successors,
               sucDataWidthMap,
-              latency)
+              latency,
+              bbIndex)
 {
   // Get the operator
   auto muxOp = dyn_cast<handshake::MuxOp>(op);
@@ -1148,8 +1149,8 @@ StartNode::StartNode(mlir::Operation *op,
                      const std::vector<std::string> &predecessors,
                      const std::vector<std::string> &successors,
                      const std::map<std::string, unsigned> &sucDataWidthDict,
-                     unsigned latency)
-    : AdjNode(op, predecessors, successors, sucDataWidthDict, latency) {
+                     unsigned latency, const unsigned &bbIndex)
+    : AdjNode(op, predecessors, successors, sucDataWidthDict, latency, bbIndex) {
   // No extra initialization needed.
 }
 

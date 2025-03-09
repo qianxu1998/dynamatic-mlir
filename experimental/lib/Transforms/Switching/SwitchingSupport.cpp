@@ -51,13 +51,14 @@ void SwitchingInfo::insertBE(unsigned srcBB, unsigned dstBB, StringRef mgLabel) 
 //===----------------------------------------------------------------------===//
 AdjNode::AdjNode(mlir::Operation* selOp, 
           const std::vector<std::string>& predecessors, const std::vector<std::string>& successors, 
-          const std::map<std::string, unsigned>& sucDataWidthMap, const unsigned& latency) {
+          const std::map<std::string, unsigned>& sucDataWidthMap, const unsigned& latency, const unsigned& bbIndex) {
   // Initialize all variables
   this->op = selOp;
   this->pres = predecessors;
   this->sucs = successors;
   this->sucsDataWidthMap = sucDataWidthMap;
   this->nodeLatency = latency;
+  this->bbindex = bbIndex;
 
   // Initialize toggle count map
   for (auto& [key, value] : sucsDataWidthMap) {
@@ -370,6 +371,15 @@ AdjGraph::AdjGraph(const buffer::CFDFC& cfdfc, const TimingDatabase& timingDB,
     // Get the unit latency
     unsigned nodeLatency = extractNodeLatency(selNode, timingDB);
 
+    // Get the BB index
+    auto nodeBBIndexAttr = selNode->getAttrOfType<IntegerAttr>("handshake.bb");
+    unsigned nodeBBIndex = 100;
+    if (!nodeBBIndexAttr) {
+      llvm::dbgs() << "[DEBUG] Can't get the BB index of the op: " << unitName << "\n";
+    } else {
+      nodeBBIndex = nodeBBIndexAttr.getUInt();
+    }
+
     //! Testing
     // llvm::dbgs() << "[DEBUG] \t=================================\n";
     // llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n";
@@ -377,7 +387,7 @@ AdjGraph::AdjGraph(const buffer::CFDFC& cfdfc, const TimingDatabase& timingDB,
 
     // Step 2.1: Construct the node storing structure
     auto newNode = createNodeFromOperation(
-      selNode, nodeToPresMap[unitName], nodeToSucsMap[unitName], nodeLatency);
+      selNode, nodeToPresMap[unitName], nodeToSucsMap[unitName], nodeLatency, nodeBBIndex);
 
     if (!newNode) continue;
 
@@ -435,8 +445,18 @@ AdjGraph::AdjGraph(const TimingDatabase& timingDB, const unsigned &II,
 
     unsigned nodeLatency = extractNodeLatency(&op, timingDB);
 
+    // Get the BB index
+    auto nodeBBIndexAttr = op.getAttrOfType<IntegerAttr>("handshake.bb");
+    // We assign a large number to those nodes without a bbIndex
+    unsigned nodeBBIndex = 100;
+    if (!nodeBBIndexAttr) {
+      llvm::dbgs() << "[DEBUG] Can't get the BB index of the op: " << unitName << "\n";
+    } else {
+      nodeBBIndex = nodeBBIndexAttr.getUInt();
+    }
+
     auto newNode = createNodeFromOperation(
-      &op, pres, sucs, nodeLatency); 
+      &op, pres, sucs, nodeLatency, nodeBBIndex); 
     
     if (!newNode) continue;
 
@@ -461,7 +481,7 @@ void AdjGraph::insertToSurroundingList(std::map<std::string, std::vector<std::st
 
 std::shared_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
                                                     std::vector<std::string> &pres, std::vector<std::string> &sucs,
-                                                    unsigned &nodeLatency) {
+                                                    unsigned &nodeLatency, unsigned &bbIndex) {
     std::map<std::string, unsigned> nodeSucsDataWidthMap;
     // Get the successor channels' dataWidth
     for (unsigned resIndex = 0, e = op->getNumResults(); resIndex < e; ++resIndex) {
@@ -489,22 +509,22 @@ std::shared_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
     return llvm::TypeSwitch<Operation *, std::shared_ptr<AdjNode>>(op)
       // handshake::AddIOp operator
       .Case<handshake::AddIOp>([&](auto selNode) {
-        auto node = std::make_shared<AddiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<AddiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
       // handshake::SubIOp operator
       .Case<handshake::SubIOp>([&](auto selNode) {
-        auto node = std::make_shared<SubiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<SubiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
       // handshake::MulIOp operator
       .Case<handshake::MulIOp>([&](auto selNode) {
-        auto node = std::make_shared<MuliNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<MuliNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
       // handshake::CmpIOp operator
       .Case<handshake::CmpIOp>([&](handshake::CmpIOp selNode) {
-        auto node = std::make_shared<CmpiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<CmpiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
       // handshake::BufferOp operator
@@ -538,7 +558,7 @@ std::shared_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
           exit(-1);
         }
 
-        auto node = std::make_shared<BufferNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<BufferNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
 
         // Update the desired inforamtion for the buffer node
         node->occupancy = occValue;
@@ -549,22 +569,22 @@ std::shared_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
       })
       // handshake::MuxOp operator
       .Case<handshake::MuxOp>([&](handshake::MuxOp selNode) {
-        auto node = std::make_shared<MuxNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<MuxNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
       // handshake::OrIOp operator
       .Case<handshake::OrIOp>([&](handshake::OrIOp selNode) {
-        auto node = std::make_shared<OriNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<OriNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
       // handshake::AndIOp operator
       .Case<handshake::AndIOp>([&](handshake::AndIOp selNode) {
-        auto node = std::make_shared<AndiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<AndiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
       // handshake::ForkOp operator
       .Case<handshake::ForkOp>([&](handshake::ForkOp selNode) {
-        auto node = std::make_shared<ForkNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<ForkNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
       // handshake::LazyForkOp operator
@@ -575,37 +595,37 @@ std::shared_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
       })
       // handshake::TruncIOp operator
       .Case<handshake::TruncIOp>([&](auto selNode) {
-        auto node = std::make_shared<TrunciNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<TrunciNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
       // handshake::ExtSIOp operator
       .Case<handshake::ExtSIOp>([&](auto selNode) {
-        auto node = std::make_shared<ExtsiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<ExtsiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
       // handshake::ExtUIOp operator
       .Case<handshake::ExtUIOp>([&](auto selNode) {
-        auto node = std::make_shared<ExtuiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<ExtuiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
       // handshake::ControlMergeOp operator
       .Case<handshake::ControlMergeOp>([&](handshake::ControlMergeOp selNode) {
-        auto node = std::make_shared<CMergeNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<CMergeNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
       // handshake::ConditionalBranchOp operator
       .Case<handshake::ConditionalBranchOp>([&](handshake::ConditionalBranchOp selNode) {
-        auto node = std::make_shared<CBrNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<CBrNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
       // handshake::SourceOp operator
       .Case<handshake::SourceOp>([&](auto selNode) {
-        auto node = std::make_shared<SourceNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<SourceNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
       // handshake::ConstantOp operator
       .Case<handshake::ConstantOp>([&](auto selNode) {
-        auto node = std::make_shared<ConstantNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<ConstantNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
       // handshake::LoadOp operator
@@ -614,41 +634,41 @@ std::shared_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
         auto memOp = findMemInterface(selNode.getAddressResult());
         if (isa_and_present<handshake::LSQOp>(memOp)) {
           // TODO: Need to change the latency obtaining method for lsq load op
-          auto node = std::make_shared<DLoadNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+          auto node = std::make_shared<DLoadNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
           return node;
         } else {
-          auto node = std::make_shared<DLoadNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+          auto node = std::make_shared<DLoadNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
           return node;
         }
       })
       // handshake::StoreOp operator
       .Case<handshake::StoreOp>([&](handshake::StoreOp selNode) {
-        auto node = std::make_shared<DStoreNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<DStoreNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
       // handshake::ShLIOp operator
       .Case<handshake::ShLIOp>([&](auto selNode) {
-        auto node = std::make_shared<ShliNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<ShliNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
       // handshake::ShRSIOp operator
       .Case<handshake::ShRSIOp>([&](auto selNode) {
-        auto node = std::make_shared<ShrsiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<ShrsiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
       // handshake::ShRUIOp operator
       .Case<handshake::ShRUIOp>([&](auto selNode) {
-        auto node = std::make_shared<ShruiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<ShruiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
       // handshake::SinkOp operator
       .Case<handshake::SinkOp>([&](auto selNode) {
-        auto node = std::make_shared<SinkNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<SinkNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
       // handshake::EndOp operator
       .Case<handshake::EndOp>([&](auto selNode) {
-        auto node = std::make_shared<EndNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency);
+        auto node = std::make_shared<EndNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
       .Default([](auto selNode) {
