@@ -731,29 +731,6 @@ void AdjGraph::obtainNodeGlobalOrder() {
   }
 }
 
-//! Testing
-// 1) Print mainStack
-static void printMainStack(const std::vector<std::string> &mainStack) {
-  llvm::dbgs() << "mainStack: [ ";
-  for (const auto &node : mainStack) {
-    llvm::dbgs() << node << " ";
-  }
-  llvm::dbgs() << "]\n";
-}
-
-// 2) Print adjStack
-static void printAdjStack(const std::vector<std::vector<std::string>> &adjStack) {
-  llvm::dbgs() << "adjStack:\n";
-  // Each element of adjStack is a vector of strings
-  for (size_t i = 0; i < adjStack.size(); ++i) {
-    llvm::dbgs() << "  Level " << i << ": [ ";
-    for (const auto &node : adjStack[i]) {
-     llvm::dbgs() << node << " ";
-    }
-    llvm::dbgs() << "]\n";
-  }
-}
-
 //
 std::vector<Path> AdjGraph::findPaths(const std::string &srcNode, const std::string &dstNode,
                               bool noStartingNode, bool useGlobalOrder) {
@@ -1095,6 +1072,71 @@ void printSegToBBListMap(const std::map<std::string, mlir::SetVector<unsigned>>&
     }
 
     llvm::dbgs() << "]\n";
+  }
+}
+
+void printMgNodeInfo(const MgNodeInfo &info)
+{
+    llvm::dbgs() << "MgNodeInfo contents:\n";
+
+    // Print "original"
+    llvm::dbgs() << "  original: [";
+    for (size_t i = 0; i < info.original.size(); ++i) {
+        if (i > 0) llvm::dbgs() << ", ";
+        llvm::dbgs() << info.original[i];
+    }
+    llvm::dbgs() << "]\n";
+
+    // Print "glitch"
+    llvm::dbgs() << "  glitch: [";
+    for (size_t i = 0; i < info.glitch.size(); ++i) {
+        if (i > 0) llvm::dbgs() << ", ";
+        llvm::dbgs() << info.glitch[i];
+    }
+    llvm::dbgs() << "]\n";
+
+    // Print "control"
+    llvm::dbgs() << "  control: [";
+    for (size_t i = 0; i < info.control.size(); ++i) {
+        if (i > 0) llvm::dbgs() << ", ";
+        llvm::dbgs() << info.control[i];
+    }
+    llvm::dbgs() << "]\n";
+
+    // Print "data"
+    llvm::dbgs() << "  data: [";
+    for (size_t i = 0; i < info.data.size(); ++i) {
+        if (i > 0) llvm::dbgs() << ", ";
+        llvm::dbgs() << info.data[i];
+    }
+    llvm::dbgs() << "]\n";
+
+    // Print "dataWidthMap"
+    llvm::dbgs() << "  dataWidthMap:\n";
+    for (const auto &pair : info.dataWidthMap) {
+        llvm::dbgs() << "    \"" << pair.first << "\" => " << pair.second << "\n";
+    }
+    llvm::dbgs() << "\n";
+}
+
+// Function to print a vector of strings (mainStack)
+void printMainStack(const std::vector<std::string>& mainStack) {
+  llvm::dbgs() << "Main Stack: [ ";
+  for (const auto& elem : mainStack) {
+      llvm::dbgs() << elem << " ";
+  }
+  llvm::dbgs() << "]" << "\n";
+}
+
+// Function to print a vector of vector of strings (adjStack)
+void printAdjStack(const std::vector<std::vector<std::string>>& adjStack) {
+  llvm::dbgs() << "Adjacency Stack:" << "\n";
+  for (size_t i = 0; i < adjStack.size(); ++i) {
+      llvm::dbgs() << "  Level " << i << ": [ ";
+      for (const auto& elem : adjStack[i]) {
+          llvm::dbgs() << elem << " ";
+      }
+      llvm::dbgs() << "]" << "\n";
   }
 }
 

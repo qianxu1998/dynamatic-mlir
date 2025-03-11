@@ -419,14 +419,14 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo, SCFProfilingResu
 
 void conSegSuccNodesList(SwitchingInfo &switchInfo, SCFProfilingResult &profileResults) {
   //! Testing
-  for (const auto& [label, bblist]: switchInfo.segToBBListMap) {
-    llvm::dbgs() << "[DEBUG] \t\tSeg Label: " << label << "\n";
-    llvm::dbgs() << "[DEBUG] \t\t\tBB List: ";
-    for (const auto& selBB : bblist) {
-      llvm::dbgs() << selBB << ", ";
-    }
-    llvm::dbgs() << "\n";
-  }
+  // for (const auto& [label, bblist]: switchInfo.segToBBListMap) {
+  //   llvm::dbgs() << "[DEBUG] \t\tSeg Label: " << label << "\n";
+  //   llvm::dbgs() << "[DEBUG] \t\t\tBB List: ";
+  //   for (const auto& selBB : bblist) {
+  //     llvm::dbgs() << selBB << ", ";
+  //   }
+  //   llvm::dbgs() << "\n";
+  // }
 
   for (const auto& selBaseNode: switchInfo.dataflowGraph->allDataBaseNode) {
     if (selBaseNode.find("control_merge") != std::string::npos) {
@@ -438,11 +438,22 @@ void conSegSuccNodesList(SwitchingInfo &switchInfo, SCFProfilingResult &profileR
 
       for (const auto& [label, bblist]: switchInfo.segToBBListMap) {
         MgNodeInfo tmpMGInfo;
-        
+        std::vector<std::string> controlExcludVec = {dataSucNode};
+        std::vector<std::string> dataExcludVec = {conSucNode};
+        tmpMGInfo.control = segConMergeSuccSearch(switchInfo, selBaseNode, controlExcludVec, label);
+        tmpMGInfo.data = segConMergeSuccSearch(switchInfo, selBaseNode, dataExcludVec, label);
+        tmpMGInfo.glitch = segConMergeGlitchSuccSearch(switchInfo, selBaseNode, controlExcludVec, label);
+
+        // Update the stroing structure
+        switchInfo.dfgBaseNodeValueMap[selBaseNode]->segSucNodeMap[label] = tmpMGInfo;
+      }
+    } else {
+      for (const auto& [label, bblist]: switchInfo.segToBBListMap) {
+        // Update the stroing structure
+        switchInfo.dfgBaseNodeValueMap[selBaseNode]->segSucNodeMap[label] = segGeneralSuccSearch(switchInfo, selBaseNode, label);
       }
     }
   }
-  
 }
 
 //===----------------------------------------------------------------------===//
@@ -450,6 +461,8 @@ void conSegSuccNodesList(SwitchingInfo &switchInfo, SCFProfilingResult &profileR
 // Functions for finding the data source node in different segments
 //
 //===----------------------------------------------------------------------===//
+// TODO: Merge all following functions into a single function
+
 std::vector<std::string> segConMergeSuccSearch(SwitchingInfo &switchInfo, std::string startNode, 
                                                 std::vector<std::string> &excludingList, std::string segLabel) {
   std::vector<std::string> succNodeList;
@@ -550,7 +563,257 @@ std::vector<std::string> segConMergeSuccSearch(SwitchingInfo &switchInfo, std::s
 }
 
 MgNodeInfo segGeneralSuccSearch(SwitchingInfo &switchInfo, std::string startNode, std::string segLabel) {
+  // Status variale definition
+  unsigned numBuffers = 0;
+  unsigned minDataWidth = 32;
+  std::string lastNode = "";
 
+  // Initialize the stroing structure
+  MgNodeInfo tmpMgNodeInfo;
+
+  // DFS STACK: None recrusive approach
+  std::vector<std::string> mainStack;
+  std::vector<std::vector<std::string>> adjStack;
+  std::vector<unsigned> segBBList = switchInfo.segToBBListMap[segLabel];
+
+  // Initialization
+  mainStack.push_back(startNode);
+
+  // Construct AdjList
+  std::vector<std::string> initAdjList;
+  for (const auto& selNode: switchInfo.dataflowGraph->nodes[startNode]->sucs) {
+    if (switchInfo.dataflowGraph->allDataBaseNode.find(selNode) == switchInfo.dataflowGraph->allDataBaseNode.end()) initAdjList.push_back(selNode);
+  }
+  adjStack.push_back(initAdjList);
+
+  // We conduct dfs starting from the specified start node in the dfg
+  // The search will stop when encountered following situations:
+  //  - Encountered a node in the data base node list
+  //  - Entering a cond_br / mux node through the conditional channel
+  //  - No node left
+  // We also check all buffer nodes, whether it's inside a specific cfdfc or not
+  while (!mainStack.empty()) {
+    std::vector<std::string> curAdjList = adjStack.back();
+    adjStack.pop_back();
+
+    if (!curAdjList.empty()) {
+      std::string curNode = curAdjList.back();
+      curAdjList.pop_back();
+
+      // Update the adjStack
+      adjStack.push_back(curAdjList);
+
+      // Flag for conditional port
+      bool nonCondFlag = true;
+      bool computeFlag = false;
+
+      // Update compute flag
+      if (switchInfo.dataflowGraph->allDataBaseNode.find(curNode) == switchInfo.dataflowGraph->allDataBaseNode.end()) {
+        // This is not a invalid backedge
+        auto selInvalidBEList = switchInfo.segInvalidBackedgesMap[segLabel];
+        std::pair<std::string, std::string> selPair = std::make_pair(mainStack.back(), curNode);
+        if (std::find(selInvalidBEList.begin(), selInvalidBEList.end(), selPair) == selInvalidBEList.end()) computeFlag = true;
+      }
+
+      // Check whether we can update mainStack or not
+      if (computeFlag) {
+        std::string preNode = mainStack.back();
+
+        if (curNode.find("cond_br") != std::string::npos) {
+          auto selNode = dyn_cast<CBrNode>(switchInfo.dataflowGraph->nodes[curNode].get());
+          if (preNode == selNode->condPreNodeName) {
+            // TODO: Check this updating condition
+            if (selNode->dataPreNodeName != "") {
+              nonCondFlag = false;
+            }
+          }
+        } else if (curNode.find("mux") != std::string::npos) {
+          // Check whether this is the conditional channel
+          auto selNode = dyn_cast<MuxNode>(switchInfo.dataflowGraph->nodes[curNode].get());
+          if (preNode == selNode->conPreNodeName) nonCondFlag = false;
+        } else if (curNode.find("buffer") != std::string::npos) {
+          // TODO: Maybe we need to check not only the name also the type, only opaque buffer is blocking the transmission of the data
+          unsigned curNodeBB = switchInfo.dataflowGraph->nodes[curNode]->bbindex;
+          if (std::find(segBBList.begin(), segBBList.end(), curNodeBB) == segBBList.end()) nonCondFlag = false;
+        } else if (curNode.find("end") != std::string::npos && (segLabel != "E")) {
+          // TODO: Check the following update logic
+          nonCondFlag = false;
+        } else if (curNode.find("mem_controller") != std::string::npos) {
+          // TODO: Check the following update logic
+          nonCondFlag = false;
+        }
+        
+        // If this is a data channel
+        if (nonCondFlag) {
+          mainStack.push_back(curNode);
+
+          // Update the buffer information
+          if (curNode.find("buffer") != std::string::npos) numBuffers += 1;
+
+          // Update the bitwidth information
+          unsigned curNodeBitWidth = switchInfo.dataflowGraph->nodes[preNode]->sucsDataWidthMap[curNode];
+          if (curNodeBitWidth < minDataWidth) minDataWidth = curNodeBitWidth;
+
+          if (numBuffers > 0) {
+            tmpMgNodeInfo.original.push_back(curNode);
+            lastNode = curNode;
+
+            // Update the bitwidth infomration
+            tmpMgNodeInfo.dataWidthMap[preNode] = minDataWidth;
+          } else {
+            tmpMgNodeInfo.glitch.push_back(curNode);
+            lastNode = curNode;
+
+            // Update the bitwidth infomration
+            tmpMgNodeInfo.dataWidthMap[preNode] = minDataWidth;
+          }
+
+          // Insert new AdjList
+          std::vector<std::string> tmpAdjList;
+          auto newAdjList = switchInfo.dataflowGraph->nodes[curNode]->sucs;
+
+          for (const auto& selNextNode: newAdjList) {
+            bool inStack = (std::find(mainStack.begin(), mainStack.end(), selNextNode) != mainStack.end());
+            bool inBaseNodeList = (switchInfo.dataflowGraph->allDataBaseNode.find(selNextNode) != switchInfo.dataflowGraph->allDataBaseNode.end());
+            if (!inStack && !inBaseNodeList) tmpAdjList.push_back(selNextNode);
+          }
+
+          adjStack.push_back(tmpAdjList);
+        }
+      }
+    } else {
+      std::string lastMainStackNode = mainStack.back();
+      if (lastMainStackNode.find("buffer") != std::string::npos) numBuffers -= 1;
+
+      mainStack.pop_back();
+    }
+
+    // Add the last unit to the data_width list
+    tmpMgNodeInfo.dataWidthMap[lastNode] = minDataWidth;
+  }
+
+  // Return the storing structure
+  return tmpMgNodeInfo;
+}
+
+std::vector<std::string> segConMergeGlitchSuccSearch(SwitchingInfo &switchInfo, std::string startNode, 
+                                                      std::vector<std::string> &excludingList, std::string segLabel) {
+  std::vector<std::string> glitchSuccNodeList;
+
+  //
+  unsigned numBuffers = 0;
+  // DFS STACK: None recrusive approach
+  std::vector<std::string> mainStack;
+  std::vector<std::vector<std::string>> adjStack;
+  std::vector<unsigned> segBBList = switchInfo.segToBBListMap[segLabel];
+
+  // Initialization
+  mainStack.push_back(startNode);
+
+  // Construct AdjList
+  std::vector<std::string> initAdjList;
+  for (const auto& selNode: switchInfo.dataflowGraph->nodes[startNode]->sucs) {
+    if (std::find(excludingList.begin(), excludingList.end(), selNode) == excludingList.end() &&
+        (switchInfo.dataflowGraph->allDataBaseNode.find(selNode) == switchInfo.dataflowGraph->allDataBaseNode.end())) initAdjList.push_back(selNode);
+  }
+  adjStack.push_back(initAdjList);
+
+  // We conduct dfs starting from the specified start node in the dfg
+  // The search will stop when encountered following situations:
+  //  - Encountered a node in the data base node list
+  //  - Entering a cond_br / mux node through the conditional channel
+  //  - No node left
+  // We also check all buffer nodes, whether it's inside a specific cfdfc or not
+  while (!mainStack.empty()) {
+    std::vector<std::string> curAdjList = adjStack.back();
+    adjStack.pop_back();
+
+    if (!curAdjList.empty()) {
+      std::string curNode = curAdjList.back();
+      curAdjList.pop_back();
+
+      // Update the adjStack
+      adjStack.push_back(curAdjList);
+
+      // Flag for conditional port
+      bool nonCondFlag = true;
+      bool computeFlag = false;
+
+      // Update compute flag
+      if (switchInfo.dataflowGraph->allDataBaseNode.find(curNode) == switchInfo.dataflowGraph->allDataBaseNode.end()) {
+        // This is not a invalid backedge
+        auto selInvalidBEList = switchInfo.segInvalidBackedgesMap[segLabel];
+        std::pair<std::string, std::string> selPair = std::make_pair(mainStack.back(), curNode);
+        if (std::find(selInvalidBEList.begin(), selInvalidBEList.end(), selPair) == selInvalidBEList.end()) computeFlag = true;
+      }
+
+      // Check whether we can update mainStack or not
+      if (computeFlag) {
+        std::string preNode = mainStack.back();
+
+        if (curNode.find("cond_br") != std::string::npos) {
+          // Check whether this is the conditional channel
+          auto selNode = dyn_cast<CBrNode>(switchInfo.dataflowGraph->nodes[curNode].get());
+          if (preNode == selNode->condPreNodeName) {
+            // TODO: Check this updating condition
+            if (selNode->dataPreNodeName != "") {
+              nonCondFlag = false;
+            }
+          }
+        } else if (curNode.find("mux") != std::string::npos) {
+          // Check whether this is the conditional channel
+          auto selNode = dyn_cast<MuxNode>(switchInfo.dataflowGraph->nodes[curNode].get());
+          if (preNode == selNode->conPreNodeName) nonCondFlag = false;
+        } else if (curNode.find("buffer") != std::string::npos) {
+          unsigned curNodeBB = switchInfo.dataflowGraph->nodes[curNode]->bbindex;
+
+          if (std::find(segBBList.begin(), segBBList.end(), curNodeBB) == segBBList.end()) nonCondFlag = false;
+        } else if (curNode.find("end") != std::string::npos && (segLabel != "E")) {
+          // TODO: Check the following update logic
+          nonCondFlag = false;
+        } else if (curNode.find("mem_controller") != std::string::npos) {
+          // TODO: Check the following update logic
+          nonCondFlag = false;
+        }
+
+        //! Testing
+        // llvm::dbgs() << "==================\n";
+        // printMainStack(mainStack);
+        // printAdjStack(adjStack);
+        // llvm::dbgs() << "nonCondFlag: " << nonCondFlag << "\n";
+
+        // If this is a data channel
+        if (nonCondFlag) {
+          mainStack.push_back(curNode);
+
+          // Update the buffer information
+          if (curNode.find("buffer") != std::string::npos) numBuffers += 1;
+
+          if (numBuffers == 0) glitchSuccNodeList.push_back(curNode);
+
+          // Insert new AdjList
+          std::vector<std::string> tmpAdjList;
+          auto newAdjList = switchInfo.dataflowGraph->nodes[curNode]->sucs;
+
+          for (const auto& selNextNode: newAdjList) {
+            bool inStack = (std::find(mainStack.begin(), mainStack.end(), selNextNode) != mainStack.end());
+            bool inBaseNodeList = (switchInfo.dataflowGraph->allDataBaseNode.find(selNextNode) != switchInfo.dataflowGraph->allDataBaseNode.end());
+            bool isExcluded = (std::find(excludingList.begin(), excludingList.end(), selNextNode) != excludingList.end());
+            if (!inStack && !inBaseNodeList && !isExcluded) tmpAdjList.push_back(selNextNode);
+          }
+
+          adjStack.push_back(tmpAdjList);
+        }
+      }
+    } else {
+      std::string lastMainStackNode = mainStack.back();
+      if (lastMainStackNode.find("buffer") != std::string::npos) numBuffers -= 1;
+
+      mainStack.pop_back();
+    }
+  }
+
+  return glitchSuccNodeList;
 }
 
 

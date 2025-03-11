@@ -528,5 +528,13 @@ std::vector<std::string> split(const std::string &s, const std::string& delimite
 // This function removes the starting and ending empty space
 std::string strip(const std::string &inputStr, const std::string &toRemove);
 
+// This function prints the node succ list info
+void printMgNodeInfo(const MgNodeInfo &info);
+
+// Function to print a vector of strings (mainStack)
+void printMainStack(const std::vector<std::string>& mainStack); 
+
+// Function to print a vector of vector of strings (adjStack)
+void printAdjStack(const std::vector<std::vector<std::string>>& adjStack); 
 
 #endif // EXPERIMENTAL_TRANSFORMS_SWITCHING_SUPPORT_H

@@ -79,6 +79,10 @@ unsigned getExecutionIter(unsigned bbIndex, unsigned curBB, SCFProfilingResult &
 std::vector<std::string> segConMergeSuccSearch(SwitchingInfo &switchInfo, std::string startNode, 
                                                 std::vector<std::string> &excludingList, std::string segLabel);
 
+// This fucntion builds the glitch succlist for the control merge node
+std::vector<std::string> segConMergeGlitchSuccSearch(SwitchingInfo &switchInfo, std::string startNode, 
+                                                      std::vector<std::string> &excludingList, std::string segLabel);
+
 // This function builds the succlist for general nodes
 MgNodeInfo segGeneralSuccSearch(SwitchingInfo &switchInfo, std::string startNode, std::string segLabel);
 
