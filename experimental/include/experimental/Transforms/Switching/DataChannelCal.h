@@ -70,6 +70,9 @@ void conSegSuccNodesList(SwitchingInfo &switchInfo, SCFProfilingResult &profileR
 // This function returns the execution iter index based on the given bb_index
 unsigned getExecutionIter(unsigned bbIndex, unsigned curBB, SCFProfilingResult &profileResults);
 
+// This function find all glitching nodes within different MGs, "S", "E", and "T" segments will be ignored
+void dataGlitchNodeSearch(SwitchingInfo &switchInfo, SCFProfilingResult &profileResults);
+
 //===----------------------------------------------------------------------===//
 //
 // Functions for finding the data source node in different segments
@@ -85,6 +88,14 @@ std::vector<std::string> segConMergeGlitchSuccSearch(SwitchingInfo &switchInfo, 
 
 // This function builds the succlist for general nodes
 MgNodeInfo segGeneralSuccSearch(SwitchingInfo &switchInfo, std::string startNode, std::string segLabel);
+
+// This function finds the actual source of the specified start_node in the selected MG
+// TODO: Merge the following function with graphBacktrack
+std::string segNodeDataSrcSearch(SwitchingInfo &switchInfo, std::string startNode, AdjGraph *selGraph);
+
+//  This function returns the longest path form the start point(s) of the specified cfdfc to the desired node
+// TODO: Merge the finding with the analyzeglobalorder function.
+LongestPathResult selLongestPath(SwitchingInfo &switchInfo, std::string dstNode, std::string mgLabel);
 
 //===----------------------------------------------------------------------===//
 //

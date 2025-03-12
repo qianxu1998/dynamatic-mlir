@@ -53,6 +53,13 @@ struct DataBaseNodesTriple {
   std::vector<std::string> data;
 };
 
+// New struct for glitch info.
+struct NodeGlitchInfo {
+  std::string srcNode;
+  int steadyTime;
+  bool buffered;
+};
+
 // Helper datatype for switching estimation. Aggregates all useful information
 // for the swithicng estimation process
 struct SwitchingInfo {
@@ -66,6 +73,8 @@ struct SwitchingInfo {
   llvm::SmallVector<std::pair<unsigned, unsigned>> backEdges;
   // Map from CFDFC index to the corresponding II values
   std::unordered_map<unsigned, float_t> cfdfcIIs;
+  // Map from CFDFC index to the corresponding throughput
+  std::unordered_map<unsigned, double_t> cfdfcThroughput;
   // Map from CFDFC index to the CFDFC info stroing class
   // Only contain the number of edges, backedges etc.
   // No info about unit delay, node neighbors etc.
@@ -99,6 +108,7 @@ struct SwitchingInfo {
   std::map<std::string, DataBaseNodesTriple> segToDataBaseVecMap;
   // Map from node name to DataBase class
   std::map<std::string, std::shared_ptr<DataBase>> dfgBaseNodeValueMap;
+  std::map<std::string, std::map<std::string, std::vector<NodeGlitchInfo>>> mgGlitchNodeDict;
 };
 
 // Class used to construct the per segment (MG & one-time execution segment)
@@ -387,6 +397,11 @@ const std::set<std::string> NAME_SENSE_LIST = {
   "shrsi"
 };
 
+// Define the set of node types that potentially have glitches
+const std::unordered_set<std::string> GLITCH_NODE = {
+  "addi", "subi", "muli", "addf", "subf",
+  "mulf", "divui", "divsi", "divf", "ori", "andi"
+};
 
 //===----------------------------------------------------------------------===//
 //
@@ -410,6 +425,15 @@ struct MgNodeInfo {
   std::vector<std::string> data;
   // "datawidth" => map from string to unsigned
   std::map<std::string, unsigned> dataWidthMap;
+};
+
+// A helper structure to return the longest path result.
+// This is used during glitch node selection
+// TODO: Remove this during refinement
+struct LongestPathResult {
+  std::string selStartNode;
+  unsigned maxLatency;
+  std::string lastSecondBuffer;
 };
 
 // Class used to store information for the finished node that's needed for data propagation
@@ -502,6 +526,9 @@ void printBEToCFDFCMap(const std::map<std::pair<unsigned, unsigned>, std::vector
 
 // This function prints the Segment ID to BBlist map
 void printSegToBBListMap(const std::map<std::string, mlir::SetVector<unsigned>>& selMap);
+
+// Helper function: extracts the initial alphabetic portion from a node name.
+std::string getNodeType(const std::string &nodeName);
 
 // This function prints all values in a vector
 template <typename T>

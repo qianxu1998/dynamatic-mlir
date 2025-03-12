@@ -590,7 +590,7 @@ std::shared_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
       // handshake::LazyForkOp operator
       .Case<handshake::LazyForkOp>([&](handshake::LazyForkOp selNode) {
         // TODO: Add model for lazy fork
-        llvm::dbgs() << "[DEBUG] \t\t Missing Implementation for LAZY FORK NODE\n";
+        llvm::errs() << "[ERROR] \t\t Missing Implementation for LAZY FORK NODE\n";
         return std::shared_ptr<AdjNode>(nullptr);
       })
       // handshake::TruncIOp operator
@@ -710,6 +710,9 @@ void AdjGraph::obtainNodeGlobalOrder() {
       std::string finalStartNode = "";
 
       for (const auto& selStartNode: segStartNodes) {
+        //! Testing
+        // llvm::dbgs() << "[DEBUG] \t\tNode: " << selStartNode << "\n";
+
         auto foundPaths = findPaths(selStartNode, name, true, false);
 
         if (foundPaths.size() > 0) {
@@ -781,6 +784,10 @@ std::vector<Path> AdjGraph::findPaths(const std::string &srcNode, const std::str
     } else {
       mainStack.pop_back();
     }
+
+    //! Testing
+    // printMainStack(mainStack);
+    // printAdjStack(adjStack);
 
     // Found a path
     if (!mainStack.empty() && mainStack.back() == dstNode) {
@@ -1117,6 +1124,15 @@ void printMgNodeInfo(const MgNodeInfo &info)
         llvm::dbgs() << "    \"" << pair.first << "\" => " << pair.second << "\n";
     }
     llvm::dbgs() << "\n";
+}
+
+// Helper function: extracts the initial alphabetic portion from a node name.
+std::string getNodeType(const std::string &nodeName) {
+  size_t pos = 0;
+  while (pos < nodeName.size() && std::isalpha(nodeName[pos])) {
+    ++pos;
+  }
+  return nodeName.substr(0, pos);
 }
 
 // Function to print a vector of strings (mainStack)

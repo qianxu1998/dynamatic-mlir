@@ -419,16 +419,22 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo, SCFProfilingResu
 
 void conSegSuccNodesList(SwitchingInfo &switchInfo, SCFProfilingResult &profileResults) {
   //! Testing
-  // for (const auto& [label, bblist]: switchInfo.segToBBListMap) {
-  //   llvm::dbgs() << "[DEBUG] \t\tSeg Label: " << label << "\n";
-  //   llvm::dbgs() << "[DEBUG] \t\t\tBB List: ";
-  //   for (const auto& selBB : bblist) {
-  //     llvm::dbgs() << selBB << ", ";
-  //   }
-  //   llvm::dbgs() << "\n";
-  // }
+  for (const auto& [label, bblist]: switchInfo.segToBBListMap) {
+    llvm::dbgs() << "[DEBUG] \t\tSeg Label: " << label << "\n";
+    llvm::dbgs() << "[DEBUG] \t\t\tBB List: ";
+    for (const auto& selBB : bblist) {
+      llvm::dbgs() << selBB << ", ";
+    }
+    llvm::dbgs() << "\n";
+  }
 
   for (const auto& selBaseNode: switchInfo.dataflowGraph->allDataBaseNode) {
+    //! Testing
+    // llvm::dbgs() << "[DEBUG] Node Name: " << selBaseNode << "\n";
+
+    // Check the existence of the selected node
+    if (switchInfo.dataflowGraph->nodes.find(selBaseNode) == switchInfo.dataflowGraph->nodes.end()) continue;
+
     if (selBaseNode.find("control_merge") != std::string::npos) {
       // If this is a control_merge node
       auto selCMNode = dyn_cast<CMergeNode>(switchInfo.dataflowGraph->nodes[selBaseNode].get());
@@ -453,6 +459,54 @@ void conSegSuccNodesList(SwitchingInfo &switchInfo, SCFProfilingResult &profileR
         switchInfo.dfgBaseNodeValueMap[selBaseNode]->segSucNodeMap[label] = segGeneralSuccSearch(switchInfo, selBaseNode, label);
       }
     }
+  }
+}
+
+void dataGlitchNodeSearch(SwitchingInfo &switchInfo, SCFProfilingResult &profileResults) {
+  for (const auto & [label, bblist] : switchInfo.segToBBListMap) {
+    // Skip all "S", "E", and "T" sections
+    if (label.find("S") != std::string::npos || label.find("E") != std::string::npos || label.find("T") != std::string::npos) {
+      continue;
+    }
+
+    // Get the selected AdjGraph
+    auto selAdjGraph = switchInfo.segToAdjGraphMap[label];
+    std::string mgBaseNode = selAdjGraph->baseNode;
+    auto mgII = switchInfo.cfdfcIIs[std::stoul(label)];
+
+    //! Testing
+    llvm::dbgs() << "[DEBUG] \t\tMG II: " << mgII << "\n";
+
+    std::map<std::string, std::vector<NodeGlitchInfo>> tmpGlitchDict;
+    std::vector<std::string> tmpGlitchNodes;
+
+    // Iterate over all mapped nodes (orderedMappedList).
+    for (const auto& selNode: switchInfo.segToAdjGraphMap[label]->orderedNodeName) {
+
+      auto selDataBaseNodes = switchInfo.segToDataBaseVecMap[label].data;
+      if (std::find(selDataBaseNodes.begin(), selDataBaseNodes.end(), selNode) != selDataBaseNodes.end()) {
+        // Get the type of the node
+        auto nodeType = getNodeType(selNode);
+
+        if (GLITCH_NODE.find(nodeType) != GLITCH_NODE.end()) {
+          // ALU will only have two inputs
+          auto preNodeLists = selAdjGraph->nodes[selNode]->pres;
+
+          // Unpack the pre_node_list
+          std::string preNode1 = preNodeLists[0];
+          std::string preNode2 = preNodeLists[1];
+
+          // Get the source of the two inputs
+          std::string srcNode1 = segNodeDataSrcSearch(switchInfo, preNode1, selAdjGraph.get());
+          std::string srcNode2 = segNodeDataSrcSearch(switchInfo, preNode2, selAdjGraph.get());
+
+          // 
+        }
+        
+      }
+      
+    }
+    
   }
 }
 
@@ -816,6 +870,88 @@ std::vector<std::string> segConMergeGlitchSuccSearch(SwitchingInfo &switchInfo, 
   return glitchSuccNodeList;
 }
 
+std::string segNodeDataSrcSearch(SwitchingInfo &switchInfo, std::string startNode, AdjGraph *selGraph) {
+  // Check the start node
+  if (switchInfo.dataflowGraph->allDataBaseNode.find(startNode) != switchInfo.dataflowGraph->allDataBaseNode.end()) return startNode;
+
+  // Define storing structure
+  std::vector<std::string> mainStack;
+  std::vector<std::vector<std::string>> adjStack;
+
+  // Initialization
+  mainStack.push_back(startNode);
+
+  if (startNode.find("cond_br") != std::string::npos) {
+    // This is a cond_br node
+    if (auto *cbrNode = dyn_cast<CBrNode>(switchInfo.dataflowGraph->nodes[startNode].get())) {
+      std::string tmpDataPreNode = cbrNode->dataPreNodeName;
+      std::string tmpCondPreNode = cbrNode->condPreNodeName;
+      if (tmpDataPreNode != "") {
+        adjStack.push_back({ tmpDataPreNode });
+      } else {
+        adjStack.push_back({ tmpCondPreNode });
+      }
+    } else {
+      adjStack.push_back(selGraph->nodes[startNode]->pres);
+    }
+  }
+
+  while (!mainStack.empty()) {
+    std::vector<std::string> curAdjList = adjStack.back();
+    adjStack.pop_back();
+
+    if (!curAdjList.empty()) {
+      std::string curNode = curAdjList.back();
+      curAdjList.pop_back();
+      adjStack.push_back(curAdjList);
+
+      //
+      if (switchInfo.dataflowGraph->allDataBaseNode.find(curNode) != switchInfo.dataflowGraph->allDataBaseNode.end()) {
+        return curNode;
+      } else {
+        mainStack.push_back(curNode);
+
+        if (curNode.find("cond_br") != std::string::npos) {
+          // This is a cond_br node
+          if (auto *cbrNode = dyn_cast<CBrNode>(switchInfo.dataflowGraph->nodes[curNode].get())) {
+            std::string tmpDataPreNode = cbrNode->dataPreNodeName;
+            std::string tmpCondPreNode = cbrNode->condPreNodeName;
+
+            if (tmpDataPreNode != "") {
+              if (std::find(mainStack.begin(), mainStack.end(), tmpDataPreNode) == mainStack.end()) {
+                adjStack.push_back({ tmpDataPreNode });
+              }
+            } else {
+              if (std::find(mainStack.begin(), mainStack.end(), tmpCondPreNode) == mainStack.end()) {
+                adjStack.push_back({ tmpCondPreNode });
+              }
+            }
+          }
+        } else {
+          std::vector<std::string> tmpAdjList;
+          std::vector<std::string> newAdjList = selGraph->nodes[curNode]->pres;
+
+          for (const auto&n : newAdjList) {
+            bool inStack = (std::find(mainStack.begin(), mainStack.end(), n) != mainStack.end());
+            if (!inStack) tmpAdjList.push_back(n);
+          }
+
+          adjStack.push_back(tmpAdjList);
+        }
+
+      }
+    } else {
+      mainStack.pop_back();
+    }
+  }
+
+  llvm::dbgs() << "[ERROR] Could not find base node for " << startNode << "\n";
+  return "";
+}
+
+LongestPathResult selLongestPath(SwitchingInfo &switchInfo, std::string dstNode, std::string mgLabel) {
+  
+}
 
 //===----------------------------------------------------------------------===//
 //

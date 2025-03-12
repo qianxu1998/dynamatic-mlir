@@ -158,6 +158,9 @@ void SwitchingEstimationPass::runDynamaticPass() {
     // Step 4.1: Determining the latest start time for each node cfdfc
     selGraph->obtainNodeGlobalOrder();
 
+    //! Testing
+    // llvm::dbgs() << "[DEBUG] \t\t Global order calculated\n"; 
+
     // Step 4.2: Check the shifting between different start node within a graph
     selGraph->analyzeStartNodeShifting();
   }
@@ -220,6 +223,9 @@ void SwitchingEstimationPass::calDataChannelSwitching(mlir::ModuleOp& topModule,
   // Step 5: Build succeeding node list for data base nodes in different segments
   llvm::dbgs() << "[DEBUG]  [SS5] Build succeeding node list\n";
   conSegSuccNodesList(switchInfo, profileResults);
+
+  // Step 6: Get all glitching base node in each MG
+  dataGlitchNodeSearch(switchInfo, profileResults);
 }
 
 
@@ -297,6 +303,7 @@ LogicalResult SwitchingEstimationPass::extractAllCFDFCs(mlir::ModuleOp& topModul
           cfdfcII = 1.0 / IIValue.getValueAsDouble();
 
           switchInfo.cfdfcIIs[std::stoul(cfdfcIndex)] = cfdfcII;
+          switchInfo.cfdfcThroughput[std::stoul(cfdfcIndex)] = IIValue.getValueAsDouble();
         }
       }
 
