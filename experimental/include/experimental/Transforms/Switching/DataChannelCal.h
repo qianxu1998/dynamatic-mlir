@@ -73,6 +73,23 @@ unsigned getExecutionIter(unsigned bbIndex, unsigned curBB, SCFProfilingResult &
 // This function find all glitching nodes within different MGs, "S", "E", and "T" segments will be ignored
 void dataGlitchNodeSearch(SwitchingInfo &switchInfo, SCFProfilingResult &profileResults);
 
+// This function update the glitching value for data base nodes
+void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo, SCFProfilingResult &profileResults, bool debug);
+
+// This function propagates values from base nodes to all other nodes in the dfg circuit based on the execution trace
+// *Special treatments needed for LOAD and SOTORE nodes
+//  Load: 
+//    Output 1: to mem_con with the address value; Output 2: the actual data output
+//  COND_BR:
+//    Need to keep track of the last valid update (the input data is not -1)
+void dfgDataChannelPropagate(SwitchingInfo &switchInfo, SCFProfilingResult &profileResults);
+
+// This function calculates a single glitching value based on the given input operands and node type
+int calGlitchValue(int op1, int op2, std::string selNode);
+
+// This function returns the data src node of the specified mux node in the selected execution iteration
+std::string getMuxDataSrc(SwitchingInfo &switchInfo, std::string selMuxNode, unsigned selIter);
+
 //===----------------------------------------------------------------------===//
 //
 // Functions for finding the data source node in different segments

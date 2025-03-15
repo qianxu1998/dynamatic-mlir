@@ -35,6 +35,9 @@ static unsigned extractNodeLatency(mlir::Operation *op, TimingDatabase timingDB)
 void SwitchingInfo::insertBE(unsigned srcBB, unsigned dstBB, StringRef mgLabel) {
   std::pair<unsigned, unsigned> BBPair = {srcBB, dstBB};
 
+  // Update the seg label to Backedge pair list
+  segToBackedgePairMap[mgLabel.str()] = BBPair;
+
   // Check the existence of the backedge pair
   if (backEdgeToCFDFCMap.find(BBPair) != backEdgeToCFDFCMap.end()) {
     backEdgeToCFDFCMap[BBPair].push_back(static_cast<unsigned>(std::stoul(mgLabel.str())));

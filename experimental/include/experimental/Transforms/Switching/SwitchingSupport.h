@@ -53,6 +53,12 @@ struct DataBaseNodesTriple {
   std::vector<std::string> data;
 };
 
+// Struct storing the list of mux and control merge nodes in each seg
+struct muxCMNodesList {
+  std::vector<std::string> muxNodeList;
+  std::vector<std::string> cmNodeList;
+};
+
 // New struct for glitch info.
 struct NodeGlitchInfo {
   std::string srcNode;
@@ -86,6 +92,8 @@ struct SwitchingInfo {
   // Map from Backedge pair to the list of CFDFC lable vector
   // i.e. {(1, 1) : [1]}
   std::map<std::pair<unsigned, unsigned>, std::vector<unsigned>> backEdgeToCFDFCMap;
+  // Map from segLabel to the corresponding backedge pair
+  std::map<std::string, std::pair<unsigned, unsigned>> segToBackedgePairMap;
   // Map from Segment Label (CFDFC and temporal transaction sections that are not MGs)
   std::map<std::string, std::vector<unsigned>> segToBBListMap;
   // Map from Transaction Segment label to the successing MG label
@@ -109,6 +117,10 @@ struct SwitchingInfo {
   // Map from node name to DataBase class
   std::map<std::string, std::shared_ptr<DataBase>> dfgBaseNodeValueMap;
   std::map<std::string, std::map<std::string, std::vector<NodeGlitchInfo>>> mgGlitchNodeDict;
+  // Map from seg label to ordered Data base nodes
+  std::map<std::string, std::vector<std::string>> segToOrderedDataBaseNodes;
+  // Map from seg label to ordered mux and control merge node list
+  std::map<std::string, muxCMNodesList> segToControlNodeList;
 };
 
 // Class used to construct the per segment (MG & one-time execution segment)
@@ -302,7 +314,6 @@ public:
   std::map<std::string, std::vector<std::string>> cmToMuxMap;
   // CondBr to control source node map
   std::map<std::string, std::string> condBrToConSrcMap;
-  // Map storing succeeding node list for all data base nodes in each 
 
   // 
   //  Internal Storing Variables
@@ -479,7 +490,9 @@ public:
 
   //
   unsigned lastUpdateIndex;
-  bool skipControlCal;
+  bool skipControlCal = false;
+  // Last valid seg label, used for glitch calculation
+  std::string lastValidSeg = "";
 };
 
 class CMergeData: public DataBase {
@@ -487,6 +500,10 @@ public:
   CMergeData(const std::string &nodeName): DataBase(nodeName) {}
 
   void printDetail();
+
+  // This function gets the desired control dataout from the control_dataout dict
+  // During MG transitions, the control dataout value doesn't exist, we directly give it a 0
+  int getControlOutput(unsigned selIter);
 
   // LLVM casting support
   NodeKind getKind() const override { return NodeKind::CMergeDataKind; }

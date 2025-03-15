@@ -225,7 +225,16 @@ void SwitchingEstimationPass::calDataChannelSwitching(mlir::ModuleOp& topModule,
   conSegSuccNodesList(switchInfo, profileResults);
 
   // Step 6: Get all glitching base node in each MG
+  llvm::dbgs() << "[DEBUG]  [SS6] Find all glitching nodes\n";
   dataGlitchNodeSearch(switchInfo, profileResults);
+
+  // Step 7: Update all glitching value for data base nodes in the dataflow circuit
+  llvm::dbgs() << "[DEBUG]  [SS7] Calculate all glitching values\n";
+  dataBaseNodeGlitchUpdate(switchInfo, profileResults, false);
+
+  // Step 8: Propagate all the data base value
+  llvm::dbgs() << "[DEBUG]  [SS8] Final data channel value updates\n";
+  dfgDataChannelPropagate(switchInfo, profileResults);
 }
 
 
