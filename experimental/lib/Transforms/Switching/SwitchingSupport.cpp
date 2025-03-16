@@ -1023,6 +1023,19 @@ void AdjGraph::buildCondandStoreSrcMap() {
 
       std::string controlSrcNode = graphBacktrack(selCBrNode->condPreNodeName, allDataBaseNode);
       condBrToConSrcMap[selNode] = controlSrcNode;
+
+      // Updated the connected buffers as well
+      for (const auto& selSucNode: selCBrNode->sucs) {
+        if (selSucNode.find("buffer")) {
+          // Get the port index
+          unsigned selPortIdx = selCBrNode->outChannelNameToIndexMap[selSucNode];
+          if (condBrToBufferMap.find(selNode) != condBrToBufferMap.end()) {
+            condBrToBufferMap[selNode].push_back(std::make_pair(selSucNode, selPortIdx));
+          } else {
+            condBrToBufferMap[selNode] = {std::make_pair(selSucNode, selPortIdx)};
+          }
+        }
+      }
     } else if (selNode.find("store") != std::string::npos) {
       auto *selStoreNode = dyn_cast<DStoreNode>(nodes[selNode].get());
 

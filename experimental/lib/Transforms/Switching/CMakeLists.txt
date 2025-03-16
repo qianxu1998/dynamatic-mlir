@@ -4,6 +4,7 @@ add_dynamatic_library(DynamaticExperimentalSwitchingEstimation
   ProfilingAnalyzer.cpp
   ExecModel.cpp
   DataChannelCal.cpp
+  HandShakeChannelCal.cpp
 
   DEPENDS
   DynamaticExperimentalTransformsPassIncGen

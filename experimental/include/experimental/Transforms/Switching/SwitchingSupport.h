@@ -119,8 +119,12 @@ struct SwitchingInfo {
   std::map<std::string, std::map<std::string, std::vector<NodeGlitchInfo>>> mgGlitchNodeDict;
   // Map from seg label to ordered Data base nodes
   std::map<std::string, std::vector<std::string>> segToOrderedDataBaseNodes;
+  // Map from seg label to ordered ALU nodes
+  std::map<std::string, std::vector<std::string>> segToOrderedALUNodes;
   // Map from seg label to ordered mux and control merge node list
   std::map<std::string, muxCMNodesList> segToControlNodeList;
+  // Map stroing the first iteration index that the seg is executed
+  std::map<std::string, unsigned> segToExecutedIter;
 };
 
 // Class used to construct the per segment (MG & one-time execution segment)
@@ -314,6 +318,9 @@ public:
   std::map<std::string, std::vector<std::string>> cmToMuxMap;
   // CondBr to control source node map
   std::map<std::string, std::string> condBrToConSrcMap;
+  // Map from cond_br node to the directly connected buffer nodes and the corresponding port idx, if exists
+  // Format: {"cond_br_node" : [(buffer_name, port_idx), ], }
+  std::map<std::string, std::vector<std::pair<std::string, unsigned>>> condBrToBufferMap;
 
   // 
   //  Internal Storing Variables

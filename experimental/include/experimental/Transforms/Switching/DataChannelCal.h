@@ -90,6 +90,12 @@ int calGlitchValue(int op1, int op2, std::string selNode);
 // This function returns the data src node of the specified mux node in the selected execution iteration
 std::string getMuxDataSrc(SwitchingInfo &switchInfo, std::string selMuxNode, unsigned selIter);
 
+// This function will reduce the input integer value to the target bit width
+int reduceBits(int value, unsigned targetBitWidth);
+
+// This fucntion gets the cond_value of for the cond_br node for data channel update
+int getCondBrNodeCondValue(SwitchingInfo &switchInfo, unsigned iterIndex, std::string nodeName);
+
 //===----------------------------------------------------------------------===//
 //
 // Functions for finding the data source node in different segments
@@ -109,6 +115,12 @@ MgNodeInfo segGeneralSuccSearch(SwitchingInfo &switchInfo, std::string startNode
 // This function finds the actual source of the specified start_node in the selected MG
 // TODO: Merge the following function with graphBacktrack
 std::string segNodeDataSrcSearch(SwitchingInfo &switchInfo, std::string startNode, AdjGraph *selGraph);
+
+// This function finds the src node of the specified node in the last segment(E)
+std::string segENodeSrcSearch(SwitchingInfo &switchInfo, std::string nodeName, SCFProfilingResult &profileResults);
+
+// This function find the address src of the specifed mem_load unit, in segment "S" and "T"
+std::string memAddrSrcSearch(SwitchingInfo &switchInfo, SCFProfilingResult &profileResults, std::string nodeName, std::string selSeg, unsigned iterIdx);
 
 //  This function returns the longest path form the start point(s) of the specified cfdfc to the desired node
 // TODO: Merge the finding with the analyzeglobalorder function.

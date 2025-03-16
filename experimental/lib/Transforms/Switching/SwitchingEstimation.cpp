@@ -9,6 +9,7 @@
 #include "experimental/Transforms/Switching/SwitchingSupport.h"
 #include "experimental/Transforms/Switching/ProfilingAnalyzer.h"
 #include "experimental/Transforms/Switching/DataChannelCal.h"
+#include "experimental/Transforms/Switching/HandShakeChannelCal.h"
 #include "dynamatic/Dialect/Handshake/HandshakeOps.h"
 #include "dynamatic/Dialect/Handshake/HandshakeAttributes.h"
 #include "dynamatic/Support/DynamaticPass.h"
@@ -76,7 +77,7 @@ struct SwitchingEstimationPass
   // 
   //  Handshake Channel Switching Calculation
   //
-  void calHSChannelSwitching(mlir::ModuleOp& topModule);
+  void calHSChannelSwitchingSteady(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults);
 };
 } // namespace 
 
@@ -171,7 +172,7 @@ void SwitchingEstimationPass::runDynamaticPass() {
 
   // Step 6: Calculate switches in handshake channels
   llvm::dbgs() << "[DEBUG] [STEP 6] Calculate Handshake Channel Switching\n";
-  llvm::dbgs() << "[DEBUG] \tOngoing\n";
+  calHSChannelSwitchingSteady(topModule, profilingResults);
 
 }
 
@@ -181,6 +182,15 @@ void SwitchingEstimationPass::runDynamaticPass() {
 //
 //===----------------------------------------------------------------------===//
 void SwitchingEstimationPass::calDataChannelSwitching(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults) {
+  // Step 0: Construct the execution map
+  llvm::dbgs() << "[DEBUG]  [SS0] Construct the segLable to IterIdx Map\n";
+  for (unsigned i = 0; i < profileResults.executedSegTrace.size(); i++) {
+    std::string segLabel = profileResults.executedSegTrace[i];
+    if (switchInfo.segToExecutedIter.find(segLabel) == switchInfo.segToExecutedIter.end()) {
+      switchInfo.segToExecutedIter[segLabel] = i;
+    }
+  }
+
   // Step 1: Get the iteration index for the frist execution of each segment
   llvm::dbgs() << "[DEBUG]  [SS1] Get the BB Pair to Control Merge Output Map\n";
   constructBBPairToCMResMap(switchInfo);
@@ -237,7 +247,23 @@ void SwitchingEstimationPass::calDataChannelSwitching(mlir::ModuleOp& topModule,
   dfgDataChannelPropagate(switchInfo, profileResults);
 }
 
+//===----------------------------------------------------------------------===//
+//
+// Handshake Channel Switching
+//
+//===----------------------------------------------------------------------===//
+void SwitchingEstimationPass::calHSChannelSwitchingSteady(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults) {
+  // For each MG, we do the following two steps
+  //  Step 1: Update buffer information
+  //  Step 2: Calculate the steady state handhshake channel switching
 
+  // Step 1
+  for (unsigned i = 0; i < switchInfo.cfdfcThroughput.size(); i++) {
+    extractBufferInfo(switchInfo, std::to_string(i), true);
+  }
+
+  // Step 2
+}
 
 //===----------------------------------------------------------------------===//
 //
