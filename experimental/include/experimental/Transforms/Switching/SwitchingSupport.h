@@ -125,6 +125,13 @@ struct SwitchingInfo {
   std::map<std::string, muxCMNodesList> segToControlNodeList;
   // Map stroing the first iteration index that the seg is executed
   std::map<std::string, unsigned> segToExecutedIter;
+
+  // 
+  //  Variables for handshake channel switching calculation
+  //
+  // Vector storing the list of load units influenced by transparent buffers in each MG,
+  // with ascending order for different MG
+  std::vector<std::vector<std::string>> mgInfluencedLoadUnits;
 };
 
 // Class used to construct the per segment (MG & one-time execution segment)
@@ -421,6 +428,20 @@ const std::unordered_set<std::string> GLITCH_NODE = {
   "mulf", "divui", "divsi", "divf", "ori", "andi"
 };
 
+// Define all join type like nodes
+static const std::unordered_set<std::string> JOIN_NODE = {
+  "cmpi",
+  "addi",
+  "subi",
+  "muli",
+  "shli",
+  "shrsi",
+  "shrui",
+  "ori",
+  "andi",
+  "divui"
+};
+
 //===----------------------------------------------------------------------===//
 //
 // Class for storing data channel values
@@ -578,6 +599,9 @@ std::vector<std::string> split(const std::string &s, const std::string& delimite
 
 // This function removes the starting and ending empty space
 std::string strip(const std::string &inputStr, const std::string &toRemove);
+
+// Get unsigned number from a float
+unsigned getUnsigned(float_t inputValue);
 
 // This function prints the node succ list info
 void printMgNodeInfo(const MgNodeInfo &info);

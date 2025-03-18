@@ -1216,6 +1216,16 @@ std::string strip(const std::string &inputStr, const std::string &toRemove) {
   return stripped;
 }
 
+unsigned getUnsigned(float_t inputValue) {
+  // 1) apply floor, which returns a double
+  double floored = std::floor(static_cast<double>(inputValue));
+
+  // 2) cast to unsigned
+  unsigned result = static_cast<unsigned>(floored);
+
+  return result;
+}
+
 /// Extracts the latency for each operation
 /// This is done in 3 ways:
 /// 1. If the operation is in the timingDB, the latency is extracted from the

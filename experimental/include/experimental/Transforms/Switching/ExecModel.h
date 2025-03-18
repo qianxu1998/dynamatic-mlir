@@ -83,8 +83,8 @@ public:
   // - calValidSwitching: if either numValid0 or numValid1 > 0, set valid signal to 2;
   //   if both are 0, then set valid signal to 0; if II==1, then also set to 0; otherwise, set to 2.
   virtual void calValidSwitching(const std::string &sucNodeName,
-                         unsigned &numValid0,
-                         unsigned &numValid1,
+                         int &numValid0,
+                         int &numValid1,
                          unsigned &II);
   
   // calValidSet: if the valid signal for sucNodeName is 0 (or II==1), then store the full set {0,...,II-1};
@@ -96,8 +96,8 @@ public:
   // calReadySwitching: if both numValid and numReady are 0, set ready signal to 0;
   // if either > 0, set it to 2.
   virtual void calReadySwitching(const std::string &preNodeName,
-                         unsigned &numValid,
-                         unsigned &numReady);
+                         int &numValid,
+                         int &numReady);
 
   // calReadySet: if both set_valid and set_ready are provided (non-null),
   // then take their intersection; otherwise, if readySignal[preNodeName] is 0 then store the full set {0,...,II-1},
@@ -131,7 +131,7 @@ public:
   // Handshake counting functions:
   // calValidSwitching: if numValid is 0, set valid signal to 0; else to 2.
   virtual void calValidSwitching(const std::string &sucNodeName,
-                         unsigned &numValid);
+                         int &numValid);
 
   // calValidSet: if validSignal[sucNodeName] is 0, store full set {0,...,II-1}; else store {nodeStartTime}.
   virtual void calValidSet(const std::string &sucNodeName,
@@ -140,7 +140,7 @@ public:
 
   // calReadySwitching: if numReady is 0, set ready signal to 0; else to 2.
   virtual void calReadySwitching(const std::string &preNodeName,
-                         unsigned &numReady);
+                         int &numReady);
 
   // calReadySet: if a set (setR) is provided, simply store it; else if readySignal[preNodeName] is 0, store full set; 
   // if >0, store {nodeStartTime}; otherwise, if setVMap is not empty and its full set is not equal to {0,...,II-1}, use that.
@@ -173,8 +173,8 @@ public:
       : JoinNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 
   void calValidSwitching(const std::string &sucNodeName,
-                         unsigned &numValid0,
-                         unsigned &numValid1,
+                         int &numValid0,
+                         int &numValid1,
                          unsigned &II) override {
     JoinNode::calValidSwitching(sucNodeName, numValid0, numValid1, II);
   }
@@ -186,8 +186,8 @@ public:
   }
   
   void calReadySwitching(const std::string &preNodeName,
-                         unsigned &numValid,
-                         unsigned &numReady) override {
+                         int &numValid,
+                         int &numReady) override {
     JoinNode::calReadySwitching(preNodeName, numValid, numReady);
   }
   
@@ -215,8 +215,8 @@ public:
       : JoinNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 
   void calValidSwitching(const std::string &sucNodeName,
-                         unsigned &numValid0,
-                         unsigned &numValid1,
+                         int &numValid0,
+                         int &numValid1,
                          unsigned &II) override {
     JoinNode::calValidSwitching(sucNodeName, numValid0, numValid1, II);
   }
@@ -228,8 +228,8 @@ public:
   }
   
   void calReadySwitching(const std::string &preNodeName,
-                         unsigned &numValid,
-                         unsigned &numReady) override {
+                         int &numValid,
+                         int &numReady) override {
     JoinNode::calReadySwitching(preNodeName, numValid, numReady);
   }
   
@@ -257,8 +257,8 @@ public:
       : JoinNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 
   void calValidSwitching(const std::string &sucNodeName,
-                         unsigned &numValid0,
-                         unsigned &numValid1,
+                         int &numValid0,
+                         int &numValid1,
                          unsigned &II) override {
     JoinNode::calValidSwitching(sucNodeName, numValid0, numValid1, II);
   }
@@ -270,8 +270,8 @@ public:
   }
   
   void calReadySwitching(const std::string &preNodeName,
-                         unsigned &numValid,
-                         unsigned &numReady) override {
+                         int &numValid,
+                         int &numReady) override {
     JoinNode::calReadySwitching(preNodeName, numValid, numReady);
   }
   
@@ -299,8 +299,8 @@ public:
       : JoinNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 
   void calValidSwitching(const std::string &sucNodeName,
-                         unsigned &numValid0,
-                         unsigned &numValid1,
+                         int &numValid0,
+                         int &numValid1,
                          unsigned &II) override {
     JoinNode::calValidSwitching(sucNodeName, numValid0, numValid1, II);
   }
@@ -312,8 +312,8 @@ public:
   }
   
   void calReadySwitching(const std::string &preNodeName,
-                         unsigned &numValid,
-                         unsigned &numReady) override {
+                         int &numValid,
+                         int &numReady) override {
     JoinNode::calReadySwitching(preNodeName, numValid, numReady);
   }
   
@@ -341,7 +341,7 @@ public:
       : PassNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
 
   void calValidSwitching(const std::string &sucNodeName,
-                         unsigned &numValid) override {
+                         int &numValid) override {
     PassNode::calValidSwitching(sucNodeName, numValid);
   }
   
@@ -352,7 +352,7 @@ public:
   }
   
   void calReadySwitching(const std::string &preNodeName,
-                         unsigned &numReady) override {
+                         int &numReady) override {
     PassNode::calReadySwitching(preNodeName, numReady);
   }
   
@@ -379,14 +379,14 @@ public:
 
   // Handshake functions:
   // For valid switching: if num_valid == 0, valid signal is 0; else if > 0, valid signal is 2.
-  void calValidSwitching(const std::string &sucNodeName, unsigned &numValid);
+  void calValidSwitching(const std::string &sucNodeName, int &numValid);
 
   // For valid set: if valid signal is 0, use the full set {0,...,II-1};
   // else, if an input set is provided, shift it by the node latency.
   void calValidSet(const std::string &sucNodeName, const std::set<unsigned> *inSetV, unsigned &II);
 
   // For ready switching: if num_ready == 0, ready signal is 0; else ready signal is 2.
-  void calReadySwitching(const std::string &preNodeName, unsigned &numReady);
+  void calReadySwitching(const std::string &preNodeName, int &numReady);
 
   // For ready set: for a load node, we assume the ready set is taken directly if provided;
   // otherwise, if readySignal is 0 then use full set, or else use {nodeStartTime}.
@@ -431,14 +431,14 @@ public:
 
   // Handshake functions for d_store.
   // For valid switching on the memory controller channel (key "mc").
-  void calValidSwitching(unsigned numValid1, unsigned numValid2);
+  void calValidSwitching(int numValid1, int numValid2);
   void calValidSet(const std::set<unsigned> *setV0,
                            const std::set<unsigned> *setV1,
                            unsigned II);
 
   void calReadySwitching(const std::string &preNodeName,
-                                 unsigned numValid1,
-                                 unsigned numValid2);
+                                 int numValid1,
+                                 int numValid2);
   void calReadySet(const std::string &preNodeName,
                            const std::set<unsigned> *setV0,
                            const std::set<unsigned> *setV1,
@@ -488,21 +488,21 @@ public:
   //   numVList: vector of valid signal switching counts for each input channel.
   //   II: initiation interval.
   void calValidSwitching(const std::string &sucNodeName,
-                                 const std::vector<std::set<unsigned>> &setVList,
-                                 const std::vector<unsigned> &numVList,
+                                 const std::vector<std::set<unsigned>*> &setVList,
+                                 const std::vector<int> &numVList,
                                  unsigned II);
 
   // calValidSet:
   //   setVList: vector of active valid sets for each input channel.
   //   II: initiation interval.
   void calValidSet(const std::string &sucNodeName,
-                           const std::vector<std::set<unsigned>> &setVList,
+                           const std::vector<std::set<unsigned>*> &setVList,
                            unsigned II);
 
   // calReadySwitching:
   //   For ready switching we have a single number.
   void calReadySwitching(const std::string &preNodeName,
-                                 unsigned numReady);
+                                 int numReady);
 
   // calReadySet:
   //   setR is provided as a pointer (if not null, it is used).
@@ -592,9 +592,9 @@ public:
   //     - nodeSteadyStart: the steady‐state start cycle of this node.
   //     - II: the initiation interval.
   void calValidSwitching(const std::string &sucNodeName,
-                         unsigned numValid,
-                         const std::map<std::string, std::set<unsigned>> &setRDict,
-                         const std::map<std::string, unsigned> &numReadyDict,
+                         int numValid,
+                         const std::unordered_map<std::string, std::set<unsigned>*> &setRDict,
+                         const std::unordered_map<std::string, int> &numReadyDict,
                          unsigned sucNodeStart,
                          unsigned nodeSteadyStart,
                          unsigned II);
@@ -604,15 +604,15 @@ public:
   //   Otherwise, if numValid > 0, assign {nodeStartTime}; else, assign the ready set from setRDict.
   void calValidSet(const std::string &sucNodeName,
                    unsigned nodeStartTime,
-                   unsigned numValid,
-                   const std::map<std::string, std::set<unsigned>> &setRDict,
+                   int numValid,
+                   std::unordered_map<std::string, std::set<unsigned>*> &setRDict,
                    unsigned II);
 
   // calReadySwitching:
   //   Takes a list of ready counts (one per channel) and if any value > 0 sets the ready signal to 2;
   //   otherwise, if all values are 0, sets it to 0.
   void calReadySwitching(const std::string &preNodeName,
-                         const std::vector<unsigned> &numReadyList);
+                         const std::vector<int> &numReadyList);
 
   // calReadySet:
   //   If a ready set (setR) is provided (non-null), use it.
@@ -621,7 +621,7 @@ public:
   //     - If the union equals the full set {0,...,II-1}, assign {0};
   //     - Otherwise, assign the last element of the union.
   void calReadySet(const std::string &preNodeName,
-                   const std::map<std::string, std::set<unsigned>> &setRDict,
+                   const std::unordered_map<std::string, std::set<unsigned>*> &setRDict,
                    unsigned II);
 };
 
@@ -645,8 +645,8 @@ public:
   // input valid counts.
   void calValidSwitching(const std::string &sucNodeName,
                          unsigned condValue,
-                         unsigned numValid0,
-                         unsigned numValid1);
+                         int numValid0,
+                         int numValid1);
 
   // calValidSet: If valid signal for sucNodeName is 0 (or II==1), then the entire cycle range is active;
   // otherwise, if condValue matches the port number of sucNodeName then assign an empty set,
@@ -659,8 +659,8 @@ public:
   // calReadySwitching: For the given predecessor, if both numValid and numReady are 0 then ready is 0;
   // else ready is 2.
   void calReadySwitching(const std::string &preNodeName,
-                         unsigned numValid,
-                         unsigned numReady);
+                         int numValid,
+                         int numReady);
 
   // calReadySet: If a ready set is provided (non-null pointer), assign it.
   // Otherwise, if readySignal for the predecessor is 0, assign the full set {0,...,II-1}.
@@ -785,7 +785,7 @@ public:
   //     - II: initiation interval.
   void calReadySwitching(const std::string &preNodeName,
                          unsigned condValue,
-                         unsigned num_v,
+                         int num_v,
                          const std::set<unsigned> *setV0,
                          const std::set<unsigned> *setVSelect,
                          const std::set<unsigned> *setR,

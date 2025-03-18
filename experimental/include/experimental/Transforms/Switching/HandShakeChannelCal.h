@@ -14,6 +14,7 @@
 #define EXPERIMENTAL_TRANSFORMS_HANDSHAKE_SWITCHING_H
 
 #include "experimental/Transforms/Switching/SwitchingSupport.h"
+#include "experimental/Transforms/Switching/DataChannelCal.h"
 #include "experimental/Transforms/Switching/ProfilingAnalyzer.h"
 #include "experimental/Transforms/Switching/ExecModel.h"
 #include "dynamatic/Transforms/BufferPlacement/CFDFC.h"
@@ -45,5 +46,20 @@ using namespace dynamatic::handshake;
 // All info will be stored in the corresponding structure in the corresponding buffer node
 void extractBufferInfo(SwitchingInfo &switchInfo, std::string selMG, bool debug);
 
+// This function iterativly counts the number of handshake switches of all nodes in the selected cfdfc
+void mgHandshakeSwitchingCounting(SwitchingInfo &switchInfo, std::string selMG, bool debug);
+
+// This function updates the status of the selected node's handshake signals
+void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::string &selMG, unsigned selMGII, bool debug);
+
+//===---------------------------------------------------------------------------------===//
+//
+// Functions for DFS in the graph, should be merged with the other functions if possible
+//
+//===---------------------------------------------------------------------------------===//
+std::vector<std::string> findInfluencedLoadNodes(SwitchingInfo &switchInfo, std::string selMG, std::vector<std::string> bufferList);
+
+// This function will return the steady state starting time for the selected node in the specified mg
+int mgGetNodeStartingPoint(SwitchingInfo &switchInfo, std::string &selNode, std::string &selMG);
 
 #endif // EXPERIMENTAL_TRANSFORMS_HANDSHAKE_SWITCHING_H

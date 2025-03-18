@@ -259,10 +259,13 @@ void SwitchingEstimationPass::calHSChannelSwitchingSteady(mlir::ModuleOp& topMod
 
   // Step 1
   for (unsigned i = 0; i < switchInfo.cfdfcThroughput.size(); i++) {
-    extractBufferInfo(switchInfo, std::to_string(i), true);
+    extractBufferInfo(switchInfo, std::to_string(i), false);
   }
 
   // Step 2
+  for (unsigned i = 0; i < switchInfo.cfdfcThroughput.size(); i++) {
+    mgHandshakeSwitchingCounting(switchInfo, std::to_string(i), true);
+  }
 }
 
 //===----------------------------------------------------------------------===//

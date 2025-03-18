@@ -72,8 +72,8 @@ void BufferNode::printDetail() {
 //
 //===----------------------------------------------------------------------===//
 void JoinNode::calValidSwitching(const std::string &sucNodeName,
-                                 unsigned &numValid0,
-                                 unsigned &numValid1,
+                                 int &numValid0,
+                                 int &numValid1,
                                  unsigned &II) {
   if (numValid0 > 0 || numValid1 > 0) {
     validSignal[sucNodeName] = 2;
@@ -102,8 +102,8 @@ void JoinNode::calValidSet(const std::string &sucNodeName,
 }
 
 void JoinNode::calReadySwitching(const std::string &preNodeName,
-                                 unsigned &numValid,
-                                 unsigned &numReady) {
+                                 int &numValid,
+                                 int &numReady) {
   if (numValid == 0 && numReady == 0) {
     readySignal[preNodeName] = 0;
   } else if (numValid > 0 || numReady > 0) {
@@ -147,10 +147,10 @@ void JoinNode::setReadySet(const std::string &preNodeName) {
 //
 //===----------------------------------------------------------------------===//
 void PassNode::calValidSwitching(const std::string &sucNodeName,
-                                 unsigned &numValid) {
+                                 int &numValid) {
   if (numValid == 0)
     validSignal[sucNodeName] = 0;
-  else
+  else if (numValid > 0)
     validSignal[sucNodeName] = 2;
 }
 
@@ -169,10 +169,10 @@ void PassNode::calValidSet(const std::string &sucNodeName,
 }
 
 void PassNode::calReadySwitching(const std::string &preNodeName,
-                                 unsigned &numReady) {
+                                 int &numReady) {
   if (numReady == 0)
     readySignal[preNodeName] = 0;
-  else
+  else if (numReady > 0)
     readySignal[preNodeName] = 2;
 }
 
@@ -233,10 +233,10 @@ DLoadNode::DLoadNode(mlir::Operation *op,
   addressInNodeName = addrInRes.getDefiningOp()->getAttrOfType<mlir::StringAttr>("handshake.name").getValue().str();
 }
 
-void DLoadNode::calValidSwitching(const std::string &sucNodeName, unsigned &numValid) {
+void DLoadNode::calValidSwitching(const std::string &sucNodeName, int &numValid) {
   if (numValid == 0)
     validSignal[sucNodeName] = 0;
-  else
+  else if (numValid > 0)
     validSignal[sucNodeName] = 2;
 }
 
@@ -253,10 +253,10 @@ void DLoadNode::calValidSet(const std::string &sucNodeName, const std::set<unsig
   }
 }
 
-void DLoadNode::calReadySwitching(const std::string &preNodeName, unsigned &numReady) {
+void DLoadNode::calReadySwitching(const std::string &preNodeName, int &numReady) {
   if (numReady == 0)
     readySignal[preNodeName] = 0;
-  else
+  else if (numReady > 0)
     readySignal[preNodeName] = 2;
 }
 
@@ -351,7 +351,7 @@ DStoreNode::DStoreNode(mlir::Operation *op,
   addressInSrcNode = "";
 }
 
-void DStoreNode::calValidSwitching(unsigned numValid1, unsigned numValid2) {
+void DStoreNode::calValidSwitching(int numValid1, int numValid2) {
   // For the memory controller channel, use key "mc".
   if (numValid1 > 0 || numValid2 > 0)
     validSignal["mem"] = 4;
@@ -377,7 +377,7 @@ void DStoreNode::calValidSet(const std::set<unsigned> *setV0, const std::set<uns
   }
 }
 
-void DStoreNode::calReadySwitching(const std::string &preNodeName, unsigned numValid1, unsigned numValid2) {
+void DStoreNode::calReadySwitching(const std::string &preNodeName, int numValid1, int numValid2) {
   // TODO: May need to change the following modeling as the implementation changed
   if (numValid1 > 0 || numValid2 > 0)
     readySignal[preNodeName] = 2;
@@ -454,8 +454,8 @@ bool DStoreNode::handshakeSwitchingChecking() {
 //===----------------------------------------------------------------------===//
 
 void MergeNode::calValidSwitching(const std::string &sucNodeName,
-                                  const std::vector<std::set<unsigned>> &setVList,
-                                  const std::vector<unsigned> &numVList,
+                                  const std::vector<std::set<unsigned>*> &setVList,
+                                  const std::vector<int> &numVList,
                                   unsigned II) {
   if (numVList.size() == 1) {
     if (numVList[0] == 0)
@@ -467,47 +467,44 @@ void MergeNode::calValidSwitching(const std::string &sucNodeName,
       validSignal[sucNodeName] = 0;
     else if (numVList[1] == 0)
       validSignal[sucNodeName] = 0;
-    else if (setVList.size() >= 2) {
-      // Check that both input sets are provided (we assume a non-empty set represents a valid set)
-      if (!setVList[0].empty() && !setVList[1].empty()) {
-        // Compute the union of setVList[0] and setVList[1]
-        std::set<unsigned> unionSet;
-        std::set_union(setVList[0].begin(), setVList[0].end(),
-                       setVList[1].begin(), setVList[1].end(),
-                       std::inserter(unionSet, unionSet.begin()));
+    else if (setVList[0] && setVList[1]) {
+      // Case 2: the union active range of the two inputs covers the entire II
+      std::set<unsigned> unionSet;
+      std::set_union(setVList[0]->begin(), setVList[0]->end(),
+        setVList[1]->begin(), setVList[1]->end(),
+        std::inserter(unionSet, unionSet.begin()));
         // Build the full set: {0, 1, ..., II-1}
         std::set<unsigned> fullSet;
         for (unsigned i = 0; i < II; ++i)
           fullSet.insert(i);
         if (unionSet == fullSet)
           validSignal[sucNodeName] = 0;
-      } else if (numVList[0] > 0 && numVList[1] > 0) {
-        validSignal[sucNodeName] = 2;
-      }
+    } else if (numVList[0] > 0 && numVList[1] > 0) {
+      validSignal[sucNodeName] = 2;
     }
   }
 }
 
 void MergeNode::calValidSet(const std::string &sucNodeName,
-                            const std::vector<std::set<unsigned>> &setVList,
+                            const std::vector<std::set<unsigned>*> &setVList,
                             unsigned II) {
   if (setVList.size() == 1) {
     // One input channel
     if (validSignal.find(sucNodeName) != validSignal.end() &&
         validSignal[sucNodeName] == 0) {
       setV[sucNodeName] = makeFullSet(II);
-    } else if (!setVList[0].empty()) {
-      setV[sucNodeName] = setVList[0];
+    } else if (setVList[0]) {
+      setV[sucNodeName] = *setVList[0];
     }
   } else {
     if (validSignal.find(sucNodeName) != validSignal.end() &&
         validSignal[sucNodeName] == 0) {
       setV[sucNodeName] = makeFullSet(II);
-    } else if (setVList.size() >= 2 && !setVList[0].empty() && !setVList[1].empty()) {
+    } else if (setVList.size() >= 2 && setVList[0] && setVList[1]) {
       // Compute the union: in C++ we use std::set_union.
       std::set<unsigned> unionSet;
-      std::set_union(setVList[0].begin(), setVList[0].end(),
-                     setVList[1].begin(), setVList[1].end(),
+      std::set_union(setVList[0]->begin(), setVList[0]->end(),
+                     setVList[1]->begin(), setVList[1]->end(),
                      std::inserter(unionSet, unionSet.begin()));
       setV[sucNodeName] = unionSet;
     }
@@ -515,7 +512,7 @@ void MergeNode::calValidSet(const std::string &sucNodeName,
 }
 
 void MergeNode::calReadySwitching(const std::string &preNodeName,
-                                  unsigned numReady) {
+                                  int numReady) {
   if (numReady == 0)
     readySignal[preNodeName] = 0;
   else if (numReady > 0)
@@ -660,12 +657,12 @@ void CMergeNode::printDetail() {
 //===----------------------------------------------------------------------===//
 
 void ForkNode::calValidSwitching(const std::string &sucNodeName,
-                                 unsigned numValid,
-                                 const std::map<std::string, std::set<unsigned>> &setRDict,
-                                 const std::map<std::string, unsigned> &numReadyDict,
-                                 unsigned sucNodeStart,
-                                 unsigned nodeSteadyStart,
-                                 unsigned II) {
+  int numValid,
+  const std::unordered_map<std::string, std::set<unsigned>*> &setRDict,
+  const std::unordered_map<std::string, int> &numReadyDict,
+  unsigned sucNodeStart,
+  unsigned nodeSteadyStart,
+  unsigned II) {
   // If any valid switching occurs at the input, the fork must toggle.
   if (numValid > 0) {
     validSignal[sucNodeName] = 2;
@@ -689,10 +686,10 @@ void ForkNode::calValidSwitching(const std::string &sucNodeName,
   unsigned selStartPoint = 0;
   auto it = setRDict.find(sucNodeName);
   if (it != setRDict.end()) {
-    const std::set<unsigned> &s = it->second;
-    if (!s.empty()) {
-      if (s.size() == 1)
-        selStartPoint = *s.begin();
+    std::set<unsigned>* s = it->second;
+    if (s && (s->size() > 0)) {
+      if (s->size() == 1)
+        selStartPoint = *s->begin();
       else {
         validSignal[sucNodeName] = 2;
         return;
@@ -709,12 +706,12 @@ void ForkNode::calValidSwitching(const std::string &sucNodeName,
   // For each entry in setRDict (other than sucNodeName), check if selStartPoint is contained.
   for (const auto &entry : setRDict) {
     if (entry.first != sucNodeName) {
-      const std::set<unsigned> &s = entry.second;
+      std::set<unsigned>* s = entry.second;
       // In our design, an empty set is equivalent to None.
-      if (s.empty()) {
+      if (!s) {
         flag = false;
         existFlag = false;
-      } else if (s.find(selStartPoint) == s.end()) {
+      } else if (s->find(selStartPoint) == s->end()) {
         flag = false;
       }
     }
@@ -736,10 +733,10 @@ void ForkNode::calValidSwitching(const std::string &sucNodeName,
 }
 
 void ForkNode::calValidSet(const std::string &sucNodeName,
-                           unsigned nodeStartTime,
-                           unsigned numValid,
-                           const std::map<std::string, std::set<unsigned>> &setRDict,
-                           unsigned II) {
+                    unsigned nodeStartTime,
+                    int numValid,
+                    std::unordered_map<std::string, std::set<unsigned>*> &setRDict,
+                    unsigned II) {
   if (validSignal.find(sucNodeName) != validSignal.end()) {
     if (validSignal[sucNodeName] == 0) {
       setV[sucNodeName] = makeFullSet(II);
@@ -751,27 +748,32 @@ void ForkNode::calValidSet(const std::string &sucNodeName,
       } else {
         auto it = setRDict.find(sucNodeName);
         if (it != setRDict.end())
-          setV[sucNodeName] = it->second;
+          if (it->second)
+            setV[sucNodeName] = *(it->second);
       }
     }
   }
 }
 
 void ForkNode::calReadySwitching(const std::string &preNodeName,
-                                 const std::vector<unsigned> &numReadyList) {
+                                 const std::vector<int> &numReadyList) {
   // If any value in numReadyList is greater than 0, set ready signal to 2 and return.
-  for (unsigned value : numReadyList) {
+  bool tmpFlag = true;
+  for (int value : numReadyList) {
     if (value > 0) {
       readySignal[preNodeName] = 2;
       return;
     }
+
+    if (value != 0) tmpFlag = false;
   }
   // Otherwise, if all values are 0, set ready signal to 0.
-  readySignal[preNodeName] = 0;
+  if (tmpFlag)
+    readySignal[preNodeName] = 0;
 }
 
 void ForkNode::calReadySet(const std::string &preNodeName,
-                           const std::map<std::string, std::set<unsigned>> &setRDict,
+                           const std::unordered_map<std::string, std::set<unsigned>*> &setRDict,
                            unsigned II) {
   if (readySignal.find(preNodeName) != readySignal.end()) {
     if (readySignal[preNodeName] == 0) {
@@ -784,15 +786,15 @@ void ForkNode::calReadySet(const std::string &preNodeName,
       for (const std::string &key : sucs) {
         auto it = setRDict.find(key);
         if (it != setRDict.end()) {
-          const std::set<unsigned> &s = it->second;
-          if (s.empty()) {
+          std::set<unsigned>* s = it->second;
+          if (!s) {
             exist = false;
             unionSet.clear(); // intersection with an empty set remains empty
           } else {
             // Compute the union: unionSet = unionSet ∪ s.
             std::set<unsigned> temp;
             std::set_union(unionSet.begin(), unionSet.end(),
-                           s.begin(), s.end(),
+                           s->begin(), s->end(),
                            std::inserter(temp, temp.begin()));
             unionSet = temp;
           }
@@ -860,8 +862,8 @@ CBrNode::CBrNode(mlir::Operation *op,
 //
 void CBrNode::calValidSwitching(const std::string &sucNodeName,
                                 unsigned condValue,
-                                unsigned numValid0,
-                                unsigned numValid1) {
+                                int numValid0,
+                                int numValid1) {
   // TODO: Check the polarity of the cond selection signal
   if (condValue == outChannelNameToIndexMap[sucNodeName])
     validSignal[sucNodeName] = 0;
@@ -891,8 +893,8 @@ void CBrNode::calValidSet(const std::string &sucNodeName,
 }
 
 void CBrNode::calReadySwitching(const std::string &preNodeName,
-                                unsigned numValid,
-                                unsigned numReady) {
+                                int numValid,
+                                int numReady) {
   if (numValid == 0 && numReady == 0)
     readySignal[preNodeName] = 0;
   else if (numValid > 0 || numReady > 0)
@@ -1048,7 +1050,7 @@ void MuxNode::calValidSet(const std::string &sucNodeName,
 
 void MuxNode::calReadySwitching(const std::string &preNodeName,
                                 unsigned condValue,
-                                unsigned num_v,
+                                int num_v,
                                 const std::set<unsigned> *setV0,
                                 const std::set<unsigned> *setVSelect,
                                 const std::set<unsigned> *setReady,
@@ -1081,7 +1083,7 @@ void MuxNode::calReadySwitching(const std::string &preNodeName,
     if (condValue != (prePort - 1)) {
       if (num_v == 0)
         readySignal[preNodeName] = 0;
-      else
+      else if (num_v > 0)
         readySignal[preNodeName] = 2;
     } else {
       if (setV0 != nullptr && setReady != nullptr) {
