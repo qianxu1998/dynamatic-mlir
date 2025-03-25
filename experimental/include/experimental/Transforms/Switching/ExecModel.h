@@ -111,6 +111,14 @@ public:
 
   // setReadySet: as a convenience, take the first key from setVMap and copy its set into setRMap for preNodeName.
   void setReadySet(const std::string &preNodeName);
+
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::JoinNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::JoinNodeKind;
+  }
 };
 
 //===----------------------------------------------------------------------===//
@@ -198,6 +206,14 @@ public:
                    unsigned &II) override {
     JoinNode::calReadySet(preNodeName, setValid, setReady, nodeStartTime, II);
   }
+
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::CmpiNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::CmpiNodeKind;
+  }
 };
 
 //===----------------------------------------------------------------------===//
@@ -239,6 +255,14 @@ public:
                    unsigned &nodeStartTime,
                    unsigned &II) override {
     JoinNode::calReadySet(preNodeName, setValid, setReady, nodeStartTime, II);
+  }
+
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::AddiNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::AddiNodeKind;
   }
 };
 
@@ -282,6 +306,14 @@ public:
                    unsigned &II) override {
     JoinNode::calReadySet(preNodeName, setValid, setReady, nodeStartTime, II);
   }
+
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::SubiNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::SubiNodeKind;
+  }
 };
 
 //===----------------------------------------------------------------------===//
@@ -324,6 +356,14 @@ public:
                    unsigned &II) override {
     JoinNode::calReadySet(preNodeName, setValid, setReady, nodeStartTime, II);
   }
+
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::MuliNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::MuliNodeKind;
+  }
 };
 
 //===----------------------------------------------------------------------===//
@@ -361,6 +401,14 @@ public:
                    unsigned &nodeStartTime,
                    unsigned &II) override {
     PassNode::calReadySet(preNodeName, setR, nodeStartTime, II);
+  }
+
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::ExtsiNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::ExtsiNodeKind;
   }
 };
 
@@ -509,6 +557,14 @@ public:
   void calReadySet(const std::string &preNodeName,
                            const std::set<unsigned> *setR,
                            unsigned II);
+
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::MergeNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::MergeNodeKind;
+  }
 };
 
 
@@ -593,7 +649,7 @@ public:
   //     - II: the initiation interval.
   void calValidSwitching(const std::string &sucNodeName,
                          int numValid,
-                         const std::unordered_map<std::string, std::set<unsigned>*> &setRDict,
+                         std::unordered_map<std::string, std::set<unsigned>*> &setRDict,
                          const std::unordered_map<std::string, int> &numReadyDict,
                          unsigned sucNodeStart,
                          unsigned nodeSteadyStart,
@@ -623,6 +679,14 @@ public:
   void calReadySet(const std::string &preNodeName,
                    const std::unordered_map<std::string, std::set<unsigned>*> &setRDict,
                    unsigned II);
+
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::ForkNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::ForkNodeKind;
+  }
 };
 
 
@@ -712,6 +776,14 @@ public:
            const std::map<std::string, unsigned> &sucDataWidthMap,
            unsigned latency, const unsigned& bbIndex)
       : JoinNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
+  
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::ShliNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::ShliNodeKind;
+  }
 };
 //===----------------------------------------------------------------------===//
 //
@@ -726,6 +798,14 @@ public:
             const std::map<std::string, unsigned> &sucDataWidthMap,
             unsigned latency, const unsigned& bbIndex)
       : JoinNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
+
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::ShrsiNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::ShrsiNodeKind;
+  }
 };
 
 
@@ -742,6 +822,14 @@ public:
             const std::map<std::string, unsigned> &sucDataWidthMap,
             unsigned latency, const unsigned& bbIndex)
       : JoinNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
+  
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::ShruiNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::ShruiNodeKind;
+  }
 };
 
 //===----------------------------------------------------------------------===//
@@ -836,6 +924,14 @@ public:
              const std::map<std::string, unsigned> &sucDataWidthMap,
              unsigned latency, const unsigned& bbIndex)
       : PassNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
+
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::TrunciNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::TrunciNodeKind;
+  }
 };
 
 //===----------------------------------------------------------------------===//
@@ -851,6 +947,14 @@ public:
             const std::map<std::string, unsigned> &sucDataWidthMap,
             unsigned latency, const unsigned& bbIndex)
       : PassNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
+  
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::ExtuiNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::ExtuiNodeKind;
+  }
 };
 
 //===----------------------------------------------------------------------===//
@@ -866,6 +970,14 @@ public:
                const std::map<std::string, unsigned> &sucDataWidthMap,
                unsigned latency, const unsigned& bbIndex)
       : PassNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
+  
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::ConstantNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::ConstantNodeKind;
+  }
 };
 
 //===----------------------------------------------------------------------===//
@@ -881,6 +993,14 @@ public:
           const std::map<std::string, unsigned> &sucDataWidthMap,
           unsigned latency, const unsigned& bbIndex)
       : JoinNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
+
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::OriNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::OriNodeKind;
+  }
 };
 //===----------------------------------------------------------------------===//
 //
@@ -895,6 +1015,14 @@ public:
            const std::map<std::string, unsigned> &sucDataWidthMap,
            unsigned latency, const unsigned& bbIndex)
       : JoinNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
+  
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::AndiNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::AndiNodeKind;
+  }
 };
 
 //===----------------------------------------------------------------------===//
@@ -933,6 +1061,14 @@ public:
       fullSet.insert(i);
     setR[preNodeName] = fullSet;
   }
+
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::SourceNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::SourceNodeKind;
+  }
 };
 
 //===----------------------------------------------------------------------===//
@@ -948,6 +1084,14 @@ public:
            const std::map<std::string, unsigned> &sucDataWidthMap,
            unsigned latency, const unsigned& bbIndex)
       : AdjNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
+
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::EndNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::EndNodeKind;
+  }
 };
 
 //----------------------------------------------------------------------------
@@ -980,6 +1124,14 @@ public:
   }
 
   void calDataout() {}
+
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::SinkNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::SinkNodeKind;
+  }
 };
 
 //===----------------------------------------------------------------------===//
@@ -1004,6 +1156,14 @@ public:
   void calValidSet();
   void calReadySwitching();
   void calReadySet();
+
+  // LLVM Casting support
+  NodeKind getKind() const override { return NodeKind::StartNodeKind; }
+
+  // "classof" needed for dyn_cast
+  static bool classof(const AdjNode *node) {
+    return node->getKind() == NodeKind::StartNodeKind;
+  }
 };
 
 //===----------------------------------------------------------------------===//

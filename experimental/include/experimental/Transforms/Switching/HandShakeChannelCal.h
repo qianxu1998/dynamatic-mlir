@@ -52,6 +52,10 @@ void mgHandshakeSwitchingCounting(SwitchingInfo &switchInfo, std::string selMG, 
 // This function updates the status of the selected node's handshake signals
 void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::string &selMG, unsigned selMGII, bool debug);
 
+// This function update information for all Join type node in the pending list to faciliatate Handshake signal updates
+// *Assumption: we assume at this stage all Join type node's valid signal is resolved
+std::vector<std::string> breakHandshakeUpdateDeadlock(SwitchingInfo &switchInfo, const std::vector<std::string> &pendingNodeList, std::string selMG, unsigned selMGII);
+
 //===---------------------------------------------------------------------------------===//
 //
 // Functions for DFS in the graph, should be merged with the other functions if possible

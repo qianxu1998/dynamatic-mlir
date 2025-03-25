@@ -658,7 +658,7 @@ void CMergeNode::printDetail() {
 
 void ForkNode::calValidSwitching(const std::string &sucNodeName,
   int numValid,
-  const std::unordered_map<std::string, std::set<unsigned>*> &setRDict,
+  std::unordered_map<std::string, std::set<unsigned>*> &setRDict,
   const std::unordered_map<std::string, int> &numReadyDict,
   unsigned sucNodeStart,
   unsigned nodeSteadyStart,
@@ -687,7 +687,7 @@ void ForkNode::calValidSwitching(const std::string &sucNodeName,
   auto it = setRDict.find(sucNodeName);
   if (it != setRDict.end()) {
     std::set<unsigned>* s = it->second;
-    if (s && (s->size() > 0)) {
+    if (s && (!s->empty())) {
       if (s->size() == 1)
         selStartPoint = *s->begin();
       else {
@@ -704,25 +704,35 @@ void ForkNode::calValidSwitching(const std::string &sucNodeName,
   bool flag = true;
   bool existFlag = true;
   // For each entry in setRDict (other than sucNodeName), check if selStartPoint is contained.
-  for (const auto &entry : setRDict) {
+  for (auto &entry : setRDict) {
     if (entry.first != sucNodeName) {
+      //! Testing
+      llvm::dbgs() << "selSuc " << nodeSteadyStart << "\n";
       std::set<unsigned>* s = entry.second;
       // In our design, an empty set is equivalent to None.
       if (!s) {
+        // If the corresponding setR is not empty
         flag = false;
-        existFlag = false;
       } else if (s->find(selStartPoint) == s->end()) {
         flag = false;
       }
     }
   }
 
+  //! Testing
+  llvm::dbgs() << "Node Steady Start: " << nodeSteadyStart << "\n";
+  llvm::dbgs() << "Sel Start Point: " << selStartPoint << "\n";
+  llvm::dbgs() << "Exist Flag: " << existFlag << "\n";
+
   if (flag && existFlag) {
     validSignal[sucNodeName] = 0;
     return;
   } else {
+    //! Testing
+    llvm::dbgs() << "Hit Valid Switching Calculation Case III\n";
     if (existFlag) {
       // Case 3: Compute desired cycle time.
+      // TODO: Verify the following desired criteria
       unsigned desiredCycleTime = (nodeSteadyStart != 0) ? (nodeSteadyStart - 1) : (II - 1);
       if (selStartPoint == 0)
         validSignal[sucNodeName] = 0;
@@ -966,6 +976,10 @@ void CBrNode::printDetail() {
   llvm::dbgs() << "[DEBUG] \t\tData_pre_node_name: " << dataPreNodeName << "\n";
   llvm::dbgs() << "[DEBUG] \t\tTrue_suc_node_name: " << trueSucNodeName << "\n";
   llvm::dbgs() << "[DEBUG] \t\tFalse_suc_node_name: " << falseSucNodeName << "\n";
+  llvm::dbgs() << "[DEBUG] \t\tOut Channel Name to Index Map:\n";
+  for (const auto& [outName, portIdx]: outChannelNameToIndexMap) {
+    llvm::dbgs() << "[DEBUG] \t\t\tOutput Node: " << outName << "; Port Idx: " << portIdx << "\n";
+  }
   llvm::dbgs() << "[DEBUG] \t\tPer_channel_dataout:\n";
   for (const auto &entry : per_channel_dataout) {
     llvm::dbgs() << "[DEBUG] \t\t\tChannel " << entry.first << ": ";
@@ -1079,7 +1093,7 @@ void MuxNode::calReadySwitching(const std::string &preNodeName,
   } else {
     // Case 2: data channel.
     // TODO: Check the port assignment methods
-    unsigned prePort = (preNodeName == conPreNodeName) ? 1 : 2;
+    unsigned prePort = preNameToPortIdxMap[preNodeName];
     if (condValue != (prePort - 1)) {
       if (num_v == 0)
         readySignal[preNodeName] = 0;

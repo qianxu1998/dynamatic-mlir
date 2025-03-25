@@ -384,9 +384,9 @@ AdjGraph::AdjGraph(const buffer::CFDFC& cfdfc, const TimingDatabase& timingDB,
     }
 
     //! Testing
-    // llvm::dbgs() << "[DEBUG] \t=================================\n";
-    // llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n";
-    // llvm::dbgs() << "[DEBUG] \tNode Latency From DataBase: " << nodeLatency << "\n";
+    llvm::dbgs() << "[DEBUG] \t=================================\n";
+    llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n";
+    llvm::dbgs() << "[DEBUG] \tNode Latency From DataBase: " << nodeLatency << "\n";
 
     // Step 2.1: Construct the node storing structure
     auto newNode = createNodeFromOperation(
@@ -395,7 +395,7 @@ AdjGraph::AdjGraph(const buffer::CFDFC& cfdfc, const TimingDatabase& timingDB,
     if (!newNode) continue;
 
     //! Testing
-    // newNode->printDetail();
+    newNode->printDetail();
 
     // Store the new node
     nodes[unitName] = newNode;

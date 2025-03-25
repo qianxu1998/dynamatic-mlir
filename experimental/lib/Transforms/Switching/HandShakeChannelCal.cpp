@@ -246,6 +246,7 @@ void mgHandshakeSwitchingCounting(SwitchingInfo &switchInfo, std::string selMG, 
   // Status
   unsigned numIter = 0;
   unsigned deadlockCounter = 0;
+  unsigned listLength = pendingList.size();
 
   while (pendingList.size() > 0) {
     // List of finished nodes in this iteration
@@ -261,11 +262,79 @@ void mgHandshakeSwitchingCounting(SwitchingInfo &switchInfo, std::string selMG, 
     }
 
     // Calculate switching
-    for (const auto& selNode: pendingList) {
+    for (auto& selNode: pendingList) {
+      // 
+      nodeHandshakeUpdate(switchInfo, selNode, selMG, selMGII, debug);
 
+      // If the node finished
+      if (selAdjGraph->nodes[selNode]->handshakeUpdateFinished()) {
+        tmpFinished.push_back(selNode);
+
+        // Update total switching for finished node
+        selAdjGraph->nodes[selNode]->totalHandshakeSwitchingUpdate();
+
+        if (debug) {
+          llvm::dbgs() << "Finished node: " << selNode << "\n";
+          selAdjGraph->nodes[selNode]->printHandshakeSwitching();
+        }
+      }
     }
-   }
-  
+
+    // remove the finished from pending
+    for (auto &fn : tmpFinished) {
+      auto it = std::find(pendingList.begin(), pendingList.end(), fn);
+      if (it != pendingList.end()) {
+        pendingList.erase(it);
+      }
+    }
+
+    // Check the nodes in the pending list
+    if (pendingList.size() == listLength) {
+      if (debug) {
+        llvm::dbgs() << "[WARNING] No Node Gets Updated\n";
+      }
+      if (deadlockCounter > 2) {
+        if (debug) {
+          llvm::dbgs() << "[Ending] # Iter: " << numIter << "\n";
+        }
+
+        for (auto& pendingNode: pendingList) {
+          if (!selAdjGraph->nodes[pendingNode]->handshakeSwitchingChecking()) {
+            llvm::dbgs() << "[Unsolved] " << pendingNode << "\n";
+          } else {
+            selAdjGraph->nodes[pendingNode]->totalHandshakeSwitchingUpdate();
+          }
+        }
+
+        // TODO: Check the following breaking rule
+        break;
+      }
+
+      // Update all Join type node
+      std::vector<std::string> tmpFinishedNode = breakHandshakeUpdateDeadlock(switchInfo, pendingList, selMG, selMGII);
+
+      for (auto &fn2 : tmpFinishedNode) {
+        auto it2 = std::find(pendingList.begin(), pendingList.end(), fn2);
+        if (it2 != pendingList.end()) {
+          pendingList.erase(it2);
+        }
+      }
+
+      deadlockCounter++;
+    }
+
+    // Update the list length
+    listLength = pendingList.size();
+
+  }
+
+  //! Testing
+  llvm::dbgs() << "[DEBUG] [HANDSHAKE CHANNEL SWITCHING SUMMARY]\n";
+  for (const auto& selNode: selAdjGraph->nodes) {
+    llvm::dbgs() << "[DEBUG] \t=================================\n";
+    llvm::dbgs() << "[DEBUG] \tNode Name: " << selNode.first << "\n";
+    selNode.second->printDetail();
+  }
 }
 
 void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::string &selMG, unsigned selMGII, bool debug) {
@@ -340,6 +409,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
   // Get node steady state start time
   //! Testing
   if (debug) {
+    llvm::dbgs() << "============================= \n";
     llvm::dbgs() << "CURRENT NODE: " << selNode << "\n";
     llvm::dbgs() << "\tpValid List: ";
     for (int v : tmpPValidList)
@@ -414,10 +484,13 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
 
   // Calculate handshake switching for different types of node
   auto node = selNodeStoringDict[selNode];
+  
   // Use llvm::TypeSwitch to branch by node type.
   llvm::TypeSwitch<AdjNode*, void>(node.get())
     .Case<CmpiNode>([&](CmpiNode* cmpi) {
       // CMPI NODE
+      //! Testing
+      if (debug) llvm::dbgs() << "[CMPI NODE] \n";
       // Valid Signal
       for (const auto& selSuc: cmpi->sucs) {
         // Calculate the number of switching
@@ -440,6 +513,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
     })
     .Case<AddiNode>([&](AddiNode* addi) {
       // ADDI NODE
+      //! Testing
+      if (debug) llvm::dbgs() << "[ADDI NODE] \n";
       // Valid Signal
       for (const auto& selSuc: addi->sucs) {
         // Calculate the number of switching
@@ -462,6 +537,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
     })
     .Case<OriNode>([&](OriNode* ori) {
       // ORI NODE
+      //! Testing
+      if (debug) llvm::dbgs() << "[ORI NODE] \n";
       // Valid Signal
       for (const auto& selSuc: ori->sucs) {
         // Calculate the number of switching
@@ -484,6 +561,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
     })
     .Case<AndiNode>([&](AndiNode* andi) {
       // ANDI NODE
+      //! Testing
+      if (debug) llvm::dbgs() << "[ANDI NODE] \n";
       // Valid Signal
       for (const auto& selSuc: andi->sucs) {
         // Calculate the number of switching
@@ -506,6 +585,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
     })
     .Case<SubiNode>([&](SubiNode* subi) {
       // SUBI NODE
+      //! Testing
+      if (debug) llvm::dbgs() << "[SUBI NODE] \n";
       // Valid Signal
       for (const auto& selSuc: subi->sucs) {
         // Calculate the number of switching
@@ -528,6 +609,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
     })
     .Case<MuliNode>([&](MuliNode* muli) {
       // MULI NODE
+      //! Testing
+      if (debug) llvm::dbgs() << "[MULI NODE] \n";
       // Valid Signal
       for (const auto& selSuc: muli->sucs) {
         // Calculate the number of switching
@@ -550,6 +633,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
     })
     .Case<ExtsiNode>([&](ExtsiNode* ext) {
       // EXTSI NODE
+      //! Testing
+      if (debug) llvm::dbgs() << "[EXTSI NODE] \n";
       // Valid Signal
       for (const auto& selSuc: ext->sucs) {
         // Number of switching
@@ -580,6 +665,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
     })
     .Case<ExtuiNode>([&](ExtuiNode* ext) {
       // EXTUI NODE
+      //! Testing
+      if (debug) llvm::dbgs() << "[EXTUI NODE] \n";
       // Valid Signal
       for (const auto& selSuc: ext->sucs) {
         // Number of switching
@@ -595,6 +682,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
     })
     .Case<DLoadNode>([&](DLoadNode* load) {
       // DLoadNode NODE: This node will only have 1 input and 1 output, all connections to mem_con ignored
+      //! Testing
+      if (debug) llvm::dbgs() << "[DLoad NODE] \n";
       // Valid Signal
       for (const auto& selSuc: load->sucs) {
         // Number of switching
@@ -621,6 +710,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
     })
     .Case<DStoreNode>([&](DStoreNode* store) {
       // DStoreNode NODE
+      //! Testing
+      if (debug) llvm::dbgs() << "[DStore NODE] \n";
       // Valid Signal: This node will not have any successors in the extracted CFDFC, but we still model the switching of MC
       store->calValidSwitching(tmpPValidList[0], tmpPValidList[1]);
       // Active Range
@@ -634,6 +725,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
     })
     .Case<ForkNode>([&](ForkNode* fork) {
       // ForkNode NODE
+      //! Testing
+      if (debug) llvm::dbgs() << "[Fork NODE] \n";
       // Valid Signal
       for (auto& selSuc: fork->sucs) {
         // Get Suc Node Start
@@ -642,6 +735,9 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
         fork->calValidSwitching(selSuc, tmpPValidList[0], tmpNReadySetDict, tmpNReadyDict, static_cast<unsigned>(sucNodeStart), tmpNodeSSStart, selMGII);
         // Active Range
         fork->calValidSet(selSuc, tmpNodeSSStart, tmpPValidList[0], tmpNReadySetDict, selMGII);
+
+        //! Testing
+        llvm::dbgs() << "Updating Value for Suc: " << selSuc << "\n";
       }
 
       // Ready Signal
@@ -654,6 +750,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
     // TODO: Add support for lazy fork Node
     .Case<MuxNode>([&](MuxNode* mux) {
       // MuxNode NODE
+      //! Testing
+      if (debug) llvm::dbgs() << "[Mux NODE] \n";
       // Get the cond input port name
       std::string condPortName = "";
       std::string dataInputPortName = "";
@@ -669,7 +767,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
       // Get the cond value
       // ! Check the following default value
       // TODO: May need to change this value
-      int condValue = 0;
+      int condValue = 1;
 
       // Get node starting time in steady state
       int nodeStartTime = mgGetNodeStartingPoint(switchInfo, selNode, selMG);
@@ -692,6 +790,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
     })
     .Case<TrunciNode>([&](TrunciNode* trunci) {
       // TrunciNode NODE
+      //! Testing
+      if (debug) llvm::dbgs() << "[Trunci NODE] \n";
       // Valid Signal
       for (const auto& selSuc: trunci->sucs) {
         trunci->calValidSwitching(selSuc, tmpPValidList[0]);
@@ -706,6 +806,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
     })
     .Case<CMergeNode>([&](CMergeNode* cmerge) {
       // CMergeNode NODE
+      //! Testing
+      if (debug) llvm::dbgs() << "[CMerge NODE] \n";
       // Get node starting time in steady state
       int nodeStartTime = mgGetNodeStartingPoint(switchInfo, selNode, selMG);
 
@@ -728,6 +830,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
     })
     .Case<CBrNode>([&](CBrNode* cbr) {
       // CBrNode NODE
+      //! Testing
+      if (debug) llvm::dbgs() << "[CBr NODE] \n";
       // Get the conditional value
       std::string condPortName = cbr->condPreNodeName;
 
@@ -764,6 +868,11 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
         if (selNameToPortIdxMap[selSuc] != static_cast<unsigned>(condValue)) {
           selOutputPort = selSuc;
         }
+      }
+
+      //! Testing
+      if (debug) {
+        llvm::dbgs() << "\tSelected Suc Node: " << selOutputPort << "\n";
       }
 
       // Sometime we just have one output for cond_br
@@ -814,6 +923,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
     })
     .Case<SourceNode>([&](SourceNode* source) {
       // Source node: Normally no pre node
+      //! Testing
+      if (debug) llvm::dbgs() << "[Source NODE] \n";
       // Valid Signals
       for (auto& selSuc: source->sucs) {
         // Number of Switching
@@ -825,6 +936,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
     })
     .Case<ConstantNode>([&](ConstantNode* constant) {
       // ConstantNode NODE
+      //! Testing
+      if (debug) llvm::dbgs() << "[Constant NODE] \n";
       // Valid Signal
       for (const auto& selSuc: constant->sucs) {
         constant->calValidSwitching(selSuc, tmpPValidList[0]);
@@ -839,6 +952,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
     })
     .Case<ShliNode>([&](ShliNode* shli) {
       // ShliNode NODE
+      //! Testing
+      if (debug) llvm::dbgs() << "[Shli NODE] \n";
       // Valid Signal
       for (const auto& selSuc: shli->sucs) {
         // Calculate the number of switching
@@ -861,6 +976,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
     })
     .Case<ShrsiNode>([&](ShrsiNode* shrsi) {
       // ShrsiNode NODE
+      //! Testing
+      if (debug) llvm::dbgs() << "[Shrsi NODE] \n";
       // Valid Signal
       for (const auto& selSuc: shrsi->sucs) {
         // Calculate the number of switching
@@ -883,6 +1000,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
     })
     .Case<ShruiNode>([&](ShruiNode* shrui) {
       // ShruiNode NODE
+      //! Testing
+      if (debug) llvm::dbgs() << "[Shrui NODE] \n";
       // Valid Signal
       for (const auto& selSuc: shrui->sucs) {
         // Calculate the number of switching
@@ -905,6 +1024,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
     })
     .Case<SinkNode>([&](SinkNode* sink) {
       // SinkNode NODE
+      //! Testing
+      if (debug) llvm::dbgs() << "[Sink NODE] \n";
       // Ready Signal
       for (auto& selPre: sink->pres) {
         sink->calReadySwitching(selPre);
@@ -919,7 +1040,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
 
     // Print node status
     if (debug) {
-      selAdjGraph->nodes[selNode]->printHandshakeSwitching();
+      // selAdjGraph->nodes[selNode]->printHandshakeSwitching();
+      selAdjGraph->nodes[selNode]->printDetail();
     }
 }
 
@@ -928,6 +1050,70 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
 // Functions for DFS in the graph, should be merged with the other functions if possible
 //
 //===---------------------------------------------------------------------------------===//
+std::vector<std::string> breakHandshakeUpdateDeadlock(SwitchingInfo &switchInfo, const std::vector<std::string> &pendingNodeList, std::string selMG, unsigned selMGII) {
+  auto selAdjGraph = switchInfo.segToAdjGraphMap[selMG];
+  // Get all join type node in the pending list
+  std::vector<std::string> selNodeList;
+  for (auto& selNode: pendingNodeList) {
+    // Get the node type
+    auto curNodeType = getNodeType(selNode);
+    if (JOIN_NODE.find(curNodeType) != JOIN_NODE.end()) {
+      selNodeList.push_back(selNode);
+    }
+  }
+
+  // Final list
+  std::vector<std::string> finishedNodeList;
+
+  // Update all selected node
+  for (auto& selNode: selNodeList) {
+    // Pending Channel Name
+    std::vector<std::string> nameUpdateList;
+
+    // Step 1: Get unresolved pValid pre_node name
+    for (auto& selPre: selAdjGraph->nodes[selNode]->pres) {
+      // Check the existence of pValid
+      if (selAdjGraph->nodes[selPre]->validSignal.find(selNode) == selAdjGraph->nodes[selPre]->validSignal.end()) {
+        nameUpdateList.push_back(selPre);
+      } else if (selAdjGraph->nodes[selPre]->validSignal[selNode] == 2) {
+        nameUpdateList.push_back(selPre);
+      }
+    }
+
+    // Update all corresponding ready signal
+    for (auto& selPreNode: nameUpdateList) {
+      // Get the Join type node
+      auto selJoinTypeNode = dyn_cast<JoinNode>(selAdjGraph->nodes[selNode].get());
+      if (selJoinTypeNode) {
+        if (selMGII != 1) {
+          int tmp1 = 2;
+          int tmp2 = 0;
+          selJoinTypeNode->calReadySwitching(selPreNode, tmp1, tmp2);
+          selJoinTypeNode->setReadySet(selPreNode);
+        } else {
+          int tmp1 = 0;
+          int tmp2 = 0;
+          selJoinTypeNode->calReadySwitching(selPreNode, tmp1, tmp2);
+          selJoinTypeNode->setReadySet(selPreNode);
+        }
+      } else {
+        llvm::errs() << "[ERROR] " << selNode << " can't be cast to JoinNode\n"; 
+      }
+    }
+
+    // Check the node is finished or not
+    if (selAdjGraph->nodes[selNode]->handshakeUpdateFinished()) {
+      finishedNodeList.push_back(selNode);
+
+      // Check the node is finished or not
+      selAdjGraph->nodes[selNode]->totalHandshakeSwitchingUpdate();
+    }
+  }
+
+  return finishedNodeList;
+}
+
+
 std::vector<std::string> findInfluencedLoadNodes(SwitchingInfo &switchInfo, std::string selMG, std::vector<std::string> bufferList) {
   auto selAdjGraph = switchInfo.segToAdjGraphMap[selMG];
 

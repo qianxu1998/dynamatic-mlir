@@ -196,21 +196,21 @@ void SwitchingEstimationPass::calDataChannelSwitching(mlir::ModuleOp& topModule,
   constructBBPairToCMResMap(switchInfo);
 
   //! Testing
-  // for (const auto& [pair1, cmVec]: switchInfo.bbPairToCMResultMap) {
-  //   llvm::dbgs() << "[DEBUG] \t(" << pair1.first << ", " << pair1.second << ") : \n";
-  //   for (auto selPair: cmVec) {
-  //     llvm::dbgs() << "[DEBUG] \t\t[" << selPair.first << " " << selPair.second << "]\n";
-  //   }
-  // }
+  for (const auto& [pair1, cmVec]: switchInfo.bbPairToCMResultMap) {
+    llvm::dbgs() << "[DEBUG] \t(" << pair1.first << ", " << pair1.second << ") : \n";
+    for (auto selPair: cmVec) {
+      llvm::dbgs() << "[DEBUG] \t\t[" << selPair.first << " " << selPair.second << "]\n";
+    }
+  }
 
   // Step 2: Construct the list of all data source nodes from scf-level profiling 
   llvm::dbgs() << "[DEBUG]  [SS2] Get all the database nodes in each segments\n";
   getDataBaseNodes(switchInfo, profileResults);
   //! Testing
-  // for (auto& [segLabel, selDB]: switchInfo.segToDataBaseVecMap) {
-  //   llvm::dbgs() << "[DEBUG] \t[SEGMENT] " << segLabel << "\n";
-  //   printDataBaseNodesTriple(selDB);
-  // }
+  for (auto& [segLabel, selDB]: switchInfo.segToDataBaseVecMap) {
+    llvm::dbgs() << "[DEBUG] \t[SEGMENT] " << segLabel << "\n";
+    printDataBaseNodesTriple(selDB);
+  }
 
   // Step 3: Contruct the data source node info of mux, condbr and mem node
   llvm::dbgs() << "[DEBUG]  [SS3] Construct the data source node storing structure for different nodes in the dataflow graph\n";
@@ -219,12 +219,12 @@ void SwitchingEstimationPass::calDataChannelSwitching(mlir::ModuleOp& topModule,
   switchInfo.dataflowGraph->buildCondandStoreSrcMap();
 
   //! Testing
-  // printMuxToSrcNodeMap(switchInfo.dataflowGraph->muxToSrcNodeMap);
-  // printSrcNodeToMuxMap(switchInfo.dataflowGraph->srcNodeToMuxMap);
-  // llvm::dbgs() << "[DEBUG] \tcondBr Node to control src map: \n";
-  // for (const auto& [cbrNode, controlSrc]: switchInfo.dataflowGraph->condBrToConSrcMap) {
-  //   llvm::dbgs() << "[DEBUG] \t\t(" << cbrNode << ", " << controlSrc << ")\n";
-  // }
+  printMuxToSrcNodeMap(switchInfo.dataflowGraph->muxToSrcNodeMap);
+  printSrcNodeToMuxMap(switchInfo.dataflowGraph->srcNodeToMuxMap);
+  llvm::dbgs() << "[DEBUG] \tcondBr Node to control src map: \n";
+  for (const auto& [cbrNode, controlSrc]: switchInfo.dataflowGraph->condBrToConSrcMap) {
+    llvm::dbgs() << "[DEBUG] \t\t(" << cbrNode << ", " << controlSrc << ")\n";
+  }
 
   // Step 4: Update value for all data base nodes
   llvm::dbgs() << "[DEBUG]  [SS4] Update the value for data base nodes\n";
@@ -244,7 +244,7 @@ void SwitchingEstimationPass::calDataChannelSwitching(mlir::ModuleOp& topModule,
 
   // Step 8: Propagate all the data base value
   llvm::dbgs() << "[DEBUG]  [SS8] Final data channel value updates\n";
-  dfgDataChannelPropagate(switchInfo, profileResults);
+  dfgDataChannelPropagate(switchInfo, profileResults, false);
 }
 
 //===----------------------------------------------------------------------===//
@@ -259,7 +259,7 @@ void SwitchingEstimationPass::calHSChannelSwitchingSteady(mlir::ModuleOp& topMod
 
   // Step 1
   for (unsigned i = 0; i < switchInfo.cfdfcThroughput.size(); i++) {
-    extractBufferInfo(switchInfo, std::to_string(i), false);
+    extractBufferInfo(switchInfo, std::to_string(i), true);
   }
 
   // Step 2

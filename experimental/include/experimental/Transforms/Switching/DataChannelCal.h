@@ -82,7 +82,7 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo, SCFProfilingResult &pro
 //    Output 1: to mem_con with the address value; Output 2: the actual data output
 //  COND_BR:
 //    Need to keep track of the last valid update (the input data is not -1)
-void dfgDataChannelPropagate(SwitchingInfo &switchInfo, SCFProfilingResult &profileResults);
+void dfgDataChannelPropagate(SwitchingInfo &switchInfo, SCFProfilingResult &profileResults, bool debug);
 
 // This function calculates a single glitching value based on the given input operands and node type
 int calGlitchValue(int op1, int op2, std::string selNode);
