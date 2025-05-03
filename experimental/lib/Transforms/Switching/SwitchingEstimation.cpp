@@ -13,6 +13,7 @@
 #include "dynamatic/Dialect/Handshake/HandshakeOps.h"
 #include "dynamatic/Dialect/Handshake/HandshakeAttributes.h"
 #include "dynamatic/Support/DynamaticPass.h"
+#include "dynamatic/Support/CFG.h"
 #include "dynamatic/Support/LLVM.h"
 #include "dynamatic/Support/Logging.h"
 #include "dynamatic/Support/Backedge.h"
@@ -78,6 +79,9 @@ struct SwitchingEstimationPass
   //  Handshake Channel Switching Calculation
   //
   void calHSChannelSwitchingSteady(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults);
+
+  // This function calculates the handshake channel switching for the entire circuit simulation
+  void countHSChannelSwitchingOverall(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults);
 };
 } // namespace 
 
@@ -174,6 +178,9 @@ void SwitchingEstimationPass::runDynamaticPass() {
   llvm::dbgs() << "[DEBUG] [STEP 6] Calculate Handshake Channel Switching\n";
   calHSChannelSwitchingSteady(topModule, profilingResults);
 
+  // Step 7: Calculate switches in handshake channels for the entire simualtion
+  llvm::dbgs() << "[DEBUG] [STEP 7] Calculate Handshake Channel Switching for the entire simulation\n";
+  countHSChannelSwitchingOverall(topModule, profilingResults);
 }
 
 //===----------------------------------------------------------------------===//
@@ -266,6 +273,234 @@ void SwitchingEstimationPass::calHSChannelSwitchingSteady(mlir::ModuleOp& topMod
   for (unsigned i = 0; i < switchInfo.cfdfcThroughput.size(); i++) {
     mgHandshakeSwitchingCounting(switchInfo, std::to_string(i), true);
   }
+}
+
+void SwitchingEstimationPass::countHSChannelSwitchingOverall(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults) {
+  /* -----------------------------------------------------------------------
+     Assumptions
+       • For nodes that belong to an MG segment we re-use the steady-state
+         switching numbers that were computed previously.
+       • If an MG is executed only once we apply the “buffer-only” rule for
+         buffers and the steady-state rule for the other nodes.
+       • For nodes that live in an S / E / T segment we assume that:
+           – every Valid output toggles twice  (0→1→0)
+           – every Ready input never toggles   (always 0)
+     ----------------------------------------------------------------------*/
+
+  //--------------------------------------------------------------------+
+  // 1)  Iterate over the execution segments in sequential order
+  //--------------------------------------------------------------------+
+  for (auto it = profileResults.execPhaseToSegExecNumMap.begin(); it != profileResults.execPhaseToSegExecNumMap.end(); ++it) {
+    auto segIdx = it->first;
+    auto segLabel = it->second.first;
+    auto numExec = it->second.second;
+    llvm::dbgs() << "[DEBUG] \tSegIndex: " << segIdx << "; MG_Label: " << segLabel << ", Num Exec: " << numExec << "\n";
+    
+    //------------------------------------------------------------------+
+    // 2-A)  SEGMENT TYPE :  “S”  or  “T”
+    //------------------------------------------------------------------+
+    // TODO: Define a separate data storing structure for active nodes in the seg
+    if (segLabel.find("S") != std::string::npos || segLabel.find("T") != std::string::npos) {
+      llvm::dbgs() << "[DEBUG] \t[SEGMENT] " << segLabel << "\n";
+      llvm::dbgs() << "[DEBUG] \t\t[Type] S or T\n";
+
+      // Traverse all active nodes in the segment
+      for (const auto& nodeName: switchInfo.dataflowGraph->orderedNodeName) {
+        // Get the node
+        AdjNode *node = switchInfo.dataflowGraph->nodes[nodeName].get();
+        
+        auto segBBList = switchInfo.segToBBListMap[segLabel];
+        if (std::find(segBBList.begin(), segBBList.end(), node->bbindex) == segBBList.end()) {
+          continue;
+        }
+        // Calculate the number of valid switches
+        unsigned numSucs = node->sucs.size();
+        unsigned numValidSwitches = 2 * numSucs;
+
+        // The node will be always ready
+        unsigned numReadySwitches = 0;
+
+        // Update the storing structure
+        node->updateHandshakeChannelSwitching(numValidSwitches, numReadySwitches);
+
+        // Update per channel switching information
+        for (const auto& suc: node->sucs) {
+          if (node->validSignal.find(suc) != node->validSignal.end()) {
+            node->validSignal[suc] += 2;
+          } else {
+            node->validSignal[suc] = 2;
+          }
+        }
+      }
+
+      // Skip the rest of the steps
+      continue;
+    } else if (segLabel.find("E") != std::string::npos) {
+      llvm::dbgs() << "[DEBUG] \t[SEGMENT] " << segLabel << "\n";
+      // Get the previous segment
+      std::string prevSegLabel = std::prev(it)->second.first;
+      llvm::dbgs() << "[DEBUG] \t\t[Prev Segment] " << prevSegLabel << "\n";
+
+      // Traverse all active nodes in the segment
+      for (const auto& nodeName: switchInfo.dataflowGraph->orderedNodeName) {
+        // Get the node
+        AdjNode *node = switchInfo.dataflowGraph->nodes[nodeName].get();
+        
+        // This node is in segment E
+        auto segBBList = switchInfo.segToBBListMap[segLabel];
+        if (std::find(segBBList.begin(), segBBList.end(), node->bbindex) == segBBList.end()) {
+          continue;
+        }
+
+        // Check wheter the node is in previous section or not
+        //* Assumption: Seg E will only be following MG ?
+        auto prevSegBBList = switchInfo.segToBBListMap[prevSegLabel];
+        if (std::find(prevSegBBList.begin(), prevSegBBList.end(), node->bbindex) != prevSegBBList.end()) {
+          // Get the node info in the previous segment
+          AdjNode *prevNode = switchInfo.segToAdjGraphMap[prevSegLabel]->nodes[nodeName].get();
+          // Node in the previous segment
+          unsigned numValidSwitches = prevNode->totalValidSwitching;
+          unsigned numSucs = prevNode->sucs.size();
+
+          if (numValidSwitches != (numSucs * 2)) {
+            if (nodeName.find("constant") == std::string::npos && nodeName.find("source") == std::string::npos) {
+              // This is the ending segment transition 1 -> 0
+              numValidSwitches += (numSucs * 2 - numValidSwitches) / 2;
+            }
+          }
+
+          unsigned numReadySwitches = prevNode->totalReadySwitching;
+
+          // Check whether this is a load unit
+          if (nodeName.find("load") != std::string::npos) {
+            numValidSwitches *= 2;
+            numReadySwitches *= 2;
+          }
+
+          // Update the perchannel information
+          // Valid Channel
+          for (const auto& suc: node->sucs) {
+            unsigned selSucValidSwitching = 0;
+            // Check whether this output is in the previous segment or not
+            if (prevNode->validSignal.find(suc) != prevNode->validSignal.end()) {
+              selSucValidSwitching = prevNode->validSignal[suc];
+            } else {
+              selSucValidSwitching = 1;
+            }
+
+            // Update the valid signal
+            if (node->validSignal.find(suc) != node->validSignal.end()) {
+              node->validSignal[suc] += selSucValidSwitching;
+            } else {
+              node->validSignal[suc] = selSucValidSwitching;
+            }
+          }
+
+          // Ready Channel
+          for (const auto & pre: node->pres) {
+            unsigned selPreReadySwitching = 0;
+            // Check whether this input is in the previous segment or not
+            if (prevNode->readySignal.find(pre) != prevNode->readySignal.end()) {
+              selPreReadySwitching = prevNode->readySignal[pre];
+            } else {
+              selPreReadySwitching = 0;
+            }
+
+            // Update the ready signal
+            if (node->readySignal.find(pre) != node->readySignal.end()) {
+              node->readySignal[pre] += selPreReadySwitching;
+            } else {
+              node->readySignal[pre] = selPreReadySwitching;
+            }
+          }
+
+          // Update the storing structure
+          node->updateHandshakeChannelSwitching(numValidSwitches, numReadySwitches);
+        } else {
+          // Get node type
+          auto selNodeType = getNodeType(nodeName);
+          unsigned numValidSwitches = 0;
+          unsigned numReadySwitches = 0;
+          if (selNodeType.find("cond_br") != std::string::npos) {
+            numValidSwitches = 2;
+            numReadySwitches = 4;
+          } else if (JOIN_NODE.find(selNodeType) != JOIN_NODE.end()) {
+            numValidSwitches = 2;
+            numReadySwitches = 2;
+          } else {
+            unsigned numSucs = node->sucs.size();
+            numValidSwitches = 2 * numSucs;
+            numReadySwitches = 0;
+          }
+
+          // Update the storing structure
+          node->updateHandshakeChannelSwitching(numValidSwitches, numReadySwitches);
+        }
+        
+      }
+    } else {
+      llvm::dbgs() << "[DEBUG] \t[SEGMENT] " << segLabel << "\n";
+      llvm::dbgs() << "[DEBUG] \t\t[Type] MG\n";
+      // TODO: Update the logic here for the rest of the nodes
+      
+      // Traverse all active nodes in the segment
+      for (const auto & nodeName: switchInfo.segToAdjGraphMap[segLabel]->orderedNodeName) {
+        // Get the node
+        AdjNode *graphNode = switchInfo.dataflowGraph->nodes[nodeName].get();
+        AdjNode *mgNode = switchInfo.segToAdjGraphMap[segLabel]->nodes[nodeName].get();
+        
+        // Get the number of switching
+        unsigned numValidSwitches = numExec * mgNode->totalValidSwitching;
+        unsigned numReadySwitches = numExec * mgNode->totalReadySwitching;
+
+        // Update the per-channel information
+        // Valid Channel
+        for (const auto& suc: graphNode->sucs) {
+          unsigned selSucValidSwitching = 0;
+          // Check whether this output is in the previous segment or not
+          if (mgNode->validSignal.find(suc) != mgNode->validSignal.end()) {
+            selSucValidSwitching = numExec * mgNode->validSignal[suc];
+          } else {
+            selSucValidSwitching = 0;
+          }
+
+          // Update the valid signal
+          if (graphNode->validSignal.find(suc) != graphNode->validSignal.end()) {
+            graphNode->validSignal[suc] += selSucValidSwitching;
+          } else {
+            graphNode->validSignal[suc] = selSucValidSwitching;
+          }
+        }
+
+        // Ready Channel
+        for (const auto & pre: graphNode->pres) {
+          unsigned selPreReadySwitching = 0;
+          // Check whether this input is in the previous segment or not
+          if (mgNode->readySignal.find(pre) != mgNode->readySignal.end()) {
+            selPreReadySwitching = numExec * mgNode->readySignal[pre];
+          } else {
+            selPreReadySwitching = 0;
+          }
+
+          // Update the ready signal
+          if (graphNode->readySignal.find(pre) != graphNode->readySignal.end()) {
+            graphNode->readySignal[pre] += selPreReadySwitching;
+          } else {
+            graphNode->readySignal[pre] = selPreReadySwitching;
+          }
+        }
+        
+        // Check whether this is a load unit
+        if (nodeName.find("load") != std::string::npos) {
+          numValidSwitches *= 2;
+          numReadySwitches *= 2;
+        }
+
+        // Update the storing structure
+        graphNode->updateHandshakeChannelSwitching(numValidSwitches, numReadySwitches);
+      }
+    }
+  } 
 }
 
 //===----------------------------------------------------------------------===//
