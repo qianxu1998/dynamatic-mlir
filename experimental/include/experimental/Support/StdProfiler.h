@@ -54,8 +54,10 @@ struct StdProfiler {
   StdProfiler(mlir::func::FuncOp funcOp);
 
   /// Prints gathered statistics on standard output.
-  void writeStats(bool printDOT);
+  // void writeStats(bool printDOT);//no overload
+  //new versoin:need to make it write to outputfilepath
 
+  void writeStats(bool printDOT, llvm::StringRef outputPath);
   /// Prints statistics on an output stream as a DOT formatted output compatible
   /// with legacy Dynamatic's smart buffer placement pass.
   void writeDOT(mlir::raw_indented_ostream &os);

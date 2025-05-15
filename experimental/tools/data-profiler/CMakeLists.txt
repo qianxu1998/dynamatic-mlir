@@ -10,6 +10,7 @@ target_link_libraries(data-profiler PRIVATE
   MLIRSupport
   MLIRLLVMDialect
   MLIRArithDialect
+  MLIRMathDialect
   MLIRFuncDialect
   MLIRMemRefDialect
   DynamaticSupport 

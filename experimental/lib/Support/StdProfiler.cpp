@@ -27,18 +27,33 @@ static bool isUnsigned(const std::string &str) {
 
 ArchBB::ArchBB(unsigned srcBB, unsigned dstBB, unsigned numTrans,
                bool isBackEdge)
-    : srcBB(srcBB), dstBB(dstBB), numTrans(numTrans), isBackEdge(isBackEdge){};
+    : srcBB(srcBB), dstBB(dstBB), numTrans(numTrans), isBackEdge(isBackEdge) {};
 
-StdProfiler::StdProfiler(mlir::func::FuncOp funcOp) : funcOp(funcOp){};
+StdProfiler::StdProfiler(mlir::func::FuncOp funcOp) : funcOp(funcOp) {};
 
-void StdProfiler::writeStats(bool printDOT) {
-  mlir::raw_indented_ostream os(llvm::outs());
-  if (printDOT)
+// void StdProfiler::writeStats(bool printDOT) {
+//   mlir::raw_indented_ostream os(llvm::outs());
+//   if (printDOT)
+//     writeDOT(os);
+//   else
+//     writeCSV(os);
+// }
+// NEW Version , make it write to output pathname
+void StdProfiler::writeStats(bool printDOT, llvm::StringRef outputPath) {
+  std::error_code ec;
+  llvm::raw_fd_ostream fileStream(outputPath, ec);
+  if (ec) {//check
+    llvm::errs() << "Error: Cannot open file " << outputPath << ": "
+                 << ec.message() << "\n";
+    return;
+  }
+
+  mlir::raw_indented_ostream os(fileStream);
+  if (printDOT)//if freq.
     writeDOT(os);
   else
     writeCSV(os);
 }
-
 void StdProfiler::writeDOT(mlir::raw_indented_ostream &os) {
   // Print the graph
   os << "Digraph G {\n";

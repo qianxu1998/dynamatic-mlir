@@ -14,7 +14,7 @@ HDL="vhdl"
 # f_benchmark_src="atax/atax.c"
 # f_benchmark_src="dct/dct.c"
 # f_benchmark_src="cnn/cnn.c"
-# f_benchmark_src="gemm/gemm.c"
+f_benchmark_src="gemm/gemm.c"
 # f_benchmark_src="matching/matching.c"
 # f_benchmark_src="matching_2/matching_2.c"
 # f_benchmark_src="sharing/share_test_1/share_test_1.c"
@@ -59,7 +59,7 @@ HDL="vhdl"
 # f_benchmark_src="matvec/matvec.c"
 # f_benchmark_src="histogram/histogram.c"
 # f_benchmark_src="histogram_enhanced/histogram_enhanced.c"
-f_benchmark_src="histogram_transition/histogram_transition.c"
+# f_benchmark_src="histogram_transition/histogram_transition.c"
 # f_benchmark_src="gemver/gemver.c"
 # f_benchmark_src="polyn_mult/polyn_mult.c"
 # f_benchmark_src="gsum/gsum.c"
@@ -79,7 +79,6 @@ echo "set-dynamatic-path .; \
   compile $SHARING $BUFFER_ALGORITHM; \
   write-hdl --hdl $HDL; \
   simulate; \
-  #visualize; \
   exit" \
   | bin/dynamatic --exit-on-failure --debug
 

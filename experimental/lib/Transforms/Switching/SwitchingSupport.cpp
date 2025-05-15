@@ -322,10 +322,10 @@ void AdjNode::printPerHandshakeChannelToggleNumber() {
 //===----------------------------------------------------------------------===//
 // Initialize the whole adjacency graph for the selected segment
 AdjGraph::AdjGraph(const buffer::CFDFC& cfdfc, const TimingDatabase& timingDB, 
-                    const unsigned &II, const unsigned &mgIndex) {
+                   const unsigned &II, const unsigned &mgIndex) {
   cfdfcIndex = mgIndex;
   cfdfcII = II;
-  
+
   std::map<std::string, std::vector<std::string>> nodeToPresMap;
   std::map<std::string, std::vector<std::string>> nodeToSucsMap;
 
@@ -354,12 +354,12 @@ AdjGraph::AdjGraph(const buffer::CFDFC& cfdfc, const TimingDatabase& timingDB,
         // Add the name of dstNode to start node vector
         segStartNodes.push_back(dstName);
       }
-      
+
       // Insert to sucs
       insertToSurroundingList(nodeToSucsMap, srcName, dstName);
 
       // Insert the pres
-      insertToSurroundingList(nodeToPresMap, dstName, srcName); 
+      insertToSurroundingList(nodeToPresMap, dstName, srcName);
     }
   }
 
@@ -404,7 +404,7 @@ AdjGraph::AdjGraph(const buffer::CFDFC& cfdfc, const TimingDatabase& timingDB,
 }
 
 AdjGraph::AdjGraph(const TimingDatabase& timingDB, const unsigned &II, 
-            handshake::FuncOp funcOp,
+    handshake::FuncOp funcOp,
             std::vector<std::pair<std::string, std::string>> &allBackedges) : backedges(allBackedges) {
   cfdfcII = II;
   // Iterate over all the ops in the funcop
@@ -460,7 +460,7 @@ AdjGraph::AdjGraph(const TimingDatabase& timingDB, const unsigned &II,
 
     auto newNode = createNodeFromOperation(
       &op, pres, sucs, nodeLatency, nodeBBIndex); 
-    
+
     if (!newNode) continue;
 
     //! Testing
@@ -485,31 +485,31 @@ void AdjGraph::insertToSurroundingList(std::map<std::string, std::vector<std::st
 std::shared_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
                                                     std::vector<std::string> &pres, std::vector<std::string> &sucs,
                                                     unsigned &nodeLatency, unsigned &bbIndex) {
-    std::map<std::string, unsigned> nodeSucsDataWidthMap;
-    // Get the successor channels' dataWidth
+  std::map<std::string, unsigned> nodeSucsDataWidthMap;
+  // Get the successor channels' dataWidth
     for (unsigned resIndex = 0, e = op->getNumResults(); resIndex < e; ++resIndex) {
-      mlir::Value selRes = op->getResult(resIndex);
+    mlir::Value selRes = op->getResult(resIndex);
 
-      // The result is of type !handshake.channel<...>
-      if (auto chanTy = selRes.getType().dyn_cast<handshake::ChannelType>()) {
-        // Extract the underlying data width.
-        unsigned dataWidth = chanTy.getDataBitWidth();
+    // The result is of type !handshake.channel<...>
+    if (auto chanTy = selRes.getType().dyn_cast<handshake::ChannelType>()) {
+      // Extract the underlying data width.
+      unsigned dataWidth = chanTy.getDataBitWidth();
 
-        // Now, iterate over all users of this result.
-        for (mlir::Operation *user : selRes.getUsers()) {
-          // Try to get the successor's name attribute.
+      // Now, iterate over all users of this result.
+      for (mlir::Operation *user : selRes.getUsers()) {
+        // Try to get the successor's name attribute.
           if (auto nameAttr = user->getAttrOfType<mlir::StringAttr>("handshake.name")) {
-            nodeSucsDataWidthMap[nameAttr.getValue().str()] = dataWidth;
+          nodeSucsDataWidthMap[nameAttr.getValue().str()] = dataWidth;
 
-            //! Testing
-            // llvm::dbgs() << "[DEBUG] \t\t" << nameAttr.getValue() << "\n";
-          }
+          //! Testing
+          // llvm::dbgs() << "[DEBUG] \t\t" << nameAttr.getValue() << "\n";
         }
       }
     }
-    
-    // Return a unique pointer
-    return llvm::TypeSwitch<Operation *, std::shared_ptr<AdjNode>>(op)
+  }
+
+  // Return a unique pointer
+  return llvm::TypeSwitch<Operation *, std::shared_ptr<AdjNode>>(op)
       // handshake::AddIOp operator
       .Case<handshake::AddIOp>([&](auto selNode) {
         auto node = std::make_shared<AddiNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
@@ -593,8 +593,13 @@ std::shared_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
       // handshake::LazyForkOp operator
       .Case<handshake::LazyForkOp>([&](handshake::LazyForkOp selNode) {
         // TODO: Add model for lazy fork
-        llvm::errs() << "[ERROR] \t\t Missing Implementation for LAZY FORK NODE\n";
-        return std::shared_ptr<AdjNode>(nullptr);
+        // llvm::errs()
+        //     << "[ERROR] \t\t Missing Implementation for LAZY FORK
+        //     NODE\n";
+        // return std::shared_ptr<AdjNode>(nullptr);
+        // For now just use the regular ForkNode
+        return std::make_shared<ForkNode>(op, pres, sucs, nodeSucsDataWidthMap,
+                                          nodeLatency, bbIndex);
       })
       // handshake::TruncIOp operator
       .Case<handshake::TruncIOp>([&](auto selNode) {
@@ -619,8 +624,8 @@ std::shared_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
       // handshake::ConditionalBranchOp operator
       .Case<handshake::ConditionalBranchOp>([&](handshake::ConditionalBranchOp selNode) {
         auto node = std::make_shared<CBrNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
-        return node;
-      })
+            return node;
+          })
       // handshake::SourceOp operator
       .Case<handshake::SourceOp>([&](auto selNode) {
         auto node = std::make_shared<SourceNode>(op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
@@ -675,9 +680,9 @@ std::shared_ptr<AdjNode> AdjGraph::createNodeFromOperation(mlir::Operation *op,
         return node;
       })
       .Default([](auto selNode) {
-          selNode->emitOpError() << "Unknown operation!";
+        selNode->emitOpError() << "Unknown operation!";
 
-          return std::shared_ptr<AdjNode>(nullptr);
+        return std::shared_ptr<AdjNode>(nullptr);
       });
 }
 
@@ -689,7 +694,7 @@ unsigned AdjGraph::calPathLatency(const Path &selPath, bool useGlobalOrder) {
 
     if (useGlobalOrder) {
       if ((std::find(segStartNodes.begin(), segStartNodes.end(), selNode) == segStartNodes.end()) &&
-            latencySum < graphGlobalOrder[selNode].second) {
+          latencySum < graphGlobalOrder[selNode].second) {
         latencySum = graphGlobalOrder[selNode].second;
       }
     }
@@ -783,7 +788,7 @@ std::vector<Path> AdjGraph::findPaths(const std::string &srcNode, const std::str
         }
       }
 
-      adjStack.push_back(tmpAdjList);      
+      adjStack.push_back(tmpAdjList);
     } else {
       mainStack.pop_back();
     }
@@ -878,7 +883,7 @@ std::string AdjGraph::graphBacktrack(std::string srcNode, std::unordered_set<std
             std::string tmpDataPreNode = cbrNode->dataPreNodeName;
             if (std::find(mainStack.begin(), mainStack.end(), tmpDataPreNode) == mainStack.end()) {
               adjStack.push_back({ tmpDataPreNode });
-            } 
+            }
           }
         } else {
           std::vector<std::string> tmpAdjList;
@@ -963,7 +968,7 @@ void AdjGraph::buildMuxSrcMap() {
 
       // Ger the mux node storing structure
       auto *selMuxNode = dyn_cast<MuxNode>(nodes[selNode].get());
-      // 
+      //
       std::map<std::string, std::string> tmpMuxPortMap;
       std::string conPreNodeName = selMuxNode->conPreNodeName;
       std::string dataPre0NodeName = "";
@@ -1100,46 +1105,46 @@ void printSegToBBListMap(const std::map<std::string, mlir::SetVector<unsigned>>&
 
 void printMgNodeInfo(const MgNodeInfo &info)
 {
-    llvm::dbgs() << "MgNodeInfo contents:\n";
+  llvm::dbgs() << "MgNodeInfo contents:\n";
 
-    // Print "original"
-    llvm::dbgs() << "  original: [";
-    for (size_t i = 0; i < info.original.size(); ++i) {
+  // Print "original"
+  llvm::dbgs() << "  original: [";
+  for (size_t i = 0; i < info.original.size(); ++i) {
         if (i > 0) llvm::dbgs() << ", ";
-        llvm::dbgs() << info.original[i];
-    }
-    llvm::dbgs() << "]\n";
+    llvm::dbgs() << info.original[i];
+  }
+  llvm::dbgs() << "]\n";
 
-    // Print "glitch"
-    llvm::dbgs() << "  glitch: [";
-    for (size_t i = 0; i < info.glitch.size(); ++i) {
+  // Print "glitch"
+  llvm::dbgs() << "  glitch: [";
+  for (size_t i = 0; i < info.glitch.size(); ++i) {
         if (i > 0) llvm::dbgs() << ", ";
-        llvm::dbgs() << info.glitch[i];
-    }
-    llvm::dbgs() << "]\n";
+    llvm::dbgs() << info.glitch[i];
+  }
+  llvm::dbgs() << "]\n";
 
-    // Print "control"
-    llvm::dbgs() << "  control: [";
-    for (size_t i = 0; i < info.control.size(); ++i) {
+  // Print "control"
+  llvm::dbgs() << "  control: [";
+  for (size_t i = 0; i < info.control.size(); ++i) {
         if (i > 0) llvm::dbgs() << ", ";
-        llvm::dbgs() << info.control[i];
-    }
-    llvm::dbgs() << "]\n";
+    llvm::dbgs() << info.control[i];
+  }
+  llvm::dbgs() << "]\n";
 
-    // Print "data"
-    llvm::dbgs() << "  data: [";
-    for (size_t i = 0; i < info.data.size(); ++i) {
+  // Print "data"
+  llvm::dbgs() << "  data: [";
+  for (size_t i = 0; i < info.data.size(); ++i) {
         if (i > 0) llvm::dbgs() << ", ";
-        llvm::dbgs() << info.data[i];
-    }
-    llvm::dbgs() << "]\n";
+    llvm::dbgs() << info.data[i];
+  }
+  llvm::dbgs() << "]\n";
 
-    // Print "dataWidthMap"
-    llvm::dbgs() << "  dataWidthMap:\n";
-    for (const auto &pair : info.dataWidthMap) {
-        llvm::dbgs() << "    \"" << pair.first << "\" => " << pair.second << "\n";
-    }
-    llvm::dbgs() << "\n";
+  // Print "dataWidthMap"
+  llvm::dbgs() << "  dataWidthMap:\n";
+  for (const auto &pair : info.dataWidthMap) {
+    llvm::dbgs() << "    \"" << pair.first << "\" => " << pair.second << "\n";
+  }
+  llvm::dbgs() << "\n";
 }
 
 // Helper function: extracts the initial alphabetic portion from a node name.
@@ -1155,7 +1160,7 @@ std::string getNodeType(const std::string &nodeName) {
 void printMainStack(const std::vector<std::string>& mainStack) {
   llvm::dbgs() << "Main Stack: [ ";
   for (const auto& elem : mainStack) {
-      llvm::dbgs() << elem << " ";
+    llvm::dbgs() << elem << " ";
   }
   llvm::dbgs() << "]" << "\n";
 }
@@ -1164,11 +1169,11 @@ void printMainStack(const std::vector<std::string>& mainStack) {
 void printAdjStack(const std::vector<std::vector<std::string>>& adjStack) {
   llvm::dbgs() << "Adjacency Stack:" << "\n";
   for (size_t i = 0; i < adjStack.size(); ++i) {
-      llvm::dbgs() << "  Level " << i << ": [ ";
+    llvm::dbgs() << "  Level " << i << ": [ ";
       for (const auto& elem : adjStack[i]) {
-          llvm::dbgs() << elem << " ";
-      }
-      llvm::dbgs() << "]" << "\n";
+      llvm::dbgs() << elem << " ";
+    }
+    llvm::dbgs() << "]" << "\n";
   }
 }
 
@@ -1209,8 +1214,8 @@ std::string strip(const std::string &inputStr, const std::string &toRemove) {
   // Remove all occurrences of the specified substring 'toRemove'
   size_t pos = stripped.find(toRemove);
   while (pos != std::string::npos) {
-      stripped.erase(pos, toRemove.length());
-      pos = stripped.find(toRemove, pos);
+    stripped.erase(pos, toRemove.length());
+    pos = stripped.find(toRemove, pos);
   }
 
   return stripped;

@@ -43,3 +43,5 @@ Logger::~Logger() {
   if (logFile)
     delete logFile;
 }
+// added  newly, to support pointer-based bblist and output logging
+llvm::raw_ostream &Logger::stream() { return *logFile; }

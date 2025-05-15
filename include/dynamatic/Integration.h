@@ -77,7 +77,7 @@
 #if defined(PRINT_PROFILING_INFO) || defined(HLS_VERIFICATION)
 #include <cstddef>
 #include <ostream>
-
+#include <iomanip>
 using OS = std::basic_ostream<char>;
 
 template <typename T>

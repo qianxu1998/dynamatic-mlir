@@ -38,6 +38,9 @@ public:
   /// file.
   mlir::raw_indented_ostream &operator*() { return *logStream; }
 
+  /// used for bblist and trace logging 
+  llvm::raw_ostream &stream();
+
   Logger(const Logger &other) = delete;
   Logger operator=(const Logger &other) = delete;
 

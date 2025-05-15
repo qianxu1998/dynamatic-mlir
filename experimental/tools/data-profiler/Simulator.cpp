@@ -9,7 +9,8 @@
 // Implements a simulator that executes a restricted form of the std dialect.
 //
 //===----------------------------------------------------------------------===//
-
+// for data profiling
+#include "dynamatic/Support/Logging.h"
 #include "experimental/Support/StdProfiler.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
@@ -20,15 +21,15 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Dominance.h"
 #include "llvm/ADT/APFloat.h"
+#include "llvm/ADT/APInt.h"
 #include "llvm/ADT/Any.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Debug.h"
-#include "mlir/IR/Dominance.h"
-#include "dynamatic/Support/Logging.h"
 #include <cmath>
+#include <cstdlib>
 #include <list>
 
 #define DEBUG_TYPE "simulator"
@@ -42,16 +43,16 @@ using namespace dynamatic::experimental;
 
 namespace {
 
-class StdExecuterData {
+class UnifiedExecuter {
 public:
-  StdExecuterData(mlir::func::FuncOp &toplevel,
-              llvm::DenseMap<mlir::Value, Any> &valueMap,
-              llvm::DenseMap<mlir::Value, double> &timeMap,
-              std::vector<Any> &results, std::vector<double> &resultTimes,
-              std::vector<std::vector<Any>> &store,
-              std::vector<double> &storeTimes, StdProfiler &prof,
-              dynamatic::Logger &trace_logger,
-              dynamatic::Logger &bbList_logger);
+  UnifiedExecuter(mlir::func::FuncOp &toplevel,
+                  llvm::DenseMap<mlir::Value, Any> &valueMap,
+                  llvm::DenseMap<mlir::Value, double> &timeMap,
+                  std::vector<Any> &results, std::vector<double> &resultTimes,
+                  std::vector<std::vector<Any>> &store,
+                  std::vector<double> &storeTimes, StdProfiler &prof,
+                  dynamatic::Logger *trace_logger = nullptr,
+                  dynamatic::Logger *bbList_logger = nullptr);
 
   LogicalResult succeeded() const {
     return successFlag ? success() : failure();
@@ -59,6 +60,8 @@ public:
 
 private:
   /// Operation execution visitors
+  LogicalResult execute(mlir::arith::ConstantOp, std::vector<Any> &,
+                        std::vector<Any> &);
   LogicalResult execute(mlir::arith::ConstantIndexOp,
                         std::vector<Any> & /*inputs*/,
                         std::vector<Any> & /*outputs*/);
@@ -78,11 +81,17 @@ private:
                         std::vector<Any> &);
   LogicalResult execute(mlir::arith::TruncIOp, std::vector<Any> &,
                         std::vector<Any> &);
+  LogicalResult execute(mlir::arith::TruncFOp, std::vector<Any> &,
+                        std::vector<Any> &);
   LogicalResult execute(mlir::arith::AndIOp, std::vector<Any> &,
                         std::vector<Any> &);
   LogicalResult execute(mlir::arith::XOrIOp, std::vector<Any> &,
                         std::vector<Any> &);
   LogicalResult execute(mlir::arith::AddFOp, std::vector<Any> &,
+                        std::vector<Any> &);
+  LogicalResult execute(mlir::arith::SIToFPOp, std::vector<Any> &,
+                        std::vector<Any> &);
+  LogicalResult execute(mlir::arith::FPToSIOp, std::vector<Any> &,
                         std::vector<Any> &);
   LogicalResult execute(mlir::arith::CmpIOp, std::vector<Any> &,
                         std::vector<Any> &);
@@ -102,11 +111,37 @@ private:
                         std::vector<Any> &);
   LogicalResult execute(mlir::arith::DivFOp, std::vector<Any> &,
                         std::vector<Any> &);
+  LogicalResult execute(mlir::arith::RemFOp, std::vector<Any> &,
+                        std::vector<Any> &);
+  LogicalResult execute(mlir::arith::RemSIOp, std::vector<Any> &,
+                        std::vector<Any> &);
+  LogicalResult execute(mlir::arith::RemUIOp, std::vector<Any> &,
+                        std::vector<Any> &);
   LogicalResult execute(mlir::arith::IndexCastOp, std::vector<Any> &,
                         std::vector<Any> &);
   LogicalResult execute(mlir::arith::ExtSIOp, std::vector<Any> &,
                         std::vector<Any> &);
   LogicalResult execute(mlir::arith::ExtUIOp, std::vector<Any> &,
+                        std::vector<Any> &);
+  LogicalResult execute(mlir::arith::ExtFOp, std::vector<Any> &,
+                        std::vector<Any> &);
+  LogicalResult execute(mlir::math::CosOp, std::vector<Any> &,
+                        std::vector<Any> &);
+  LogicalResult execute(mlir::math::ExpOp, std::vector<Any> &,
+                        std::vector<Any> &);
+  LogicalResult execute(mlir::math::Exp2Op, std::vector<Any> &,
+                        std::vector<Any> &);
+  LogicalResult execute(mlir::math::LogOp, std::vector<Any> &,
+                        std::vector<Any> &);
+  LogicalResult execute(mlir::math::Log2Op, std::vector<Any> &,
+                        std::vector<Any> &);
+  LogicalResult execute(mlir::math::Log10Op, std::vector<Any> &,
+                        std::vector<Any> &);
+  LogicalResult execute(mlir::math::SinOp, std::vector<Any> &,
+                        std::vector<Any> &);
+  LogicalResult execute(mlir::math::SqrtOp, std::vector<Any> &,
+                        std::vector<Any> &);
+  LogicalResult execute(mlir::math::AbsFOp, std::vector<Any> &,
                         std::vector<Any> &);
   LogicalResult execute(memref::LoadOp, std::vector<Any> &, std::vector<Any> &);
   LogicalResult execute(memref::StoreOp, std::vector<Any> &,
@@ -115,14 +150,14 @@ private:
                         std::vector<Any> &);
   LogicalResult execute(mlir::cf::BranchOp, std::vector<Any> &,
                         std::vector<Any> &, DominanceInfo &,
-                        dynamatic::Logger &, dynamatic::Logger &);
+                        dynamatic::Logger *, dynamatic::Logger *);
   LogicalResult execute(mlir::cf::CondBranchOp, std::vector<Any> &,
                         std::vector<Any> &, DominanceInfo &,
-                        dynamatic::Logger &, dynamatic::Logger &);
+                        dynamatic::Logger *, dynamatic::Logger *);
   LogicalResult execute(func::ReturnOp, std::vector<Any> &, std::vector<Any> &);
   LogicalResult execute(mlir::CallOpInterface, std::vector<Any> &,
                         std::vector<Any> &, DominanceInfo &,
-                        dynamatic::Logger &, dynamatic::Logger &);
+                        dynamatic::Logger *, dynamatic::Logger *);
 
 private:
   /// Execution context variables.
@@ -136,6 +171,10 @@ private:
 
   /// Profiler to gather statistics.
   StdProfiler &prof;
+
+  /// Optional loggers.
+  dynamatic::Logger *trace_logger;
+  dynamatic::Logger *bbList_logger;
 
   /// Flag indicating whether execution was successful.
   bool successFlag = true;
@@ -286,23 +325,48 @@ static unsigned allocateMemRef(mlir::MemRefType type, std::vector<Any> &in,
 //===----------------------------------------------------------------------===//
 // Std executer
 //===----------------------------------------------------------------------===//
-
-LogicalResult StdExecuterData::execute(mlir::arith::ConstantIndexOp op,
-                                   std::vector<Any> &, std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::arith::ConstantOp op,
+                                       std::vector<Any> &,
+                                       std::vector<Any> &out) {
+  mlir::Type cstType = op.getResult().getType();
+  TypedAttr valueAttr = op.getValueAttr();
+  if (isa<IndexType>(cstType)) {
+    mlir::IntegerAttr attr = cast<mlir::IntegerAttr>(valueAttr);
+    out[0] = attr.getValue().sextOrTrunc(IndexType::kInternalStorageBitWidth);
+  } else if (isa<mlir::IntegerType>(cstType)) {
+    APInt value = cast<mlir::IntegerAttr>(valueAttr).getValue();
+    unsigned bitwidth = cstType.getIntOrFloatBitWidth();
+    if (cstType.isUnsignedInteger())
+      out[0] = value.zextOrTrunc(bitwidth);
+    else
+      out[0] = value.sextOrTrunc(bitwidth);
+  } else if (isa<mlir::FloatType>(cstType)) {
+    mlir::FloatAttr attr = cast<mlir::FloatAttr>(valueAttr);
+    out[0] = attr.getValue();
+  } else {
+    fatalValueError("unsupported constant type", op);
+  }
+  return success();
+}
+LogicalResult UnifiedExecuter::execute(mlir::arith::ConstantIndexOp op,
+                                       std::vector<Any> &,
+                                       std::vector<Any> &out) {
   auto attr = op->getAttrOfType<mlir::IntegerAttr>("value");
   out[0] = attr.getValue().sextOrTrunc(IndexType::kInternalStorageBitWidth);
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::arith::ConstantIntOp op,
-                                   std::vector<Any> &, std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::arith::ConstantIntOp op,
+                                       std::vector<Any> &,
+                                       std::vector<Any> &out) {
   auto attr = op->getAttrOfType<mlir::IntegerAttr>("value");
   out[0] = attr.getValue();
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::LLVM::UndefOp op, std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::LLVM::UndefOp op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   auto type = op.getRes().getType();
   if (isa<IndexType>(type)) {
     APInt val(IndexType::kInternalStorageBitWidth, 0);
@@ -318,15 +382,16 @@ LogicalResult StdExecuterData::execute(mlir::LLVM::UndefOp op, std::vector<Any> 
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::arith::SelectOp op,
-                                   std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::arith::SelectOp op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   out[0] = any_cast<APInt>(in[0]) != 0 ? in[1] : in[2];
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::arith::ShLIOp, std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::arith::ShLIOp,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   auto toShift = any_cast<APInt>(in[0]).getSExtValue();
   auto shiftAmount = any_cast<APInt>(in[1]).getZExtValue();
   auto shifted =
@@ -335,8 +400,8 @@ LogicalResult StdExecuterData::execute(mlir::arith::ShLIOp, std::vector<Any> &in
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::arith::ShRSIOp, std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::arith::ShRSIOp,std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   auto toShift = any_cast<APInt>(in[0]).getSExtValue();
   auto shiftAmount = any_cast<APInt>(in[1]).getZExtValue();
   auto shifted =
@@ -345,46 +410,46 @@ LogicalResult StdExecuterData::execute(mlir::arith::ShRSIOp, std::vector<Any> &i
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::arith::OrIOp, std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::arith::OrIOp, std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   out[0] = any_cast<APInt>(in[0]) | any_cast<APInt>(in[1]);
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::arith::TruncIOp op,
-                                   std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::arith::TruncIOp op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   auto width = dyn_cast<mlir::IntegerType>(op.getResult().getType()).getWidth();
   out[0] = any_cast<APInt>(in[0]).trunc(width);
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::arith::AndIOp, std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::arith::AndIOp,std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   out[0] = any_cast<APInt>(in[0]) & any_cast<APInt>(in[1]);
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::arith::XOrIOp, std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::arith::XOrIOp,std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   out[0] = any_cast<APInt>(in[0]) ^ any_cast<APInt>(in[1]);
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::arith::AddIOp, std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::arith::AddIOp,std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   out[0] = any_cast<APInt>(in[0]) + any_cast<APInt>(in[1]);
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::arith::AddFOp, std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::arith::AddFOp,std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   out[0] = any_cast<APFloat>(in[0]) + any_cast<APFloat>(in[1]);
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::arith::CmpIOp op, std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::arith::CmpIOp op,std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   APInt in0 = any_cast<APInt>(in[0]);
   APInt in1 = any_cast<APInt>(in[1]);
   APInt out0(1, mlir::arith::applyCmpPredicate(op.getPredicate(), in0, in1));
@@ -392,8 +457,8 @@ LogicalResult StdExecuterData::execute(mlir::arith::CmpIOp op, std::vector<Any> 
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::arith::CmpFOp op, std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::arith::CmpFOp op,std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   APFloat in0 = any_cast<APFloat>(in[0]);
   APFloat in1 = any_cast<APFloat>(in[1]);
   APInt out0(1, mlir::arith::applyCmpPredicate(op.getPredicate(), in0, in1));
@@ -401,33 +466,33 @@ LogicalResult StdExecuterData::execute(mlir::arith::CmpFOp op, std::vector<Any> 
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::arith::SubIOp, std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::arith::SubIOp,std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   out[0] = any_cast<APInt>(in[0]) - any_cast<APInt>(in[1]);
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::arith::SubFOp, std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::arith::SubFOp,std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   out[0] = any_cast<APFloat>(in[0]) + any_cast<APFloat>(in[1]);
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::arith::MulIOp, std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::arith::MulIOp,std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   out[0] = any_cast<APInt>(in[0]) * any_cast<APInt>(in[1]);
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::arith::MulFOp, std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::arith::MulFOp,std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   out[0] = any_cast<APFloat>(in[0]) * any_cast<APFloat>(in[1]);
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::arith::DivSIOp op,
-                                   std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::arith::DivSIOp op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   if (!any_cast<APInt>(in[1]).getZExtValue())
     return op.emitOpError() << "Division By Zero!";
 
@@ -435,24 +500,42 @@ LogicalResult StdExecuterData::execute(mlir::arith::DivSIOp op,
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::arith::DivUIOp op,
-                                   std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::arith::DivUIOp op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   if (!any_cast<APInt>(in[1]).getZExtValue())
     return op.emitOpError() << "Division By Zero!";
   out[0] = any_cast<APInt>(in[0]).udiv(any_cast<APInt>(in[1]));
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::arith::DivFOp, std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::arith::DivFOp,std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   out[0] = any_cast<APFloat>(in[0]) / any_cast<APFloat>(in[1]);
   return success();
 }
+LogicalResult UnifiedExecuter::execute(mlir::arith::RemFOp,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
+  out[0] = any_cast<APFloat>(in[0]).mod(any_cast<APFloat>(in[1]));
+  return success();
+}
+LogicalResult UnifiedExecuter::execute(mlir::arith::RemSIOp,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
+  out[0] = any_cast<APInt>(in[0]).srem(any_cast<APInt>(in[1]));
+  return success();
+}
 
-LogicalResult StdExecuterData::execute(mlir::arith::IndexCastOp op,
-                                   std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::arith::RemUIOp,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
+  out[0] = any_cast<APInt>(in[0]).urem(any_cast<APInt>(in[1]));
+  return success();
+}
+LogicalResult UnifiedExecuter::execute(mlir::arith::IndexCastOp op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   mlir::Type outType = op.getOut().getType();
   APInt inValue = any_cast<APInt>(in[0]);
   APInt outValue;
@@ -469,25 +552,110 @@ LogicalResult StdExecuterData::execute(mlir::arith::IndexCastOp op,
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::arith::ExtSIOp op,
-                                   std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::arith::ExtSIOp op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   int64_t width = op.getType().getIntOrFloatBitWidth();
   out[0] = any_cast<APInt>(in[0]).sext(width);
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::arith::ExtUIOp op,
-                                   std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::arith::ExtUIOp op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   int64_t width = op.getType().getIntOrFloatBitWidth();
   out[0] = any_cast<APInt>(in[0]).zext(width);
   return success();
 }
+LogicalResult UnifiedExecuter::execute(mlir::arith::ExtFOp op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
+  auto width = dyn_cast<mlir::FloatType>(op.getResult().getType()).getWidth();
+  assert(width == 64 && "We assume that ExtFOp converts float to double.");
+  out[0] = APFloat(any_cast<APFloat>(in[0]).convertToDouble());
+  return success();
+}
+LogicalResult UnifiedExecuter::execute(mlir::arith::SIToFPOp op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
+  out[0] = APFloat(APIntOps::RoundSignedAPIntToFloat(any_cast<APInt>(in[0])));
+  return success();
+}
+LogicalResult UnifiedExecuter::execute(mlir::arith::FPToSIOp op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
+  int64_t width = op.getType().getIntOrFloatBitWidth();
 
-LogicalResult StdExecuterData::execute(mlir::memref::LoadOp op,
-                                   std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+  out[0] = any_cast<APInt>(APIntOps::RoundDoubleToAPInt(
+      any_cast<APFloat>(in[0]).convertToDouble(), width));
+  return success();
+}
+LogicalResult UnifiedExecuter::execute(mlir::math::CosOp op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
+  out[0] = APFloat(std::cos(any_cast<APFloat>(in[0]).convertToDouble()));
+  return success();
+}
+
+LogicalResult UnifiedExecuter::execute(mlir::math::ExpOp op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
+  out[0] = APFloat(std::exp(any_cast<APFloat>(in[0]).convertToDouble()));
+  return success();
+}
+
+LogicalResult UnifiedExecuter::execute(mlir::math::Exp2Op op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
+  out[0] = APFloat(std::exp2(any_cast<APFloat>(in[0]).convertToDouble()));
+  return success();
+}
+
+LogicalResult UnifiedExecuter::execute(mlir::math::LogOp op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
+  out[0] = APFloat(std::log(any_cast<APFloat>(in[0]).convertToDouble()));
+  return success();
+}
+
+LogicalResult UnifiedExecuter::execute(mlir::math::Log2Op op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
+  out[0] = APFloat(std::log2(any_cast<APFloat>(in[0]).convertToDouble()));
+  return success();
+}
+
+LogicalResult UnifiedExecuter::execute(mlir::math::Log10Op op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
+  out[0] = APFloat(std::log10(any_cast<APFloat>(in[0]).convertToDouble()));
+  return success();
+}
+
+LogicalResult UnifiedExecuter::execute(mlir::math::SinOp op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
+  out[0] = APFloat(std::sin(any_cast<APFloat>(in[0]).convertToDouble()));
+  return success();
+}
+
+LogicalResult UnifiedExecuter::execute(mlir::math::SqrtOp op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
+  out[0] = APFloat(std::sqrt(any_cast<APFloat>(in[0]).convertToDouble()));
+  return success();
+}
+
+LogicalResult UnifiedExecuter::execute(mlir::math::AbsFOp op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
+  out[0] = APFloat(std::abs(any_cast<APFloat>(in[0]).convertToDouble()));
+  return success();
+}
+
+LogicalResult UnifiedExecuter::execute(mlir::memref::LoadOp op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   ArrayRef<int64_t> shape = op.getMemRefType().getShape();
   unsigned address = 0;
   for (unsigned i = 0; i < shape.size(); ++i) {
@@ -514,8 +682,9 @@ LogicalResult StdExecuterData::execute(mlir::memref::LoadOp op,
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::memref::StoreOp op,
-                                   std::vector<Any> &in, std::vector<Any> &) {
+LogicalResult UnifiedExecuter::execute(mlir::memref::StoreOp op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &) {
   ArrayRef<int64_t> shape = op.getMemRefType().getShape();
   unsigned address = 0;
   for (unsigned i = 0; i < shape.size(); ++i) {
@@ -539,18 +708,20 @@ LogicalResult StdExecuterData::execute(mlir::memref::StoreOp op,
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::memref::AllocOp op,
-                                   std::vector<Any> &in,
-                                   std::vector<Any> &out) {
+LogicalResult UnifiedExecuter::execute(mlir::memref::AllocOp op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
   out[0] = allocateMemRef(op.getType(), in, store, storeTimes);
   unsigned ptr = any_cast<unsigned>(out[0]);
   storeTimes[ptr] = time;
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::cf::BranchOp branchOp,
-                                   std::vector<Any> &in, std::vector<Any> &, DominanceInfo &DomInfo,
-                                   dynamatic::Logger &trace_logger, dynamatic::Logger &bbList_logger) {
+LogicalResult UnifiedExecuter::execute(mlir::cf::BranchOp branchOp,
+                                       std::vector<Any> &in, std::vector<Any> &,
+                                       DominanceInfo &DomInfo,
+                                       dynamatic::Logger *trace_logger,
+                                       dynamatic::Logger *bbList_logger) {
   mlir::Block *dest = branchOp.getDest();
   for (auto out : enumerate(dest->getArguments())) {
     LLVM_DEBUG(debugArg("ARG", out.value(), in[out.index()], time));
@@ -560,26 +731,37 @@ LogicalResult StdExecuterData::execute(mlir::cf::BranchOp branchOp,
   prof.transitions[std::make_pair(branchOp->getBlock(), dest)]++;
 
   //! Testing
-  if (DomInfo.dominates(dest, branchOp->getBlock())) {
-    // This is a back edge
-    *trace_logger << "[BEdge] " << num_edges << " (" << BlocktoIDs[branchOp->getBlock()] << "," << BlocktoIDs[dest] << ")\n";
-    *bbList_logger << "[BEdge] " << num_edges << " (" << BlocktoIDs[branchOp->getBlock()] << "," << BlocktoIDs[dest] << ")\n";
-  } else {
-    // This is not a backedge
-    *trace_logger << "[Edge] "<< num_edges << " (" << BlocktoIDs[branchOp->getBlock()] << "," << BlocktoIDs[dest] << ")\n";
-    *bbList_logger << "[Edge] "<< num_edges << " (" << BlocktoIDs[branchOp->getBlock()] << "," << BlocktoIDs[dest] << ")\n";
+  if (trace_logger && bbList_logger) {
+    if (DomInfo.dominates(dest, branchOp->getBlock())) {
+      // This is a back edge
+      trace_logger->stream()
+          << "[BEdge] " << num_edges << " (" << BlocktoIDs[branchOp->getBlock()]
+          << "," << BlocktoIDs[dest] << ")\n";
+      bbList_logger->stream()
+          << "[BEdge] " << num_edges << " (" << BlocktoIDs[branchOp->getBlock()]
+          << "," << BlocktoIDs[dest] << ")\n";
+    } else {
+      // This is not a backedge
+      trace_logger->stream()
+          << "[Edge] " << num_edges << " (" << BlocktoIDs[branchOp->getBlock()]
+          << "," << BlocktoIDs[dest] << ")\n";
+      bbList_logger->stream()
+          << "[Edge] " << num_edges << " (" << BlocktoIDs[branchOp->getBlock()]
+          << "," << BlocktoIDs[dest] << ")\n";
+    }
+    // Update edge status
+    num_edges++;
   }
-
-  // Update edge status
-  num_edges++;
 
   instIter = dest->begin();
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::cf::CondBranchOp condBranchOp,
-                                   std::vector<Any> &in, std::vector<Any> &, DominanceInfo &DomInfo,
-                                   dynamatic::Logger &trace_logger, dynamatic::Logger &bbList_logger) {
+LogicalResult UnifiedExecuter::execute(mlir::cf::CondBranchOp condBranchOp,
+                                       std::vector<Any> &in, std::vector<Any> &,
+                                       DominanceInfo &DomInfo,
+                                       dynamatic::Logger *trace_logger,
+                                       dynamatic::Logger *bbList_logger) {
   APInt condition = any_cast<APInt>(in[0]);
   mlir::Block *dest;
   std::vector<Any> inArgs;
@@ -612,24 +794,33 @@ LogicalResult StdExecuterData::execute(mlir::cf::CondBranchOp condBranchOp,
   prof.transitions[std::make_pair(condBranchOp->getBlock(), dest)]++;
 
   //! Testing
-  if (DomInfo.dominates(dest, condBranchOp->getBlock())) {
-    // This is a backedge
-    *trace_logger << "[BEdge] " << num_edges << " (" << BlocktoIDs[condBranchOp->getBlock()] << "," << BlocktoIDs[dest] << ")\n";
-    *bbList_logger << "[BEdge] " << num_edges << " (" << BlocktoIDs[condBranchOp->getBlock()] << "," << BlocktoIDs[dest] << ")\n";
-  } else {
-    // This is not a backedge
-    *trace_logger << "[Edge] " << num_edges << " (" << BlocktoIDs[condBranchOp->getBlock()] << "," << BlocktoIDs[dest] << ")\n";
-    *bbList_logger << "[Edge] " << num_edges << " (" << BlocktoIDs[condBranchOp->getBlock()] << "," << BlocktoIDs[dest] << ")\n";
+  if (trace_logger && bbList_logger) {
+    if (DomInfo.dominates(dest, condBranchOp->getBlock())) {
+      // This is a backedge
+      trace_logger->stream() << "[BEdge] " << num_edges << " ("
+                             << BlocktoIDs[condBranchOp->getBlock()] << ","
+                             << BlocktoIDs[dest] << ")\n";
+      bbList_logger->stream() << "[BEdge] " << num_edges << " ("
+                              << BlocktoIDs[condBranchOp->getBlock()] << ","
+                              << BlocktoIDs[dest] << ")\n";
+    } else {
+      // This is not a backedge
+      trace_logger->stream() << "[Edge] " << num_edges << " ("
+                             << BlocktoIDs[condBranchOp->getBlock()] << ","
+                             << BlocktoIDs[dest] << ")\n";
+      bbList_logger->stream() << "[Edge] " << num_edges << " ("
+                              << BlocktoIDs[condBranchOp->getBlock()] << ","
+                              << BlocktoIDs[dest] << ")\n";
+    }
+    // Update edge status
+    num_edges++;
   }
 
-  // Update edge status
-  num_edges++;
-  
   return success();
 }
 
-LogicalResult StdExecuterData::execute(func::ReturnOp op, std::vector<Any> &in,
-                                   std::vector<Any> &) {
+LogicalResult UnifiedExecuter::execute(func::ReturnOp op, std::vector<Any> &in,
+                                       std::vector<Any> &) {
   for (unsigned i = 0; i < results.size(); ++i) {
     results[i] = in[i];
     resultTimes[i] = timeMap[op.getOperand(i)];
@@ -637,9 +828,11 @@ LogicalResult StdExecuterData::execute(func::ReturnOp op, std::vector<Any> &in,
   return success();
 }
 
-LogicalResult StdExecuterData::execute(mlir::CallOpInterface callOp,
-                                   std::vector<Any> &in, std::vector<Any> &, DominanceInfo &DomInfo,
-                                   dynamatic::Logger &trace_logger, dynamatic::Logger &bbList_logger) {
+LogicalResult UnifiedExecuter::execute(mlir::CallOpInterface callOp,
+                                       std::vector<Any> &in, std::vector<Any> &,
+                                       DominanceInfo &DomInfo,
+                                       dynamatic::Logger *trace_logger,
+                                       dynamatic::Logger *bbList_logger) {
   // implement function calls.
   auto *op = callOp.getOperation();
   mlir::Operation *calledOp = callOp.resolveCallable();
@@ -659,8 +852,8 @@ LogicalResult StdExecuterData::execute(mlir::CallOpInterface callOp,
       newTimeMap[blockArgs[inIt.index()]] =
           timeMap[op->getOperand(inIt.index())];
     }
-    // StdExecuterData(funcOp, newValueMap, newTimeMap, results, resultTimes, store,
-    //             storeTimes, prof);
+    // UnifiedExecuter(funcOp, newValueMap, newTimeMap, results, resultTimes,
+    // store, storeTimes, prof, trace_logger, bbList_logger);
     for (auto out : enumerate(op->getResults())) {
       valueMap[out.value()] = results[out.index()];
       timeMap[out.value()] = resultTimes[out.index()];
@@ -670,23 +863,22 @@ LogicalResult StdExecuterData::execute(mlir::CallOpInterface callOp,
     return op->emitOpError() << "Callable was not a function";
 
   //! Testing
-  *trace_logger << "[Call Op]\n";
+  if (trace_logger)
+    trace_logger->stream() << "[Call Op]\n";
 
   return success();
 }
 enum ExecuteStrategy { Default = 1 << 0, Continue = 1 << 1, Return = 1 << 2 };
 
-StdExecuterData::StdExecuterData(mlir::func::FuncOp &toplevel,
-                         llvm::DenseMap<mlir::Value, Any> &valueMap,
-                         llvm::DenseMap<mlir::Value, double> &timeMap,
-                         std::vector<Any> &results,
-                         std::vector<double> &resultTimes,
-                         std::vector<std::vector<Any>> &store,
-                         std::vector<double> &storeTimes, StdProfiler &prof,
-                         dynamatic::Logger &trace_logger, dynamatic::Logger &bbList_logger)
+UnifiedExecuter::UnifiedExecuter(
+    mlir::func::FuncOp &toplevel, llvm::DenseMap<mlir::Value, Any> &valueMap,
+    llvm::DenseMap<mlir::Value, double> &timeMap, std::vector<Any> &results,
+    std::vector<double> &resultTimes, std::vector<std::vector<Any>> &store,
+    std::vector<double> &storeTimes, StdProfiler &prof,
+    dynamatic::Logger *trace_logger, dynamatic::Logger *bbList_logger)
     : valueMap(valueMap), timeMap(timeMap), results(results),
       resultTimes(resultTimes), store(store), storeTimes(storeTimes),
-      prof(prof) {
+      prof(prof), trace_logger(trace_logger), bbList_logger(bbList_logger) {
   successFlag = true;
   mlir::Block &entryBlock = toplevel.getBody().front();
   instIter = entryBlock.begin();
@@ -719,17 +911,20 @@ StdExecuterData::StdExecuterData(mlir::func::FuncOp &toplevel,
     auto res =
         llvm::TypeSwitch<Operation *, LogicalResult>(&op)
             .Case<
-                mlir::arith::ConstantIndexOp, mlir::arith::ConstantIntOp,
-                mlir::arith::AddIOp, mlir::arith::AddFOp, mlir::arith::CmpIOp,
-                mlir::arith::CmpFOp, mlir::arith::SubIOp, mlir::arith::SubFOp,
-                mlir::arith::MulIOp, mlir::arith::MulFOp, 
-                mlir::arith::DivSIOp,mlir::arith::DivUIOp, 
-                mlir::arith::DivFOp, mlir::arith::IndexCastOp, 
-                mlir::arith::TruncIOp, mlir::arith::AndIOp, 
-                mlir::arith::OrIOp, mlir::arith::XOrIOp,
-                mlir::arith::SelectOp, mlir::LLVM::UndefOp, 
-                mlir::arith::ShRSIOp, mlir::arith::ShLIOp,
-                mlir::arith::ExtSIOp, mlir::arith::ExtUIOp, memref::AllocOp,
+                mlir::arith::ConstantOp, mlir::arith::ConstantIndexOp,
+                mlir::arith::ConstantIntOp, mlir::arith::AddIOp,
+                mlir::arith::AddFOp, mlir::arith::CmpIOp, mlir::arith::CmpFOp,
+                mlir::arith::SubIOp, mlir::arith::SubFOp, mlir::arith::MulIOp,
+                mlir::arith::MulFOp, mlir::arith::DivSIOp, mlir::arith::DivUIOp,
+                mlir::arith::DivFOp, mlir::arith::RemFOp, arith::RemSIOp,
+                arith::RemUIOp, mlir::arith::SIToFPOp, mlir::arith::FPToSIOp,
+                mlir::arith::IndexCastOp, mlir::arith::TruncIOp,
+                mlir::arith::AndIOp, mlir::arith::OrIOp, mlir::arith::XOrIOp,
+                mlir::arith::SelectOp, mlir::LLVM::UndefOp,
+                mlir::arith::ShRSIOp, mlir::arith::ShLIOp, mlir::arith::ExtSIOp,
+                mlir::arith::ExtUIOp, arith::ExtFOp, math::SqrtOp, math::CosOp,
+                math::ExpOp, math::Exp2Op, math::LogOp, math::Log2Op,
+                math::Log10Op, math::SqrtOp, math::AbsFOp, memref::AllocOp,
                 memref::LoadOp, memref::StoreOp>([&](auto op) {
               strat = ExecuteStrategy::Default;
               return execute(op, inValues, outValues);
@@ -737,7 +932,8 @@ StdExecuterData::StdExecuterData(mlir::func::FuncOp &toplevel,
             .Case<mlir::cf::BranchOp, mlir::cf::CondBranchOp,
                   mlir::CallOpInterface>([&](auto op) {
               strat = ExecuteStrategy::Continue;
-              return execute(op, inValues, outValues, domInfo, trace_logger, bbList_logger);
+              return execute(op, inValues, outValues, domInfo, trace_logger,
+                             bbList_logger);
             })
             .Case<func::ReturnOp>([&](auto op) {
               strat = ExecuteStrategy::Return;
@@ -765,22 +961,33 @@ StdExecuterData::StdExecuterData(mlir::func::FuncOp &toplevel,
 
       // Skip Constant Operations
       // TODO: Merge ConstantIndex and ConstantIndex op;
-      if (!isa<mlir::arith::ConstantIntOp>(op) && !isa<mlir::arith::ConstantIndexOp>(op)) {
-        *trace_logger << "[DATA] (" << op.getAttr("handshake.name");
-
-        //! At this stage we only allow APInt
-        // TODO: Support APFloat
-        *trace_logger << "," << any_cast<APInt>(outValues[out.index()]) << ")\n";
+      if (!isa<mlir::arith::ConstantIntOp>(op) &&
+          !isa<mlir::arith::ConstantIndexOp>(op)) {
+        if (trace_logger) {
+          auto attr = op.getAttrOfType<mlir::StringAttr>("handshake.name");
+          std::string nameStr = attr ? attr.getValue().str() : "<unnamed>";
+          trace_logger->stream() << "[DATA] (" << nameStr;
+          if (auto *intVal = any_cast<APInt>(&outValues[out.index()])) {
+            trace_logger->stream() << "," << *intVal << ")\n";
+          } else if (auto *floatVal =
+                         any_cast<APFloat>(&outValues[out.index()])) {
+            trace_logger->stream()
+                << "," << floatVal->convertToDouble() << ")\n";
+          } else {
+            trace_logger->stream() << ",<unknown>)\n";
+          }
+        }
       }
-      
     }
     ++instIter;
     ++instructionsExecuted;
   }
 }
-
+// dynamatic::Logger &trace_logger = nullptr,
+// dynamatic::Logger &bbList_logger = nullptr) {
 LogicalResult simulate(func::FuncOp funcOp, ArrayRef<std::string> inputArgs,
-                       StdProfiler &prof, dynamatic::Logger &trace_logger, dynamatic::Logger &bbList_logger) {
+                       StdProfiler &prof, dynamatic::Logger *trace_logger,
+                       dynamatic::Logger *bbList_logger) {
   // The store associates each allocation in the program
   // (represented by a int) with a vector of values which can be
   // accessed by it.   Currently values are assumed to be an integer.
@@ -836,14 +1043,18 @@ LogicalResult simulate(func::FuncOp funcOp, ArrayRef<std::string> inputArgs,
       timeMap[blockArgs[i]] = 0.0;
 
       // Get input arguments
-      *trace_logger << "[ARG] (" << funcOp.getArgAttrOfType<mlir::StringAttr>(i, "handshake.arg_name") << "," << any_cast<APInt>(value) <<")\n";
+      if (trace_logger)
+        trace_logger->stream() << "[ARG] ("
+                               << funcOp.getArgAttrOfType<mlir::StringAttr>(
+                                      i, "handshake.arg_name")
+                               << "," << any_cast<APInt>(value) << ")\n";
     }
   }
 
   std::vector<Any> results(numOutputs);
   std::vector<double> resultTimes(numOutputs);
 
-  return StdExecuterData(funcOp, valueMap, timeMap, results, resultTimes, store,
-                     storeTimes, prof, trace_logger, bbList_logger)
+  return UnifiedExecuter(funcOp, valueMap, timeMap, results, resultTimes, store,
+                         storeTimes, prof, trace_logger, bbList_logger)
       .succeeded();
 }

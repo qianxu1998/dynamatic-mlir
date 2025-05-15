@@ -54,9 +54,10 @@ DATA_LOG="$OUTPUT_DIR/profiling.log"
 TRACE_LOG="$OUTPUT_DIR/trace.log"
 BB_LOG="$OUTPUT_DIR/bblist.log"
 FREQUENCIES="$OUTPUT_DIR/frequencies.csv"
-DYNAMATIC_DIR="/home/jianliu/new_lsq/dynamatic-mlir"
+DYNAMATIC_DIR="/home/$USER/new/dynamatic-mlir"
 
-DATA_PROFILER_BIN="./bin/data-profiler"
+# DATA_PROFILER_BIN="./bin/data-profiler""
+DATA_PROFILER_BIN="./build/bin/data-profiler"
 DYNAMATIC_OPT_BIN="./bin/dynamatic-opt"
 
 F_CF_DYN_TRANSFORMED="$OUTPUT_DIR/cf_dyn_transformed.mlir"
@@ -80,7 +81,9 @@ echo_section "[Step 1] Runing Data Profiler for ${KERNEL_NAME}"
   --top-level-function="$KERNEL_NAME" \
   --input-args-file="$OUTPUT_DIR/profiler-inputs.txt" \
   --trace-log-file="$TRACE_LOG" \
-  --bb-list-log-file="$BB_LOG" > /dev/null
+  --bb-list-log-file="$BB_LOG" \
+  --output-frequencies="$FREQUENCIES" \
+  --mode=both > /dev/null
 echo_info "Data Profiling Finished"
 
 # Run the switching estimation pass
@@ -88,3 +91,4 @@ echo_section "[Step 2] Running Switching Estiamtion Pass for ${KERNEL_NAME}"
 "$DYNAMATIC_OPT_BIN" "$F_HANDSHAKE_EXPORT" \
   --switching-estimation="data-trace=$TRACE_LOG bb-list=$BB_LOG frequencies=$FREQUENCIES timing-models=$DYNAMATIC_DIR/data/components.json" \
  2>&1 | tee "$F_HANDSHAKE_SWITCH"
+

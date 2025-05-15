@@ -124,8 +124,7 @@ int main(int argc, char **argv) {
   // Load the MLIR module
   SourceMgr sourceMgr;
   sourceMgr.AddNewSourceBuffer(std::move(*fileOrErr), SMLoc());
-  mlir::OwningOpRef<mlir::ModuleOp> module(
-      mlir::parseSourceFile<ModuleOp>(sourceMgr, &context));
+  OwningOpRef<mlir::ModuleOp> module(mlir::parseSourceFile<ModuleOp>(sourceMgr, &context));
   if (!module)
     return 1;
 

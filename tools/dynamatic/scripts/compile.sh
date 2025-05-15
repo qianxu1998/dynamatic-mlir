@@ -19,7 +19,8 @@ USE_SHARING=$8
 POLYGEIST_CLANG_BIN="$DYNAMATIC_DIR/bin/cgeist"
 CLANGXX_BIN="$DYNAMATIC_DIR/bin/clang++"
 DYNAMATIC_OPT_BIN="$DYNAMATIC_DIR/bin/dynamatic-opt"
-DYNAMATIC_PROFILER_BIN="$DYNAMATIC_DIR/bin/exp-frequency-profiler"
+# DYNAMATIC_PROFILER_BIN="$DYNAMATIC_DIR/bin/exp-frequency-profiler"
+DYNAMATIC_PROFILER_BIN="$DYNAMATIC_DIR/bin/data-profiler"
 DYNAMATIC_EXPORT_DOT_BIN="$DYNAMATIC_DIR/bin/export-dot"
 
 # Generated directories/files
@@ -153,10 +154,12 @@ else
   "$F_PROFILER_BIN" > "$F_PROFILER_INPUTS"
   exit_on_fail "Failed to kernel for profiling" "Ran kernel for profiling"
 
-  # cf-level profiler
+  # cf-level profiler ## TODO: ! it was an old  frequency profiler 
   "$DYNAMATIC_PROFILER_BIN" "$F_CF_DYN_TRANSFORMED" \
-    --top-level-function="$KERNEL_NAME" --input-args-file="$F_PROFILER_INPUTS" \
-    > $F_FREQUENCIES
+    --top-level-function="$KERNEL_NAME" \
+    --input-args-file="$F_PROFILER_INPUTS" \
+    --output-frequencies="$F_FREQUENCIES" \
+    --mode=frequency
   exit_on_fail "Failed to profile cf-level" "Profiled cf-level"
 
   # Smart buffer placement
