@@ -83,6 +83,7 @@ private:
                         std::vector<Any> &);
   LogicalResult execute(mlir::arith::TruncFOp, std::vector<Any> &,
                         std::vector<Any> &);
+
   LogicalResult execute(mlir::arith::AndIOp, std::vector<Any> &,
                         std::vector<Any> &);
   LogicalResult execute(mlir::arith::XOrIOp, std::vector<Any> &,
@@ -400,7 +401,8 @@ LogicalResult UnifiedExecuter::execute(mlir::arith::ShLIOp,
   return success();
 }
 
-LogicalResult UnifiedExecuter::execute(mlir::arith::ShRSIOp,std::vector<Any> &in,
+LogicalResult UnifiedExecuter::execute(mlir::arith::ShRSIOp,
+                                       std::vector<Any> &in,
                                        std::vector<Any> &out) {
   auto toShift = any_cast<APInt>(in[0]).getSExtValue();
   auto shiftAmount = any_cast<APInt>(in[1]).getZExtValue();
@@ -423,32 +425,44 @@ LogicalResult UnifiedExecuter::execute(mlir::arith::TruncIOp op,
   out[0] = any_cast<APInt>(in[0]).trunc(width);
   return success();
 }
-
-LogicalResult UnifiedExecuter::execute(mlir::arith::AndIOp,std::vector<Any> &in,
+LogicalResult UnifiedExecuter::execute(mlir::arith::TruncFOp op,
+                                       std::vector<Any> &in,
+                                       std::vector<Any> &out) {
+  auto width = dyn_cast<mlir::FloatType>(op.getResult().getType()).getWidth();
+  assert(width == 32 && "We assume that TruncFOp converts double to float.");
+  out[0] = APFloat(float(any_cast<APFloat>(in[0]).convertToDouble()));
+  return success();
+}
+LogicalResult UnifiedExecuter::execute(mlir::arith::AndIOp,
+                                       std::vector<Any> &in,
                                        std::vector<Any> &out) {
   out[0] = any_cast<APInt>(in[0]) & any_cast<APInt>(in[1]);
   return success();
 }
 
-LogicalResult UnifiedExecuter::execute(mlir::arith::XOrIOp,std::vector<Any> &in,
+LogicalResult UnifiedExecuter::execute(mlir::arith::XOrIOp,
+                                       std::vector<Any> &in,
                                        std::vector<Any> &out) {
   out[0] = any_cast<APInt>(in[0]) ^ any_cast<APInt>(in[1]);
   return success();
 }
 
-LogicalResult UnifiedExecuter::execute(mlir::arith::AddIOp,std::vector<Any> &in,
+LogicalResult UnifiedExecuter::execute(mlir::arith::AddIOp,
+                                       std::vector<Any> &in,
                                        std::vector<Any> &out) {
   out[0] = any_cast<APInt>(in[0]) + any_cast<APInt>(in[1]);
   return success();
 }
 
-LogicalResult UnifiedExecuter::execute(mlir::arith::AddFOp,std::vector<Any> &in,
+LogicalResult UnifiedExecuter::execute(mlir::arith::AddFOp,
+                                       std::vector<Any> &in,
                                        std::vector<Any> &out) {
   out[0] = any_cast<APFloat>(in[0]) + any_cast<APFloat>(in[1]);
   return success();
 }
 
-LogicalResult UnifiedExecuter::execute(mlir::arith::CmpIOp op,std::vector<Any> &in,
+LogicalResult UnifiedExecuter::execute(mlir::arith::CmpIOp op,
+                                       std::vector<Any> &in,
                                        std::vector<Any> &out) {
   APInt in0 = any_cast<APInt>(in[0]);
   APInt in1 = any_cast<APInt>(in[1]);
@@ -457,7 +471,8 @@ LogicalResult UnifiedExecuter::execute(mlir::arith::CmpIOp op,std::vector<Any> &
   return success();
 }
 
-LogicalResult UnifiedExecuter::execute(mlir::arith::CmpFOp op,std::vector<Any> &in,
+LogicalResult UnifiedExecuter::execute(mlir::arith::CmpFOp op,
+                                       std::vector<Any> &in,
                                        std::vector<Any> &out) {
   APFloat in0 = any_cast<APFloat>(in[0]);
   APFloat in1 = any_cast<APFloat>(in[1]);
@@ -466,25 +481,29 @@ LogicalResult UnifiedExecuter::execute(mlir::arith::CmpFOp op,std::vector<Any> &
   return success();
 }
 
-LogicalResult UnifiedExecuter::execute(mlir::arith::SubIOp,std::vector<Any> &in,
+LogicalResult UnifiedExecuter::execute(mlir::arith::SubIOp,
+                                       std::vector<Any> &in,
                                        std::vector<Any> &out) {
   out[0] = any_cast<APInt>(in[0]) - any_cast<APInt>(in[1]);
   return success();
 }
 
-LogicalResult UnifiedExecuter::execute(mlir::arith::SubFOp,std::vector<Any> &in,
+LogicalResult UnifiedExecuter::execute(mlir::arith::SubFOp,
+                                       std::vector<Any> &in,
                                        std::vector<Any> &out) {
   out[0] = any_cast<APFloat>(in[0]) + any_cast<APFloat>(in[1]);
   return success();
 }
 
-LogicalResult UnifiedExecuter::execute(mlir::arith::MulIOp,std::vector<Any> &in,
+LogicalResult UnifiedExecuter::execute(mlir::arith::MulIOp,
+                                       std::vector<Any> &in,
                                        std::vector<Any> &out) {
   out[0] = any_cast<APInt>(in[0]) * any_cast<APInt>(in[1]);
   return success();
 }
 
-LogicalResult UnifiedExecuter::execute(mlir::arith::MulFOp,std::vector<Any> &in,
+LogicalResult UnifiedExecuter::execute(mlir::arith::MulFOp,
+                                       std::vector<Any> &in,
                                        std::vector<Any> &out) {
   out[0] = any_cast<APFloat>(in[0]) * any_cast<APFloat>(in[1]);
   return success();
@@ -509,7 +528,8 @@ LogicalResult UnifiedExecuter::execute(mlir::arith::DivUIOp op,
   return success();
 }
 
-LogicalResult UnifiedExecuter::execute(mlir::arith::DivFOp,std::vector<Any> &in,
+LogicalResult UnifiedExecuter::execute(mlir::arith::DivFOp,
+                                       std::vector<Any> &in,
                                        std::vector<Any> &out) {
   out[0] = any_cast<APFloat>(in[0]) / any_cast<APFloat>(in[1]);
   return success();
@@ -887,7 +907,8 @@ UnifiedExecuter::UnifiedExecuter(
   // this is a backedge if the destination block dominates the source block
   DominanceInfo domInfo(toplevel);
 
-  // Assign a unique id to each block based on their order of appearance in the function
+  // Assign a unique id to each block based on their order of appearance in the
+  // function
   for (auto [idx, block] : llvm::enumerate(toplevel.getBody())) {
     BlocktoIDs[&block] = idx;
   }
@@ -919,8 +940,8 @@ UnifiedExecuter::UnifiedExecuter(
                 mlir::arith::DivFOp, mlir::arith::RemFOp, arith::RemSIOp,
                 arith::RemUIOp, mlir::arith::SIToFPOp, mlir::arith::FPToSIOp,
                 mlir::arith::IndexCastOp, mlir::arith::TruncIOp,
-                mlir::arith::AndIOp, mlir::arith::OrIOp, mlir::arith::XOrIOp,
-                mlir::arith::SelectOp, mlir::LLVM::UndefOp,
+                arith::TruncFOp, mlir::arith::AndIOp, mlir::arith::OrIOp,
+                mlir::arith::XOrIOp, mlir::arith::SelectOp, mlir::LLVM::UndefOp,
                 mlir::arith::ShRSIOp, mlir::arith::ShLIOp, mlir::arith::ExtSIOp,
                 mlir::arith::ExtUIOp, arith::ExtFOp, math::SqrtOp, math::CosOp,
                 math::ExpOp, math::Exp2Op, math::LogOp, math::Log2Op,

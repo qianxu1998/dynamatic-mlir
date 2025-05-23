@@ -41,8 +41,7 @@ using namespace dynamatic::experimental;
 
 /// Simulates a std-level function on a specific set of inputs.
 mlir::LogicalResult simulate(func::FuncOp funcOp,
-                             ArrayRef<std::string> inputArgs, 
-                             StdProfiler &prof,
+                             ArrayRef<std::string> inputArgs, StdProfiler &prof,
                              dynamatic::Logger *trace_logger,
                              dynamatic::Logger *bbList_logger);
 
@@ -52,34 +51,30 @@ static cl::opt<std::string> inputFileName(cl::Positional,
                                           cl::desc("<input file>"),
                                           cl::cat(mainCategory));
 
-
-
-static cl::opt<std::string>
-    fileArgs("input-args-file", cl::Optional,
-      cl::desc("If provided, the tool will fetch argument values from a file "
-        "instead of from the command line"),
-                  cl::init(""), cl::cat(mainCategory));
+static cl::opt<std::string> fileArgs(
+    "input-args-file", cl::Optional,
+    cl::desc("If provided, the tool will fetch argument values from a file "
+             "instead of from the command line"),
+    cl::init(""), cl::cat(mainCategory));
 
 static cl::opt<std::string>
     outputFrequencies("output-frequencies", cl::Optional,
-      cl::desc("If provided, the tool formats its output as a "
-        "legacy-compatible DOT instead of a CSV"),
+                      cl::desc("If provided, the tool formats its output as a "
+                               "legacy-compatible DOT instead of a CSV"),
                       cl::init(""), cl::cat(mainCategory));
-                      static cl::opt<std::string>
-                      toplevelFunction("top-level-function", cl::Optional,
-                                       cl::desc("The top-level function to execute"),
-                                       cl::init("main"), cl::cat(mainCategory));
+static cl::opt<std::string>
+    toplevelFunction("top-level-function", cl::Optional,
+                     cl::desc("The top-level function to execute"),
+                     cl::init("main"), cl::cat(mainCategory));
 static cl::opt<std::string>
     traceLogFile("trace-log-file", cl::Optional,
-                   cl::desc("Where to store the execution trace log"),
-                   cl::init(""), 
-                   cl::cat(mainCategory));
+                 cl::desc("Where to store the execution trace log"),
+                 cl::init(""), cl::cat(mainCategory));
 
 static cl::opt<std::string>
     bbListLogFile("bb-list-log-file", cl::Optional,
-                    cl::desc("Where to store the bb execution trace log"),
-                    cl::init(""), 
-                    cl::cat(mainCategory));
+                  cl::desc("Where to store the bb execution trace log"),
+                  cl::init(""), cl::cat(mainCategory));
 
 enum class ProfilerMode { Data, Frequency, Both };
 
@@ -120,13 +115,14 @@ int main(int argc, char **argv) {
       "results are returned on stdout.\n"
       "Memref types are specified as a comma-separated list of values.\n");
 
-      //fron frequency profiler
+  // fron frequency profiler
   SmallVector<std::string> args =
       fileArgs.empty() ? SmallVector<std::string>(argv + 1, argv + argc)
-                            : fetchArgsFromFile();
+                       : fetchArgsFromFile();
   MLIRContext context;
-  context.loadDialect<cf::ControlFlowDialect, func::FuncDialect,
-                      memref::MemRefDialect, LLVM::LLVMDialect>();
+  context
+      .loadDialect<cf::ControlFlowDialect, func::FuncDialect, math::MathDialect,
+                   memref::MemRefDialect, LLVM::LLVMDialect>();
   context.allowUnregisteredDialects();
 
   // Load MLIR
@@ -140,7 +136,7 @@ int main(int argc, char **argv) {
   SourceMgr sourceMgr;
   sourceMgr.AddNewSourceBuffer(std::move(*fileOrErr), SMLoc());
   mlir::OwningOpRef<mlir::ModuleOp> module(
-    mlir::parseSourceFile<ModuleOp>(sourceMgr, &context));
+      mlir::parseSourceFile<ModuleOp>(sourceMgr, &context));
   if (!module)
     return 1;
 
@@ -151,16 +147,16 @@ int main(int argc, char **argv) {
   }
   //! Testing
   // Create trace logger
-  
+
   std::error_code overall_ec;
   dynamatic::Logger *traceLoggerPtr = nullptr;
   // Create bbList logger
   std::error_code bblist_ec;
   dynamatic::Logger *bbListLoggerPtr = nullptr;
-    // Run the std-level simulator
+  // Run the std-level simulator
 
   StdProfiler profiler(funcOp);
-  
+
   if (!traceLogFile.empty())
     traceLoggerPtr = new Logger(traceLogFile, overall_ec);
   if (!bbListLogFile.empty())

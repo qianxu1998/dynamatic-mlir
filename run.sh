@@ -14,7 +14,7 @@ HDL="vhdl"
 # f_benchmark_src="atax/atax.c"
 # f_benchmark_src="dct/dct.c"
 # f_benchmark_src="cnn/cnn.c"
-f_benchmark_src="gemm/gemm.c"
+# f_benchmark_src="gemm/gemm.c"
 # f_benchmark_src="matching/matching.c"
 # f_benchmark_src="matching_2/matching_2.c"
 # f_benchmark_src="sharing/share_test_1/share_test_1.c"
@@ -33,7 +33,7 @@ f_benchmark_src="gemm/gemm.c"
 # f_benchmark_src="bicg_float/bicg_float.c"
 # f_benchmark_src="gesummv_float/gesummv_float.c"
 # f_benchmark_src="gemm_float/gemm_float.c"
-# f_benchmark_src="gemm/gemm.c"
+f_benchmark_src="gemm/gemm.c"
 # f_benchmark_src="memory/test_memory_11/test_memory_11.c"
 # f_benchmark_src="memory/test_memory_8/test_memory_8.c"
 # f_benchmark_src="symm_float/symm_float.c"
@@ -54,16 +54,16 @@ f_benchmark_src="gemm/gemm.c"
 # f_benchmark_src="covariance_float/covariance_float.c"
 # f_benchmark_src="gemm/gemm.c"
 # f_benchmark_src="while_loop_2/while_loop_2.c"
-# f_benchmark_src="sobel/sobel.c"
+# f_benchmark_src="simple_example_1/simple_example_1.c"
 # f_benchmark_src="lu/lu.c"
 # f_benchmark_src="matvec/matvec.c"
 # f_benchmark_src="histogram/histogram.c"
-# f_benchmark_src="histogram_enhanced/histogram_enhanced.c"
-# f_benchmark_src="histogram_transition/histogram_transition.c"
+# f_benchmark_src="gemver_float/gemver_float.c"
 # f_benchmark_src="gemver/gemver.c"
 # f_benchmark_src="polyn_mult/polyn_mult.c"
 # f_benchmark_src="gsum/gsum.c"
 # f_benchmark_src="admm/admm.c"
+# f_benchmark_src="sobel/sobel.c"
 # f_benchmark_src="gcd/gcd.c"
 # f_benchmark_src="matrix_power/matrix_power.c"
 # f_benchmark_src="video_filter/video_filter.c"
@@ -77,8 +77,9 @@ echo "set-dynamatic-path .; \
   set-src ./integration-test/$f_benchmark_src; \
   set-clock-period 8; \
   compile $SHARING $BUFFER_ALGORITHM; \
-  write-hdl --hdl $HDL; \
-  simulate; \
+  # write-hdl --hdl $HDL; \
+  # simulate; \
+  # visualize; \
   exit" \
   | bin/dynamatic --exit-on-failure --debug
 
