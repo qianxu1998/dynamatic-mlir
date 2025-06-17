@@ -409,7 +409,7 @@ void DStoreNode::updateDataout(int inputData, const std::string &srcInputNode) {
   assert(!dataInSrcNode.empty());
   assert(!addressInSrcNode.empty());
   
-  int valueDiff = 0;
+  [[maybe_unused]] int valueDiff = 0;
   if (srcInputNode == addressInSrcNode) {
     // Update the address output channel (use key "address_out")
     if (dataOut.find("address_out") != dataOut.end() && !dataOut["address_out"].empty()) {
@@ -733,7 +733,7 @@ void ForkNode::calValidSwitching(const std::string &sucNodeName,
     if (existFlag) {
       // Case 3: Compute desired cycle time.
       // TODO: Verify the following desired criteria
-      unsigned desiredCycleTime = (nodeSteadyStart != 0) ? (nodeSteadyStart - 1) : (II - 1);
+      [[maybe_unused]] unsigned desiredCycleTime = (nodeSteadyStart != 0) ? (nodeSteadyStart - 1) : (II - 1);
       if (selStartPoint == 0)
         validSignal[sucNodeName] = 0;
       else

@@ -14,6 +14,7 @@
 #define EXPERIMENTAL_TRANSFORMS_DATACHANNEL_SWITCHING_H
 
 #include "experimental/Transforms/Switching/SwitchingSupport.h"
+#include "experimental/Transforms/Switching/GraphModel.h"
 #include "experimental/Transforms/Switching/ProfilingAnalyzer.h"
 #include "experimental/Transforms/Switching/ExecModel.h"
 #include "dynamatic/Transforms/BufferPlacement/CFDFC.h"

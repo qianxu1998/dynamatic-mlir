@@ -14,6 +14,8 @@
 #define EXPERIMENTAL_TRANSFORMS_SWITCHING_EXECUTION_MODEL_H
 
 #include "experimental/Transforms/Switching/SwitchingSupport.h"
+#include "experimental/Transforms/Switching/NodeInfo.h"
+
 #include "mlir/IR/Operation.h"
 
 #include <map>
@@ -21,7 +23,7 @@
 #include <set>
 #include <string>
 #include <vector>
-
+using IIset=llvm::SmallBitVector;
 //===----------------------------------------------------------------------===//
 //
 // Model for Buffer Node

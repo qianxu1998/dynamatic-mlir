@@ -5,6 +5,11 @@ add_dynamatic_library(DynamaticExperimentalSwitchingEstimation
   ExecModel.cpp
   DataChannelCal.cpp
   HandShakeChannelCal.cpp
+  NodeId.cpp
+  NameTable.cpp
+  NodeInfo.cpp
+  GraphModel.cpp
+
 
   DEPENDS
   DynamaticExperimentalTransformsPassIncGen

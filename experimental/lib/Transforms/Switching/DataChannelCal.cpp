@@ -35,7 +35,7 @@ void constructBBPairToCMResMap(SwitchingInfo &switchInfo) {
     // The input of a control_merge node will not be from a block argument, 
     // so we don't check it
     auto opOperands = CMOp.getOperands();
-    for (int i = 0; i < opOperands.size(); i++) {
+    for (size_t i = 0; i < opOperands.size(); i++) {
       auto inputSrcOp = opOperands[i].getDefiningOp();
       unsigned preBB;
       if (std::optional<unsigned> optBB = getLogicBB(inputSrcOp); !optBB.has_value())
@@ -1003,7 +1003,8 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo, SCFProfilingResult &pro
         // TODO: Need to check the portidx to name mapping
         for (const auto& [nodeName, portIdx] : selMuxNodeStructure->preNameToPortIdxMap) {
           //* Here we need to do cond + 1, as the port map of muxnode assigns 0 to its control input.
-          if (portIdx == (condValue + 1)) preNode = nodeName;
+          const unsigned int cond_add1= condValue + 1;
+          if (portIdx == (cond_add1)) preNode = nodeName;
         }
 
         bool bufferedFlag = false;
@@ -1095,7 +1096,7 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo, SCFProfilingResult &pro
             // Cond value will be the same for the last segment
             int preCondValue = 1 - condValue;
             std::string preDataSrc = switchInfo.dataflowGraph->muxToSrcNodeMap[selMuxNode][std::to_string(preCondValue)];
-            unsigned newIterIdx = i;
+            [[maybe_unused]] unsigned newIterIdx = i;
 
             // If we have the same sources for both cond_value
             if (preDataSrc == selDataSrcNode) {
@@ -2122,7 +2123,7 @@ LongestPathResult selLongestPath(SwitchingInfo &switchInfo, std::string dstNode,
   std::string lastSecondBuff = "";
   LongestPathResult returnValue;
   auto selGraph = switchInfo.segToAdjGraphMap[mgLabel];
-  auto selMGII = switchInfo.cfdfcIIs[std::stoul(mgLabel)];
+  [[maybe_unused]] auto selMGII = switchInfo.cfdfcIIs[std::stoul(mgLabel)];
 
   // Get the list of buffers
   std::vector<std::string> selBuffList;

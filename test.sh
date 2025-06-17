@@ -54,7 +54,7 @@ DATA_LOG="$OUTPUT_DIR/profiling.log"
 TRACE_LOG="$OUTPUT_DIR/trace.log"
 BB_LOG="$OUTPUT_DIR/bblist.log"
 FREQUENCIES="$OUTPUT_DIR/frequencies.csv"
-DYNAMATIC_DIR="/home/$USER/new/dynamatic-mlir"
+DYNAMATIC_DIR="/home/$USER/new_lsq/dynamatic-mlir"
 
 # DATA_PROFILER_BIN="./bin/data-profiler""
 DATA_PROFILER_BIN="./build/bin/data-profiler"

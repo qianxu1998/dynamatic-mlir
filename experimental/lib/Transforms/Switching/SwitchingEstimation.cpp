@@ -7,6 +7,9 @@
 
 #include "experimental/Transforms/Switching/SwitchingEstimation.h"
 #include "experimental/Transforms/Switching/SwitchingSupport.h"
+#include "experimental/Transforms/Switching/NodeId.h"
+#include "experimental/Transforms/Switching/NameTable.h"
+
 #include "experimental/Transforms/Switching/ProfilingAnalyzer.h"
 #include "experimental/Transforms/Switching/DataChannelCal.h"
 #include "experimental/Transforms/Switching/HandShakeChannelCal.h"
@@ -102,7 +105,7 @@ void SwitchingEstimationPass::runDynamaticPass() {
   llvm::dbgs() << "[DEBUG] [Step 1] Parsing Profiling Results\n";
   llvm::dbgs() << "[DEBUG] \tBBList Log file: " << bbList << "\n";
   llvm::dbgs() << "[DEBUG] \tData Profiling Log file: " << dataTrace << "\n";
-  SCFProfilingResult profilingResults(dataTrace, bbList, switchInfo);
+  SCFProfilingResult profilingResults(dataTrace, bbList, switchInfo);// works at scf level, converts to HS
 
   // Step 2: Build Adjacency graph for each CFDFC
   std::vector<std::pair<std::string, std::string>> allBackedges;
@@ -110,17 +113,19 @@ void SwitchingEstimationPass::runDynamaticPass() {
   
   for (const auto& [mgIndex, mgInstance]: switchInfo.cfdfcs) {
     llvm::dbgs() << "[DEBUG] \tMG : " << mgIndex << "\n";
-    
+    // AdjGraph a(mgInstance, timingDB, switchInfo.cfdfcIIs[mgIndex], mgIndex);
+
+
     auto adj = std::make_shared<AdjGraph>(mgInstance, timingDB, switchInfo.cfdfcIIs[mgIndex], mgIndex);
     // AdjGraph tmpAdjGraph(mgInstance, timingDB, switchInfo.cfdfcIIs[mgIndex], mgIndex);
     switchInfo.segToAdjGraphMap.insert_or_assign(std::to_string(mgIndex), adj);
-
+  
     // Update the backedge list
     for (const auto& selPair : adj->backedges) {
       allBackedges.push_back(selPair);
     }
   }
-
+// AdjGraph>(mgInstance, timingDB, switchInfo.cfdfcIIs[mgIndex], mgIndex)
   // Step 3: Build the graph for the entire dataflow graph
   llvm::dbgs() << "[DEBUG] [STEP 3] Construct the Adj Graph for the entire DFG\n";
   /// Step 3.1: First store the information of the backedges in the circuit
@@ -170,7 +175,7 @@ void SwitchingEstimationPass::runDynamaticPass() {
     selGraph->analyzeStartNodeShifting();
   }
 
-  // Step 5: Calculate switches in data channel
+  // Step 5: Calculate switches in data channel 
   llvm::dbgs() << "[DEBUG] [STEP 5] Calculate Data Channel Switching\n";
   calDataChannelSwitching(topModule, profilingResults);
 

@@ -225,7 +225,7 @@ void SCFProfilingResult::parseBBListFile(StringRef bbList, SwitchingInfo& switch
         // Add the transaction section to the execution trace and bblist mapping dict
         bool presentFlag = false;
 
-        for (int i = 0; i < transactionBBLists.size(); i++) {
+        for (unsigned long i = 0; i < transactionBBLists.size(); i++) {
           if (tmpTransBBList == transactionBBLists[i]) {
             // We have stored the transaction section
             std::string sectionName = "T" + std::to_string(i);
@@ -265,7 +265,7 @@ void SCFProfilingResult::parseBBListFile(StringRef bbList, SwitchingInfo& switch
 
   // Updatge the ending BB list
   std::vector<unsigned> tmpEndBBList;
-  for (int i = 0; i < executedBBTrace.size() - tracePointer; i++) {
+  for (size_t i = 0; i < executedBBTrace.size() - tracePointer; i++) {
     tmpEndBBList.push_back(executedBBTrace[tracePointer + i]);
   }
 
@@ -276,7 +276,7 @@ void SCFProfilingResult::parseBBListFile(StringRef bbList, SwitchingInfo& switch
   unsigned iterMapCounter = 0;
   unsigned iterCounter = 0;
   for (const auto& selSeg: executedSegTrace) {
-    for (int i = 0; i < switchInfo.segToBBListMap[selSeg].size(); i++) {
+    for (size_t i = 0; i < switchInfo.segToBBListMap[selSeg].size(); i++) {
       bbToIterMap[iterMapCounter++] = iterCounter;
     }
     iterCounter++;
@@ -351,7 +351,7 @@ void SCFProfilingResult::parseDataLogFile(StringRef dataTrace, SwitchingInfo& sw
 } 
 
 void SCFProfilingResult::buildScfToHSMap(SwitchingInfo& switchInfo, SCFFile& scfFile) {
-  for (int i = 0; i < switchInfo.funcOpNames.size(); i++) {
+  for (size_t i = 0; i < switchInfo.funcOpNames.size(); i++) {
     std::string scfName = scfFile.opNameList[i];
     std::string hsName = switchInfo.funcOpNames[i];
 
