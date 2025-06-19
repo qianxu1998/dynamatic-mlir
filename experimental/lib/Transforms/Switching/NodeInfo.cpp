@@ -221,7 +221,7 @@ llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s
 llvm::dbgs() << "[DEBUG] \t\tValid Active Range: \n";
 for (const auto &[s, valueVec] : setV) {
 llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [";
-for (const auto &selValue : valueVec) {
+for (const auto &selValue : valueVec.set_bits() ) {
 llvm::dbgs() << selValue << " ";
 }
 llvm::dbgs() << "]\n";
@@ -230,7 +230,7 @@ llvm::dbgs() << "]\n";
 llvm::dbgs() << "[DEBUG] \t\tReady Active Range: \n";
 for (const auto &[s, valueVec] : setR) {
 llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [";
-for (const auto &selValue : valueVec) {
+for (const auto &selValue : valueVec.set_bits()) {
 llvm::dbgs() << selValue << " ";
 }
 llvm::dbgs() << "]\n";
@@ -258,7 +258,7 @@ llvm::dbgs() << "[DEBUG] [DEBUG] \t\t\t\tNode: " << s
 llvm::dbgs() << "[DEBUG] \t\tValid Active Range: \n";
 for (const auto &[s, valueVec] : setV) {
 llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [";
-for (const auto &selValue : valueVec) {
+for (const auto &selValue : valueVec.set_bits()) {
 llvm::dbgs() << selValue << " ";
 }
 llvm::dbgs() << "]\n";
@@ -267,7 +267,7 @@ llvm::dbgs() << "]\n";
 llvm::dbgs() << "[DEBUG] \t\tReady Active Range: \n";
 for (const auto &[s, valueVec] : setR) {
 llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [";
-for (const auto &selValue : valueVec) {
+for (const auto &selValue : valueVec.set_bits()) {
 llvm::dbgs() << selValue << " ";
 }
 llvm::dbgs() << "]\n";

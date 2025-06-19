@@ -14,10 +14,13 @@
 #ifndef NODEINFO_HPP
 #define NODEINFO_HPP
 #include "dynamatic/Support/LLVM.h"
+#include "llvm/ADT/SmallBitVector.h"
 #include <map>
 #include <string>
 #include <vector>
 #include <set>
+using IISet = llvm::SmallBitVector;
+
 using namespace mlir;
 using namespace dynamatic;
 // using namespace dynamatic::handshake;
@@ -96,8 +99,8 @@ class AdjNode {
     std::map<std::string, unsigned> validSignal;    // Map used to store number of switching of the node's valid signals (per channel, e.x., {"node_name" : 2})
     std::map<std::string, unsigned> readySignal;    // Map used to store number of switching of the node's ready signals (per channel, e.x., {"node_name" : 2})
     // TODO: Need to improve the way the setR/V is stored
-    std::map<std::string, std::set<unsigned>> setV; // Set used to store the active range of the corresponding valid signal in different channels
-    std::map<std::string, std::set<unsigned>> setR; // Set used to store active range of the corresponding ready signal in different channels
+    std::map<std::string, IISet> setV; // Set used to store the active range of the corresponding valid signal in different channels
+    std::map<std::string, IISet> setR; // Set used to store active range of the corresponding ready signal in different channels
   
     // Data channel Switching
     std::map<std::string, unsigned> sucsDataWidthMap; // Map from succeeding node name to the channel width
