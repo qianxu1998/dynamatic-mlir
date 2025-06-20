@@ -18,6 +18,7 @@
 #include "experimental/Transforms/Switching/SwitchingSupport.h"
 
 #include "mlir/IR/Operation.h"
+#include "llvm/ADT/DenseMap.h"
 
 #include <map>
 #include <memory>
@@ -622,8 +623,8 @@ public:
   //     - II: the initiation interval.
   void
   calValidSwitching(const std::string &sucNodeName, int numValid,
-                    std::unordered_map<std::string, IISet *> &setRDict,
-                    const std::unordered_map<std::string, int> &numReadyDict,
+                    llvm::DenseMap<StringRef, IISet *> &setRDict,
+                    const llvm::DenseMap<StringRef,  int> &numReadyDict,
                     unsigned sucNodeStart, unsigned nodeSteadyStart,
                     unsigned II);
 
@@ -633,7 +634,8 @@ public:
   //   assign the ready set from setRDict.
   void calValidSet(const std::string &sucNodeName, unsigned nodeStartTime,
                    int numValid,
-                   std::unordered_map<std::string, IISet *> &setRDict,
+                   llvm::DenseMap<StringRef, IISet *> &setRDict,
+
                    unsigned II);
 
   // calReadySwitching:
@@ -650,7 +652,9 @@ public:
   //     - If the union equals the full set {0,...,II-1}, assign {0};
   //     - Otherwise, assign the last element of the union.
   void calReadySet(const std::string &preNodeName,
-                   const std::unordered_map<std::string, IISet *> &setRDict,
+
+                   const llvm::DenseMap<StringRef, IISet *> &setRDict,
+
                    unsigned II);
 
   // LLVM Casting support

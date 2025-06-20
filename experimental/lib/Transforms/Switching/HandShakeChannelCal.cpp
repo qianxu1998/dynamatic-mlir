@@ -21,7 +21,8 @@
 #include "mlir/IR/Value.h"
 #include "llvm/Support/Path.h"
 //#include "llvm/Support/Debug.h"
-#include <unordered_map>
+// #include <unordered_map>
+#include "llvm/ADT/DenseMap.h"
 using IISet = llvm::SmallBitVector;
 
 void extractBufferInfo(SwitchingInfo &switchInfo, std::string selMG, bool debug) {
@@ -340,14 +341,15 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
 
   // Get all needed information if available
   std::vector<int> tmpPValidList;
-  std::unordered_map<std::string, int> tmpPValidDict;
+  llvm::DenseMap<StringRef, int> tmpPValidDict;
   std::vector<IISet *> tmpPValidSetList;
-  std::unordered_map<std::string, IISet* > tmpPValidSetDict;
+  llvm::DenseMap<StringRef, IISet *> tmpPValidSetDict;
 
   std::vector<int> tmpNReadyList;
-  std::unordered_map<std::string, int> tmpNReadyDict;
+  llvm::DenseMap<StringRef, int> tmpNReadyDict;
+
   std::vector<IISet *> tmpNReadySetList;
-  std::unordered_map<std::string, IISet* > tmpNReadySetDict;
+  llvm::DenseMap<StringRef, IISet *> tmpNReadySetDict;
 
   // Get all needed pValid signal info
   for (const auto& selPre: selNodeStoringDict[selNode]->pres) {
@@ -482,7 +484,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
   auto node = selNodeStoringDict[selNode];
 
   // helper to fetch an IISet from a dict or return all-false since we switched from set  to bitvector with references
-  auto getSet = [&](const std::unordered_map<std::string, IISet*> &dict,
+  auto getSet = [&](const    llvm::DenseMap<StringRef, IISet *> &dict,
                     const std::string &name) {
     auto it = dict.find(name);
     return (it != dict.end() && it->second)
@@ -779,7 +781,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
         // Number of switching
         fork->calReadySwitching(selPre, tmpNReadyList);
         // build a one-entry map for this predecessor's ready set
-        std::unordered_map<std::string, IISet*> singleR{{selPre, readyPtr}};
+        llvm::DenseMap<StringRef, IISet* > singleR{{selPre, readyPtr}};
+
         fork->calReadySet(selPre, singleR, selMGII);
       }
     })

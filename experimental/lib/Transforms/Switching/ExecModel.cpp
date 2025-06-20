@@ -670,8 +670,8 @@ void CMergeNode::printDetail() {
 
 void ForkNode::calValidSwitching(
     const std::string &sucNodeName, int numValid,
-    std::unordered_map<std::string, IISet *> &setRDict,
-    const std::unordered_map<std::string, int> &numReadyDict,
+    llvm::DenseMap<StringRef, IISet *> &setRDict,
+    const llvm::DenseMap<StringRef, int> &numReadyDict,
     unsigned sucNodeStart, unsigned nodeSteadyStart, unsigned II) {
   // If any valid switching occurs at the input, the fork must toggle.
   if (numValid > 0) {
@@ -756,7 +756,8 @@ void ForkNode::calValidSwitching(
 
 void ForkNode::calValidSet(
     const std::string &sucNodeName, unsigned nodeStartTime, int numValid,
-    std::unordered_map<std::string, IISet *> &setRDict,
+    llvm::DenseMap<StringRef, IISet *> &setRDict,
+
     unsigned II) {
   if (validSignal.find(sucNodeName) != validSignal.end()) {
     if (validSignal[sucNodeName] == 0) {
@@ -796,7 +797,8 @@ void ForkNode::calReadySwitching(const std::string &preNodeName,
 
 void ForkNode::calReadySet(
     const std::string &preNodeName,
-    const std::unordered_map<std::string, IISet * >  &setRDict,
+    const    llvm::DenseMap<StringRef, IISet *> &setRDict,
+
     unsigned II) {
 
 

@@ -19,6 +19,8 @@
 #include "experimental/Support/StdProfiler.h"
 #include "dynamatic/Support/TimingModels.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/ADT/DenseMap.h"
+
 #include "llvm/Support/Debug.h"
 #include "experimental/Transforms/Switching/NodeInfo.h"
 #include <unordered_set>
@@ -82,9 +84,10 @@ struct SwitchingInfo {
   // All backedge BB pairs in the dataflow circuit
   llvm::SmallVector<std::pair<unsigned, unsigned>> backEdges;
   // Map from CFDFC index to the corresponding II values
-  std::unordered_map<unsigned, float_t> cfdfcIIs;
+  llvm::DenseMap<unsigned, float_t> cfdfcIIs;
+
   // Map from CFDFC index to the corresponding throughput
-  std::unordered_map<unsigned, double_t> cfdfcThroughput;
+  llvm::DenseMap<unsigned, double_t> cfdfcThroughput;
   // Map from CFDFC index to the CFDFC info stroing class
   // Only contain the number of edges, backedges etc.
   // No info about unit delay, node neighbors etc.
