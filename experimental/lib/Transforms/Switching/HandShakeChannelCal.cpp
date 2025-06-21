@@ -261,7 +261,7 @@ void mgHandshakeSwitchingCounting(SwitchingInfo &switchInfo, std::string selMG, 
     // Calculate switching
     for (auto& selNode: pendingList) {
       // 
-      nodeHandshakeUpdate(switchInfo, selNode, selMG, selMGII, debug);
+      nodeHandshakeUpdate(switchInfo, selNode, selMG, selMGII, debug=false);
 
       // If the node finished
       if (selAdjGraph->nodes[selNode]->handshakeUpdateFinished()) {

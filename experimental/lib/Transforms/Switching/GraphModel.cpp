@@ -8,6 +8,8 @@
 
 #include "experimental/Transforms/Switching/GraphModel.h"
 #include "experimental/Transforms/Switching/ExecModel.h"
+#include "experimental/Transforms/Switching/NodeInfo.h"
+
 #include "dynamatic/Support/CFG.h"
 #include "dynamatic/Support/Attribute.h"
 
@@ -496,7 +498,7 @@ void AdjGraph::obtainNodeGlobalOrder() {
         //! Testing
         // llvm::dbgs() << "[DEBUG] \t\tNode: " << selStartNode << "\n";
 
-        auto tmpPathLat = getMaxLatency(selStartNode, name, true, false);
+        auto [tmpPathLat,_unused] = getMaxLatency(selStartNode, name, true, false);
 
         // if (foundPaths.size() > 0) {
           // for (const auto &selPath : foundPaths) {
@@ -634,7 +636,7 @@ AdjGraph::graphBacktrack(std::string srcNode,
 
   // Initialization
   mainStack.push_back(srcNode);
-  if (srcNode.find("cond_br") != std::string::npos) {
+  if (nodes[srcNode]->getKind() ==AdjNode::NodeKind::CBrNodeKind ) {
     if (auto *cbrNode = dyn_cast<CBrNode>(nodes[srcNode].get())) {
       std::string tmpDataPreNode = cbrNode->dataPreNodeName;
       adjStack.push_back({tmpDataPreNode});
@@ -713,15 +715,9 @@ void AdjGraph::analyzeStartNodeShifting() {
   // Update the cycle time of the MG
   for (const auto &selBackedge : backedges) {
     unsigned tmpLonPath = 0;
-    auto tmpPaths =
-        findPaths(selBackedge.second, selBackedge.first, false, true);
-
-    for (auto selPath : tmpPaths) {
-      if (selPath.latency > tmpLonPath) {
-        tmpLonPath = selPath.latency;
-      }
-    }
-    cycleTimeMap[selBackedge.second] = tmpLonPath;
+    auto [tmpPaths,_pathname_unused] =
+        getMaxLatency(selBackedge.second, selBackedge.first, false, true);
+    cycleTimeMap[selBackedge.second] = tmpPaths;
   }
 
   // Analyze the shifting between different start ndoes and the base node
@@ -752,7 +748,7 @@ void AdjGraph::buildMuxSrcMap() {
   // Traverse all nodes in the dataflow graph
   for (const auto &selNode : orderedNodeName) {
     // If this is a mux node
-    if (selNode.find("mux") != std::string::npos) {
+    if ( nodes[selNode]->getKind() ==AdjNode::NodeKind::MuxNodeKind  ) {
       //! Testing
       llvm::dbgs() << "[DEBUG] \t\tMux Node Name: " << selNode << "\n";
 
@@ -825,7 +821,7 @@ void AdjGraph::buildCondandStoreSrcMap() {
 
       // Updated the connected buffers as well
       for (const auto &selSucNode : selCBrNode->sucs) {
-        if (selSucNode.find("buffer")) {
+        if (nodes[selSucNode]->getKind() ==AdjNode::NodeKind::BufferNodeKind ) {
           // Get the port index
           unsigned selPortIdx =
               selCBrNode->outChannelNameToIndexMap[selSucNode];
@@ -838,7 +834,7 @@ void AdjGraph::buildCondandStoreSrcMap() {
           }
         }
       }
-    } else if (selNode.find("store") != std::string::npos) {
+    } else if (nodes[selNode]->getKind() ==AdjNode::NodeKind::DStoreNodeKind ) {
       auto *selStoreNode = dyn_cast<DStoreNode>(nodes[selNode].get());
 
       std::string addrPreNode = selStoreNode->addressInNode;

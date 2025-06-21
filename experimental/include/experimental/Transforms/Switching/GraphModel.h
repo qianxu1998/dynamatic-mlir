@@ -159,9 +159,9 @@ public:
   };
 
   // cache for longest paths from each entry node to all other nodes 
-  std::unordered_map<Pathkey , unsigned,PathkeyHasher> maxLatencycache;
+  std::unordered_map<Pathkey , std::pair<unsigned,std::string> ,PathkeyHasher> maxLatencycache;
 
-  unsigned getMaxLatency(const std::string &srcNode,
+  std::pair<unsigned,std::string> getMaxLatency(const std::string &srcNode,
     const std::string &dstNode,
     bool noStartingNode,
     bool useGlobalOrder) {
@@ -171,11 +171,13 @@ public:
     auto it=maxLatencycache.find(key);
     //Case 1 : cache hit
       if(it!=maxLatencycache.end()){
-        unsigned cachedLatency= it->second;
-        return    cachedLatency;
+        llvm::dbgs() <<"step4 found\n";
+        return    it->second;// return cached latency and node name
       }
 
           // Case 2: cache miss
+          llvm::dbgs() << "step4 longest path data channel "<< srcNode<<" "<< dstNode <<"\n";
+
       std::vector<Path> tmppaths=  findPaths(srcNode,dstNode,noStartingNode,useGlobalOrder);
       unsigned maxLatency{0};
       std::string bestSrcNode{""};
@@ -186,8 +188,8 @@ public:
           bestSrcNode = srcNode;
       }
     }
-    maxLatencycache[key]=maxLatency;
-    return  maxLatency;
+    maxLatencycache[key] = std::make_pair(maxLatency,bestSrcNode);
+    return  {maxLatency,bestSrcNode};
   }
 
 

@@ -667,7 +667,8 @@ void dataGlitchNodeSearch(SwitchingInfo &switchInfo, SCFProfilingResult &profile
   }
 }
 
-int calGlitchValue(int op1, int op2, std::string selNode) {
+int 
+calGlitchValue(int op1, int op2, std::string selNode) {
   // TODO: Add supports for other types of nodes in self.GLITCH_NODE
   if (selNode.find("add") != std::string::npos) {
     return op1 + op2;
@@ -2135,56 +2136,59 @@ LongestPathResult selLongestPath(SwitchingInfo &switchInfo, std::string dstNode,
 
   // For all start node
   for (const auto &startNode : selGraph->segStartNodes) {
-    auto tmpPaths = selGraph->findPaths(startNode, dstNode, false, true);
+    auto [latency, bestsrcnode] = selGraph->getMaxLatency(startNode, dstNode, false, true);
+    llvm::dbgs() << "step5 longest path data channel "<< startNode<<" "<< dstNode <<"\n";
 
     std::vector<std::pair<unsigned, std::string>> tmpLastSecondBufferList;
-
-    for (auto& selPath: tmpPaths) {
-      unsigned tmpPathLatency = selPath.latency;
-
-      //! Testing
-      // selPath.printDetail();
-      
-      if (tmpPathLatency > maxLatency) {
-        maxLatency = tmpPathLatency;
-        selStartNode = startNode;
-      }
-
-      // Get the last second buffer, if exist
-      if (tmpPathLatency == maxLatency) {
-        std::vector<std::string> tmpBufferList;
-        for (const auto& tmpSelNode: selPath.nodeList) {
-          if (tmpSelNode.find("buffer") != std::string::npos) {
-            tmpBufferList.push_back(tmpSelNode);
-          }
-        }
-
-        if (tmpBufferList.size() > 1) {
-          tmpLastSecondBufferList.push_back({tmpPathLatency, tmpBufferList[tmpBufferList.size() - 2]});
-        }
-      }
-    }
-
-    // Select the wanted last second buffer, this will be used in the cal of SET_R for transparent buffers
-    for (const auto &selPair: tmpLastSecondBufferList) {
-      if (selPair.first == maxLatency) {
-        // TODO: Validate the following selection criteria
-        auto selBuffer = dyn_cast<BufferNode>(selGraph->nodes[selPair.second].get());
-        float_t oriOcc = 0;
-        if (lastSecondBuff != "") {
-          auto oriBuffer = dyn_cast<BufferNode>(selGraph->nodes[lastSecondBuff].get());
-          oriOcc = oriBuffer->occupancy;
-        }
-        if (lastSecondBuff == "" || (selBuffer->occupancy < oriOcc)) {
-          lastSecondBuff = selPair.second;
-        }
-      }
+    if (latency > maxLatency) {
+      maxLatency = latency;
+      selStartNode = bestsrcnode;
     }
   }
 
+
+    // 2. walk the paths just for the last second buffer
+    std::vector<std::pair<unsigned, std::string>> tmpLastSecondBufferList;
+    for (const auto &startNode : selGraph->segStartNodes) {
+        // Find all paths from startNode to dstNode
+        auto paths = selGraph->findPaths(startNode, dstNode, false, true);
+        for (const auto &selPath : paths) {
+            if (selPath.latency == maxLatency) {
+                // Find the list of buffer nodes along the path
+                std::vector<std::string> tmpBufferList;
+                for (const auto &tmpSelNode : selPath.nodeList) {
+                    if (tmpSelNode.find("buffer") != std::string::npos) {
+                        tmpBufferList.push_back(tmpSelNode);
+                    }
+                }
+                // if there are more than 2 buffers
+                if (tmpBufferList.size() > 1) {
+                    tmpLastSecondBufferList.push_back({maxLatency, tmpBufferList[tmpBufferList.size() - 2]});
+                }
+            }
+        }
+    }
+
+
+    // Select the wanted last second buffer for set_r calc
+    for (const auto &selPair : tmpLastSecondBufferList) {
+      if (selPair.first == maxLatency) {
+          // pick the buffer with the lowest occupancy??
+          auto selBuffer = dyn_cast<BufferNode>(selGraph->nodes[selPair.second].get());
+          float_t oriOcc = 0;
+          if (!lastSecondBuff.empty()) {
+              auto oriBuffer = dyn_cast<BufferNode>(selGraph->nodes[lastSecondBuff].get());
+              oriOcc = oriBuffer->occupancy;
+          }
+          if (lastSecondBuff.empty() || (selBuffer->occupancy < oriOcc)) {
+              lastSecondBuff = selPair.second;
+          }
+      }
+  }
+
   // Check the validity of the start node
-  if (selStartNode == "") {
-    selStartNode = selGraph->baseNode;
+    if (selStartNode.empty()) {
+      selStartNode = selGraph->baseNode;
   }
 
   // Construct the return value
