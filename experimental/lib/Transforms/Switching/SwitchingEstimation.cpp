@@ -9,6 +9,7 @@
 #include "experimental/Transforms/Switching/SwitchingSupport.h"
 #include "experimental/Transforms/Switching/NodeId.h"
 #include "experimental/Transforms/Switching/NameTable.h"
+#include "experimental/Transforms/Switching/DataGlitches.h"
 
 #include "experimental/Transforms/Switching/ProfilingAnalyzer.h"
 #include "experimental/Transforms/Switching/DataChannelCal.h"
@@ -71,7 +72,52 @@ struct SwitchingEstimationPass
 
   // Extract all op names of the alus in order
   void extractHandshakeOpNames(handshake::FuncOp& topFunc);
+// DFS utility for topological sort
+void topologicalSortUtil(const std::string& node,
+  const std::unordered_map<std::string, std::vector<std::string>>& adj,
+  std::unordered_map<std::string, bool>& visited,
+  std::stack<std::string>& Stack)
+{
+visited[node] = true;
+//  for all dependencies
+auto it = adj.find(node);
+if (it != adj.end()) {
+for (const auto& dep : it->second) {
+if (!visited[dep]) {
+topologicalSortUtil(dep, adj, visited, Stack);
+}
+}
+}
+Stack.push(node);
+}
 
+// Main function to do topological sort for all nodes in the dependency graph
+std::vector<std::string> topologicalSort(
+  const std::unordered_map<std::string, std::vector<std::string>>& adj)
+{
+  std::unordered_map<std::string, bool> visited;
+  visited.reserve(adj.size());
+  for (const auto& p : adj) {
+      visited.try_emplace(p.first, false);
+      for (const auto& dep : p.second)
+          visited.try_emplace(dep, false);
+  }
+
+
+  std::stack<std::string> result;
+  for (auto& p : visited) {
+      if (!p.second)
+          topologicalSortUtil(p.first, adj, visited, result);
+  }
+    // 3) Pop into a vector the sorted order
+    std::vector<std::string> sorted;
+    sorted.reserve(visited.size());
+    while (!result.empty()) {
+        sorted.push_back(result.top());
+        result.pop();
+    }
+    return sorted;
+}
   // 
   //  DataChannel Switching Calculation
   //
@@ -127,7 +173,7 @@ void SwitchingEstimationPass::runDynamaticPass() {
   }
 // AdjGraph>(mgInstance, timingDB, switchInfo.cfdfcIIs[mgIndex], mgIndex)
   // Step 3: Build the graph for the entire dataflow graph
-  llvm::dbgs() << "[DEBUG] [STEP 3] Construct the Adj Graph for the entire DFG\n";
+  llvm::dbgs() << "[DEBUG] [STEP 3] Construct the Adj Graph for the entire DFG and sort the multiplexers\n";
   /// Step 3.1: First store the information of the backedges in the circuit
   for (const auto& [selSegLabel, segBBList] : switchInfo.segToBBListMap) {
     if (selSegLabel.find("S") != std::string::npos) {
@@ -162,6 +208,22 @@ void SwitchingEstimationPass::runDynamaticPass() {
     // Contruct the Adj graph for the entire dataflow circuit
     switchInfo.dataflowGraph = std::make_shared<AdjGraph>(timingDB, switchInfo.cfdfcIIs[0], funcOp, allBackedges);
   }
+  llvm::dbgs() << "[DEBUG] \t sort muxes:\n";
+  std::vector<std::string> allMuxNodes;
+  for (const auto& [name, node] : switchInfo.dataflowGraph->nodes) {
+    if (name.find("mux") != std::string::npos)
+        allMuxNodes.push_back(name);
+}
+std::unordered_map<std::string, std::vector<std::string>> muxDeps;
+for (const auto& mux : allMuxNodes) {
+  for (const auto& [port, src] : switchInfo.dataflowGraph->muxToSrcNodeMap[mux]) {
+      if (port == "control") continue;
+      if (src.find("mux") != std::string::npos)
+          muxDeps[mux].push_back(src);
+  }
+}
+switchInfo.orderedMuxNodes =topologicalSort(muxDeps);
+llvm::dbgs() << "[DEBUG] \t mux sorting finished:\n";
 
   llvm::dbgs() << "[DEBUG] [STEP 4] Determining the Global start time and shifting for each MG\n";
   for (auto& [mgIndex, selGraph]: switchInfo.segToAdjGraphMap) {

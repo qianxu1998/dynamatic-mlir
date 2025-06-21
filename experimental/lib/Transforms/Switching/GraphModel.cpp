@@ -129,6 +129,36 @@ AdjGraph::AdjGraph(const buffer::CFDFC &cfdfc, const TimingDatabase &timingDB,
     // Store the new node
     nodes[unitName] = newNode;
   }
+
+
+
+// 1. Collect all names referenced as pres/sucs but not in nodes map
+std::set<std::string> neededNames;
+// For the CFDFC constructor:
+for (const auto& [name, preds] : nodeToPresMap)
+  neededNames.insert(name), neededNames.insert(preds.begin(), preds.end());
+for (const auto& [name, sucs] : nodeToSucsMap)
+  neededNames.insert(name), neededNames.insert(sucs.begin(), sucs.end());
+
+// For the FuncOp constructor:
+for (auto& [unitName, node] : nodes) {
+    for (const auto& p : node->pres) neededNames.insert(p);
+    for (const auto& s : node->sucs) neededNames.insert(s);
+}
+for (const auto& name : orderedNodeName) neededNames.insert(name);
+
+// 2. Create a dummy AdjNode for each missing node
+for (const auto& name : neededNames) {
+    if (nodes.find(name) == nodes.end()) {
+        // Use the generic base AdjNode kind, with empty pres/sucs, latency 0, etc.
+        nodes[name] = std::make_shared<AdjNode>(
+          nullptr,                       // <-- not name!
+          std::vector<std::string>{},
+          std::vector<std::string>{},
+          std::map<std::string, unsigned>{},
+          0, 100);
+    }
+}
 }
 
 AdjGraph::AdjGraph(
@@ -209,6 +239,33 @@ AdjGraph::AdjGraph(
     // Store the new node
     nodes[unitName] = newNode;
   }
+
+// 1. Collect all names referenced as pres/sucs but not in nodes map
+std::set<std::string> neededNames;
+for (auto& [unitName, node] : nodes) {
+    for (const auto& p : node->pres) neededNames.insert(p);
+    for (const auto& s : node->sucs) neededNames.insert(s);
+}
+for (const auto& name : orderedNodeName) neededNames.insert(name);
+// For the FuncOp constructor:
+for (auto& [unitName, node] : nodes) {
+    for (const auto& p : node->pres) neededNames.insert(p);
+    for (const auto& s : node->sucs) neededNames.insert(s);
+}
+for (const auto& name : orderedNodeName) neededNames.insert(name);
+
+// 2. Create a dummy AdjNode for each missing node
+for (const auto& name : neededNames) {
+    if (nodes.find(name) == nodes.end()) {
+        // Use the generic base AdjNode kind, with empty pres/sucs, latency 0, etc.
+        nodes[name] = std::make_shared<AdjNode>(
+          nullptr,                       // <-- not name!
+          std::vector<std::string>{},
+          std::vector<std::string>{},
+          std::map<std::string, unsigned>{},
+          0, 100);
+    }
+}
 }
 
 void AdjGraph::insertToSurroundingList(
@@ -301,18 +358,33 @@ std::shared_ptr<AdjNode> AdjGraph::createNodeFromOperation(
 
         // Get the occupancy value
         float_t occValue = -1;
-        DictionaryAttr occAttr =
-            getDialectAttr<handshake::BufferOccupancyAttr>(op)
-                .getBufferOccMap();
-        auto occValueAttr =
-            occAttr.get(std::to_string(cfdfcIndex)).dyn_cast<mlir::FloatAttr>();
-        if (occValueAttr) {
-          // Successfully retrieved the occ attribute
-          occValue = occValueAttr.getValueAsDouble();
-        } else {
-          llvm::errs()
-              << "[ERROR] Failed to retrieve the buffer occupancy attribute\n";
-          exit(-1);
+        auto key= std::to_string(cfdfcIndex);
+        //  Try dialect-based attribute (preferred for Dynamatic)
+        if (auto occDictAttr = getDialectAttr<handshake::BufferOccupancyAttr>(op)) {
+          auto occDict = occDictAttr.getBufferOccMap();
+          if (auto occAttr = occDict.get(key).dyn_cast_or_null<mlir::FloatAttr>()) {
+              occValue = occAttr.getValueAsDouble();
+          }
+        }
+
+        //Fallback: direct dictionary attribute (older IRs or special cases)
+        if (occValue < 0 && op->hasAttr("handshake.bufOcc")) {
+          auto dict = op->getAttr("handshake.bufOcc").dyn_cast<mlir::DictionaryAttr>();
+          if (dict) {
+              // Try key first
+              auto occAttr = dict.get(key);
+              if (occAttr && occAttr.isa<mlir::FloatAttr>()) {
+                  occValue = occAttr.cast<mlir::FloatAttr>().getValueAsDouble();
+              } else {
+                  // Fallback: use the *first* FloatAttr in dict
+                  for (auto attr : dict) {
+                      if (auto floatAttr = attr.getValue().dyn_cast<mlir::FloatAttr>()) {
+                          occValue = floatAttr.getValueAsDouble();
+                          break;
+                      }
+                  }
+              }
+          }
         }
 
         auto node = std::make_shared<BufferNode>(
@@ -477,6 +549,7 @@ unsigned AdjGraph::calPathLatency(const Path &selPath, bool useGlobalOrder) {
   }
 
   // Check backedges
+
   if (selPath.contain_backedge) {
     latencySum -= (selPath.backedges.size() * cfdfcII);
   }
@@ -499,21 +572,13 @@ void AdjGraph::obtainNodeGlobalOrder() {
         // llvm::dbgs() << "[DEBUG] \t\tNode: " << selStartNode << "\n";
 
         auto [tmpPathLat,_unused] = getMaxLatency(selStartNode, name, true, false);
-
-        // if (foundPaths.size() > 0) {
-          // for (const auto &selPath : foundPaths) {
-          //   auto tmpPathLat = selPath.latency;
             if (tmpPathLat >= maxLatency) {
               maxLatency = tmpPathLat;
               finalStartNode = selStartNode;
             }
-          // }
-        // }
       }
-      
       // Store the global order
       graphGlobalOrder[name] = std::make_pair(finalStartNode, maxLatency);
-
       //! Testing
       // llvm::dbgs() << "[DEBUG] \tNode: " << name << "; Global Order: (" <<
       // finalStartNode << ", " << maxLatency << ");\n";
@@ -547,6 +612,11 @@ std::vector<Path> AdjGraph::findPaths(const std::string &srcNode,
 
   //
   while (!mainStack.empty()) {
+    // avoid out of bounds access eg if adjstack empty
+    if (adjStack.empty()) {
+      llvm::errs()<< "[ERROR] AdjStack is empty while MainStack is not!\n";
+      break; // or return foundPaths;
+    }
     std::vector<std::string> curAdjList = adjStack.back();
     adjStack.pop_back();
 
@@ -556,7 +626,11 @@ std::vector<Path> AdjGraph::findPaths(const std::string &srcNode,
 
       mainStack.push_back(curNode);
       adjStack.push_back(curAdjList);
-
+      if (nodes.find(curNode) == nodes.end()) {
+        llvm::errs()<< "[ERROR] Node " << curNode << " not in nodes map!\n";
+        mainStack.pop_back();
+        continue;
+    }
       // Insert new adj_list
       std::vector<std::string> tmpAdjList;
       std::vector<std::string> newAdjList = nodes[curNode]->sucs;
@@ -714,7 +788,6 @@ void AdjGraph::analyzeStartNodeShifting() {
 
   // Update the cycle time of the MG
   for (const auto &selBackedge : backedges) {
-    unsigned tmpLonPath = 0;
     auto [tmpPaths,_pathname_unused] =
         getMaxLatency(selBackedge.second, selBackedge.first, false, true);
     cycleTimeMap[selBackedge.second] = tmpPaths;

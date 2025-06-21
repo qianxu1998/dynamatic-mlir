@@ -171,12 +171,12 @@ public:
     auto it=maxLatencycache.find(key);
     //Case 1 : cache hit
       if(it!=maxLatencycache.end()){
-        llvm::dbgs() <<"step4 found\n";
+        // llvm::dbgs() <<"step4 found\n";
         return    it->second;// return cached latency and node name
       }
 
           // Case 2: cache miss
-          llvm::dbgs() << "step4 longest path data channel "<< srcNode<<" "<< dstNode <<"\n";
+          // llvm::dbgs() << "step4 longest path data channel "<< srcNode<<" "<< dstNode <<"\n";
 
       std::vector<Path> tmppaths=  findPaths(srcNode,dstNode,noStartingNode,useGlobalOrder);
       unsigned maxLatency{0};
@@ -190,21 +190,7 @@ public:
     }
     maxLatencycache[key] = std::make_pair(maxLatency,bestSrcNode);
     return  {maxLatency,bestSrcNode};
-  }
-
-
-  // // Compute the longest paths from a given entry node to all other nodes
-  // void computeLongestPathsFromEntry(const std::string &entry);
-  
-  // // Get the longest path latency from entry to node (computes if not cached)
-  // unsigned getLongestPathLatency(const std::string &entry, const std::string &node);
-
-
-
-
-
-
-  
+  }  
 };
 
 

@@ -128,6 +128,8 @@ struct SwitchingInfo {
   std::map<std::string, std::vector<std::string>> segToOrderedDataBaseNodes;
   // Map from seg label to ordered ALU nodes
   std::map<std::string, std::vector<std::string>> segToOrderedALUNodes;
+  // Mux Nodes topologically ordered
+  std::vector<std::string> orderedMuxNodes;
   // Map from seg label to ordered mux and control merge node list
   std::map<std::string, muxCMNodesList> segToControlNodeList;
   // Map stroing the first iteration index that the seg is executed
