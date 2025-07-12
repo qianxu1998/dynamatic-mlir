@@ -64,15 +64,13 @@ class SCFProfilingResult {
 public:
 
   SCFProfilingResult(StringRef dataTrace,
-                     StringRef bbList,
                      SwitchingInfo& switchInfo);
 
-  // Parse the BB execution list log file
-  void parseBBListFile(StringRef bbList, SwitchingInfo& switchInfo);
 
-  // Parse the actual data profiling log file
-  void parseDataLogFile(StringRef dataTrace, SwitchingInfo& switchInfo);
 
+  // Parse the  data profiling trace log file
+
+  void parseUnifiedLogFile(StringRef dataTrace, SwitchingInfo& switchInfo);
   // Construct the map from scf level profiling to handshake level IR
   void buildScfToHSMap(SwitchingInfo& switchInfo, SCFFile& scfFile);
 
@@ -102,6 +100,108 @@ public:
   std::vector<std::string> argNamesVec;
 
 };
+
+
+// This function split a given string into a vector based on the delimiter
+// std::vector<std::string> split(const std::string &s, const std::string& delimiter);
+
+// This function removes the starting and ending empty space
+// std::string strip(const std::string &inputStr, const std::string &toRemove);
+
+inline std::vector<std::string> split(const std::string &s,
+                               const std::string &delimiter) {
+  std::vector<std::string> tokens;
+  std::regex re(delimiter);
+  std::sregex_token_iterator it(s.begin(), s.end(), re, -1);
+  std::sregex_token_iterator end;
+
+  for (; it != end; ++it) {
+    tokens.push_back(it->str());
+  }
+
+  return tokens;
+}
+
+inline std::vector<std::string> splitf(const std::string &s,
+  char delimiter) {
+std::vector<std::string> tokens;
+// std::regex re(delimiter);
+std::istringstream tokenstream(s);
+std::string token;
+// std::sregex_token_iterator it(s.begin(), s.end(), re, -1);
+// std::sregex_token_iterator end;
+
+while (std::getline(tokenstream,token,delimiter)) {
+tokens.push_back(token);
+}
+
+return tokens;
+}
+
+inline void splitfast(const std::string &s, char delim,
+  std::vector<std::string_view> &out) {
+out.clear();
+size_t start = 0;
+while (true) {
+size_t pos = s.find(delim, start);
+out.emplace_back(s.data() + start, pos == std::string::npos ? 
+                   s.size() - start : pos - start);
+if (pos == std::string::npos) break;
+start = pos + 1;
+}
+}
+
+inline std::string strip(const std::string &inputStr, const std::string &toRemove) {
+  // Trim leading and trailing whitespace
+  size_t start = inputStr.find_first_not_of(" \t\n\r\f\v");
+  if (start == std::string::npos) {
+    return ""; // Return an empty string if there are only whitespaces
+  }
+  size_t end = inputStr.find_last_not_of(" \t\n\r\f\v");
+  std::string stripped = inputStr.substr(start, end - start + 1);
+
+  if (toRemove == "") {
+    return stripped;
+  }
+
+  // Remove all occurrences of the specified substring 'toRemove'
+  size_t pos = stripped.find(toRemove);
+  while (pos != std::string::npos) {
+    stripped.erase(pos, toRemove.length());
+    pos = stripped.find(toRemove, pos);
+  }
+
+  return stripped;
+}
+inline std::string trim(const std::string &s) {
+  auto start = s.find_first_not_of(" \t\n\r\f\v");
+  auto end = s.find_last_not_of(" \t\n\r\f\v");
+  return (start == std::string::npos) ? "" : s.substr(start, end - start + 1);
+}
+
+
+
+
+
+
+static inline void split_sv(const std::string &in,
+                            char delim,
+                            std::vector<std::string_view> &out) {
+  out.clear();
+  auto str = std::string_view(in);
+  size_t start = 0;
+  while (start <= str.size()) {
+    size_t pos = str.find(delim, start);
+    if (pos == std::string_view::npos) {
+      out.emplace_back(str.data() + start, str.size() - start);
+      break;
+    }
+    out.emplace_back(str.data() + start, pos - start);
+    start = pos + 1;
+  }
+}
+
+
 
 
 #endif // EXPERIMENTAL_TRANSFORMS_PROFILING_ANALYZER_H

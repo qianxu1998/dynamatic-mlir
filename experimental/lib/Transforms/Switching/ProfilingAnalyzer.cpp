@@ -5,15 +5,15 @@
 //===----------------------------------------------------------------------===//
 
 #include "experimental/Transforms/Switching/ProfilingAnalyzer.h"
-
+#include <cassert>
 using namespace mlir;
 using namespace dynamatic;
 using namespace dynamatic::handshake;
 
 // Constructor for the SCF parsing class
-SCFProfilingResult::SCFProfilingResult(StringRef dataTrace, StringRef bbList, SwitchingInfo& switchInfo) {
+SCFProfilingResult::SCFProfilingResult(StringRef dataTrace, SwitchingInfo& switchInfo) {
   // Step 0: Get the directory path
-  std::filesystem::path pathObj(bbList.str());
+  std::filesystem::path pathObj(dataTrace.str());
   std::string resultDir = pathObj.parent_path().string();
   std::string scfFilePath = resultDir + "/cf_dyn_transformed.mlir";
   llvm::dbgs() << "[DEBUG] \tResult Dir : " << resultDir << "\n";
@@ -22,12 +22,8 @@ SCFProfilingResult::SCFProfilingResult(StringRef dataTrace, StringRef bbList, Sw
   SCFFile scfFile(scfFilePath);
   buildScfToHSMap(switchInfo, scfFile);
 
-  // Step 1: Parse the BBlist file and reconstruct the execution BBlist
-  parseBBListFile(bbList, switchInfo);
-  llvm::dbgs() << "[DEBUG] \t\tDONE\n";
-
   // Step 2: Parse the actual data log file
-  parseDataLogFile(dataTrace, switchInfo);
+  parseUnifiedLogFile(dataTrace, switchInfo);
   llvm::dbgs() << "[DEBUG] \t\tDONE\n";
 
   // Step 3: Construct the map for seg execution count
@@ -42,318 +38,188 @@ SCFProfilingResult::SCFProfilingResult(StringRef dataTrace, StringRef bbList, Sw
   // }
 }
 
-void SCFProfilingResult::constructSegExeCount() {
-  unsigned segCounter = 0;
-  unsigned numExecPhase = 0;
-  unsigned globalCounter = 0;
-  std::string prevSeg = "S";
 
-  for (const auto& selSeg: executedSegTrace) {
-    if (selSeg != prevSeg) {
-      execPhaseToSegExecNumMap[numExecPhase] = std::make_pair(prevSeg, segCounter);
-      prevSeg = selSeg;
-      numExecPhase++;
-      segCounter = 1;
-    } else {
-      segCounter++;
-    }
 
-    if (segToStartIterIndexMap.find(selSeg) == segToStartIterIndexMap.end()) {
-      segToStartIterIndexMap[selSeg] = globalCounter;
-    }
 
-    // Update the globalCounter
-    globalCounter++;
-  }
 
-  // Add the ending section
-  execPhaseToSegExecNumMap[numExecPhase] = std::make_pair("E", 1);
-}
+void SCFProfilingResult::parseUnifiedLogFile(StringRef tracePath, SwitchingInfo& switchInfo) {
+  llvm::dbgs() << "[DEBUG] \t[PARSING UNIFIED TRACE LOG FILE]\n";
 
-void SCFProfilingResult::insertValuePair(int opValue, unsigned iterIndex, std::string opName) {
-  // Check wheter the key exist in the map or not
-  if (opNameToValueListMap.find(opName) != opNameToValueListMap.end()) {
-    opNameToValueListMap[opName].push_back(std::make_pair(opValue, iterIndex));
-  } else {
-    std::vector<std::pair<int, unsigned>> newVector = {std::make_pair(opValue, iterIndex)};
-    opNameToValueListMap[opName] = newVector;
-  }
-}
-
-void SCFProfilingResult::parseBBListFile(StringRef bbList, SwitchingInfo& switchInfo) {
-  llvm::dbgs() << "[DEBUG] \t[PARSING BBLIST LOG FILE]\n";
-
-  // STEP 0 : Variable initialization
+  // STEP 0: Initialize structures
   std::vector<unsigned> tmpMGTrace;
-  std::vector<unsigned> tmpBBTrace; // List of traversed BB (temporary structure)
+  std::vector<unsigned> tmpBBTrace;
   int numTransSections = 0;
+  executedBBTrace.clear();
   executedBBTrace.push_back(0);    // Always start with BB 0
   tmpBBTrace.push_back(0);
-
-  // Record all transaction section
   std::vector<std::vector<unsigned>> transactionBBLists;
+  unsigned curIter = 0;
 
-  // Read the BB list log file
-  std::ifstream file(bbList.str());
-  if (!file.is_open()) {
-    llvm::errs() << "[ERROR] Can't Open file " << bbList << "\n";
+  // Read entire trace into memory
+  std::vector<std::string> lines;
+  {
+    std::ifstream file(tracePath.str());
+    if (!file.is_open()) {
+      llvm::errs() << "[ERROR] Can't open file " << tracePath << "\n";
+      return;
+    }
+    std::string rawLine;
+    while (std::getline(file, rawLine))
+      lines.push_back(rawLine);
+    file.close();
   }
 
-  // STEP 1: Traverse the BB list log
-  std::string line;
-  while (std::getline(file, line)) {
-    // Remove unnecessary information
-    line = strip(line, "");
-    auto lineSplit = split(line, " ");
-
-    // Clean the string
-    std::string BBTupleStr = strip(lineSplit.back(), "(");
-    BBTupleStr = strip(BBTupleStr, ")");
-
-    // If edge encountered
-    if (lineSplit[0] == "[Edge]") {
-      auto edgeTuple = split(BBTupleStr, ",");
-
-      executedBBTrace.push_back(std::stoul(edgeTuple[1]));
-      tmpBBTrace.push_back(std::stoul(edgeTuple[1]));
-    } else if (lineSplit[0] == "[BEdge]") {
-      auto backEdgeTuple = split(BBTupleStr, ",");
-      executedBBTrace.push_back(std::stoul(backEdgeTuple[1]));
-
-      // Get the executed MG
+  // PASS 1: Build BB trace from [Edge] / [BEdge]
+  for (auto &rawLine : lines) {
+    std::string line = strip(rawLine, "");
+    auto parts = splitf(line, ' ');
+    if (parts[0] == "[Edge]") {
+      std::string tuple = strip(parts.back(), "(");
+      tuple = strip(tuple, ")");
+      auto edgeTuple = splitf(tuple, ',');
+      unsigned dst = std::stoul(edgeTuple[1]);
+      executedBBTrace.push_back(dst);
+      tmpBBTrace.push_back(dst);
+    } else if (parts[0] == "[BEdge]") {
+      std::string tuple = strip(parts.back(), "(");
+      tuple = strip(tuple, ")");
+      auto backEdgeTuple = splitf(tuple, ',');
       unsigned srcBB = std::stoul(backEdgeTuple[0]);
       unsigned dstBB = std::stoul(backEdgeTuple[1]);
-      auto CFDFCVec = switchInfo.backEdgeToCFDFCMap[std::make_pair(srcBB, dstBB)];
+      executedBBTrace.push_back(dstBB);
+      // determine MG
+      auto CFDFCVec = switchInfo.staticinfo.backEdgeToCFDFC[{srcBB, dstBB}];
       unsigned travMG = 0;
-
       if (CFDFCVec.size() > 1) {
-        // Multiple CFDFC cancidates
-        bool matchedFlag = false;
-        unsigned selMGBBNumber = 0;
-        unsigned selMGIndex = 0;
-
-        for (const auto& selMG: CFDFCVec) {
-          // Get the BBlist vector
-          // We choose the one with the most number of bbs matched with the selBBList
-          std::vector<unsigned> selBBList = switchInfo.segToBBListMap[std::to_string(selMG)];
-          // Create sets from traversed BB and the potential MG
-          std::set<unsigned> selMGBBSet(selBBList.begin(), selBBList.end());
-          std::set<unsigned> compareSet(tmpBBTrace.begin(), tmpBBTrace.end());
-
-          // TODO: Verify the comparison below
-          if (std::includes(compareSet.begin(), compareSet.end(), selMGBBSet.begin(), selMGBBSet.end())) {
-            matchedFlag = true;
-            if (selMGBBSet.size() > selMGBBNumber) {
-              selMGIndex = selMG;
-              selMGBBNumber = selMGBBSet.size();
+        bool matched = false;
+        unsigned bestSize = 0;
+        for (auto selMG : CFDFCVec) {
+          auto &bbList = switchInfo.staticinfo.segToBBs[std::to_string(selMG)];
+          std::set<unsigned> mgSet(bbList.begin(), bbList.end());
+          std::set<unsigned> traceSet(tmpBBTrace.begin(), tmpBBTrace.end());
+          if (std::includes(traceSet.begin(), traceSet.end(), mgSet.begin(), mgSet.end())) {
+            matched = true;
+            if (mgSet.size() > bestSize) {
+              bestSize = mgSet.size();
+              travMG = selMG;
             }
           }
         }
-
-        if (matchedFlag) {
-          travMG = selMGIndex;
-        } else {
-          llvm::errs() << "[ERROR] Cant's match the backedge (" << srcBB << ", " << dstBB << ") to the corresponding MG.\n" ;
-        }
+        if (!matched)
+          llvm::errs() << "[ERROR] Can't match backedge (" << srcBB << "," << dstBB << ")\n";
       } else {
         travMG = CFDFCVec[0];
       }
-
       tmpMGTrace.push_back(travMG);
-
-      // Update the tmpBBTrace
-      std::vector<unsigned> newVector = {dstBB};
-      tmpBBTrace = std::move(newVector);
+      tmpBBTrace = {dstBB};
     }
   }
 
-  file.close();
-
-  // STEP 2: Partition the executedBB Trace into different sections
-  // Identify all segments in the execution trace
-  // Including both MGs and Transitions sections, which will not be repeatedly executed
-  unsigned curIter = 0;
-  unsigned tracePointer = 0;
-
-  for (const auto& selMG : tmpMGTrace) {
-    auto curCFDFCBBList = switchInfo.segToBBListMap[std::to_string(selMG)];
-
-    if (curIter == 0) {
-      std::vector<unsigned> tmpStartBBList;
-
-      while (true) {
-        if (std::find(curCFDFCBBList.begin(), curCFDFCBBList.end(), executedBBTrace[tracePointer]) == curCFDFCBBList.end()) {
-          tmpStartBBList.push_back(executedBBTrace[tracePointer]);
-          tracePointer++;
-        } else {
-          break;
-        }
+  // STEP 2: Partition the BB trace into segments and build iterEndIndex
+  unsigned segmentIter = 0, ptr = 0;
+  for (auto selMG : tmpMGTrace) {
+    auto &mgBBs = switchInfo.staticinfo.segToBBs[std::to_string(selMG)];
+    if (segmentIter == 0) {
+      std::vector<unsigned> startBBs;
+      while (ptr < executedBBTrace.size() &&
+             std::find(mgBBs.begin(), mgBBs.end(), executedBBTrace[ptr]) == mgBBs.end()) {
+        startBBs.push_back(executedBBTrace[ptr++]);
       }
-
-      // Update the CFDFC BB storing Dict
-      switchInfo.segToBBListMap["S"] = tmpStartBBList;
-
-      // Store the end of the initialization
+      switchInfo.staticinfo.segToBBs["S"] = startBBs;
       executedSegTrace.push_back("S");
-
-      // Update the iteration end stataus
-      iterEndIndex.push_back(tracePointer - 1);
-
-      curIter++;
-
-      // First Marked Graph entered, update the trace pointer
-      tracePointer += curCFDFCBBList.size();
-      iterEndIndex.push_back(tracePointer - 1);
-
+      iterEndIndex.push_back(ptr - 1);
+      segmentIter++;
+      ptr += mgBBs.size();
       executedSegTrace.push_back(std::to_string(selMG));
-
-      // Update the curIter
-      curIter++;
+      iterEndIndex.push_back(ptr - 1);
+      segmentIter++;
     } else {
-      // Check whether a transation section is encountered
-      if (std::find(curCFDFCBBList.begin(), curCFDFCBBList.end(), executedBBTrace[tracePointer]) == curCFDFCBBList.end()) {
-        // Transaction section encountered
-        std::vector<unsigned> tmpTransBBList;
-
-        while (true) {
-          if (std::find(curCFDFCBBList.begin(), curCFDFCBBList.end(), executedBBTrace[tracePointer]) == curCFDFCBBList.end()) {
-            tmpTransBBList.push_back(executedBBTrace[tracePointer]);
-            tracePointer++;
-          } else break;
+      if (std::find(mgBBs.begin(), mgBBs.end(), executedBBTrace[ptr]) == mgBBs.end()) {
+        std::vector<unsigned> transBBs;
+        while (ptr < executedBBTrace.size() &&
+               std::find(mgBBs.begin(), mgBBs.end(), executedBBTrace[ptr]) == mgBBs.end()) {
+          transBBs.push_back(executedBBTrace[ptr++]);
         }
-
-        // Add the transaction section to the execution trace and bblist mapping dict
-        bool presentFlag = false;
-
-        for (unsigned long i = 0; i < transactionBBLists.size(); i++) {
-          if (tmpTransBBList == transactionBBLists[i]) {
-            // We have stored the transaction section
-            std::string sectionName = "T" + std::to_string(i);
-            executedSegTrace.push_back(sectionName);
-
-            presentFlag = true;
+        bool found = false;
+        for (size_t i = 0; i < transactionBBLists.size(); ++i) {
+          if (transactionBBLists[i] == transBBs) {
+            executedSegTrace.push_back("T" + std::to_string(i));
+            found = true;
             break;
           }
         }
-
-        // Update iter end status
-        iterEndIndex.push_back(tracePointer - 1);
+        iterEndIndex.push_back(ptr - 1);
         curIter++;
-
-        // If this is a new transaction section
-        if (!presentFlag) {
-          std::string sectionName = "T" + std::to_string(numTransSections);
-
-          // Update the storing structure
-          transactionBBLists.push_back(tmpTransBBList);
-          executedSegTrace.push_back(sectionName);
-          switchInfo.segToBBListMap[sectionName] = tmpTransBBList;
-
+        if (!found) {
+          transactionBBLists.push_back(transBBs);
+          executedSegTrace.push_back("T" + std::to_string(numTransSections));
+          switchInfo.staticinfo.segToBBs["T" + std::to_string(numTransSections)] = transBBs;
+          switchInfo.staticinfo.transToSucMGMap["T" + std::to_string(numTransSections)] = std::to_string(selMG);
           numTransSections++;
-
-          // Update the successing list
-          switchInfo.transToSucMGMap[sectionName] = std::to_string(selMG);
         }
       }
-
-      tracePointer += curCFDFCBBList.size();
-      iterEndIndex.push_back(tracePointer - 1);
+      ptr += mgBBs.size();
       executedSegTrace.push_back(std::to_string(selMG));
-      curIter++;
+      iterEndIndex.push_back(ptr - 1);
+      segmentIter++;
     }
   }
-
-  // Updatge the ending BB list
-  std::vector<unsigned> tmpEndBBList;
-  for (size_t i = 0; i < executedBBTrace.size() - tracePointer; i++) {
-    tmpEndBBList.push_back(executedBBTrace[tracePointer + i]);
-  }
-
-  // Store the ending section
+  // Ending segment
+  std::vector<unsigned> endBBs(executedBBTrace.begin() + ptr, executedBBTrace.end());
   executedSegTrace.push_back("E");
-  switchInfo.segToBBListMap["E"] = tmpEndBBList;
+  switchInfo.staticinfo.segToBBs["E"] = endBBs;
 
-  unsigned iterMapCounter = 0;
-  unsigned iterCounter = 0;
-  for (const auto& selSeg: executedSegTrace) {
-    for (size_t i = 0; i < switchInfo.segToBBListMap[selSeg].size(); i++) {
-      bbToIterMap[iterMapCounter++] = iterCounter;
+  // Build bbToIterMap
+  unsigned mapCounter = 0, iterCounter = 0;
+  for (auto &seg : executedSegTrace) {
+    for (size_t i = 0; i < switchInfo.staticinfo.segToBBs[seg].size(); ++i) {
+      bbToIterMap[mapCounter++] = iterCounter;
     }
     iterCounter++;
   }
-}
 
-void SCFProfilingResult::parseDataLogFile(StringRef dataTrace, SwitchingInfo& switchInfo) {
-  llvm::dbgs() << "[DEBUG] \t[PARSING DATA LOG FILE]\n";
-
-  // STEP 0: Variable initialization
-  unsigned curIter = 0;
-  
-  // Read the Data log file
-  std::ifstream file(dataTrace.str());
-  if (!file.is_open()) {
-    llvm::errs() << "[ERROR] Can't Open file " << dataTrace << "\n";
-  }
-
-  // STEP 1: Traverse the Data log
-  std::string line;
-  while (std::getline(file, line)) {
-    // Remove unnecessary information
-    line = strip(line, "");
-    auto lineSplit = split(line, " ");
-
-    if (lineSplit[0] == "[DATA]") {
-      // Get the (op_name, value) tuple
-      std::string opValueStr = strip(lineSplit[1], "(");
-      opValueStr = strip(opValueStr, ")");
-
-      auto opValueTuple = split(opValueStr, ",");
-      std::string scfOPName = strip(opValueTuple[0], "\"");
-
-      std::string opName = scfToHandshakeNameMap[scfOPName];
-
-      if (lineSplit.size() > 1) {
-        int opValue = std::stoi(opValueTuple.back());
-        insertValuePair(opValue, curIter, opName);
-      } else {
-        continue;
-      }
-    } else if (lineSplit[0] == "[ARG]") {
-      // Get the (op_name, value) tuple
-      std::string opValueStr = strip(lineSplit[1], "(");
-      opValueStr = strip(opValueStr, ")");
-
-      auto opValueTuple = split(opValueStr, ",");
-      std::string argName = strip(opValueTuple[0], "\"");
-
-      int opValue = std::stoi(opValueTuple.back());
-      insertValuePair(opValue, curIter, argName);
-
-      // Record the name of the arguments
-      argNamesVec.push_back(argName);
-    } else if (lineSplit[0] == "[Edge]") {
-      unsigned edgeIndex = std::stoul(lineSplit[1]);
-
-      if (std::find(iterEndIndex.begin(), iterEndIndex.end(), edgeIndex) != iterEndIndex.end()) {
-        curIter++;
-      }
-    } else if (lineSplit[0] == "[BEdge]") {
-      unsigned edgeIndex = std::stoul(lineSplit[1]);
-
-      if (std::find(iterEndIndex.begin(), iterEndIndex.end(), edgeIndex) != iterEndIndex.end()) {
-        curIter++;
+  // PASS 2: Data parsing with curIter bumps on segment boundaries
+  curIter = 0;
+  for (auto &rawLine : lines) {
+    std::string line = strip(rawLine, "");
+    auto parts = splitf(line, ' ');
+    if (parts[0] == "[DATA]") {
+      std::string valStr = strip(parts[1], "(");
+      valStr = strip(valStr, ")");
+      auto tup = splitf(valStr, ',');
+      std::string name = strip(tup[0], "\"");
+      std::string hsName = scfToHandshakeNameMap[name];
+      int val = tup.size() > 1 ? std::stoi(tup.back()) : 0;
+      insertValuePair(val, curIter, hsName);
+    } else if (parts[0] == "[ARG]") {
+      std::string valStr = strip(parts[1], "(");
+      valStr = strip(valStr, ")");
+      auto tup = splitf(valStr, ',');
+      std::string arg = strip(tup[0], "\"");
+      int val = std::stoi(tup.back());
+      insertValuePair(val, curIter, arg);
+      argNamesVec.push_back(arg);
+    } else if (parts[0] == "[Edge]" || parts[0] == "[BEdge]") {
+      unsigned idx = std::stoul(parts[1]);
+      if (std::find(iterEndIndex.begin(), iterEndIndex.end(), idx) != iterEndIndex.end()) {
+        ++curIter;
       }
     }
   }
+}
 
-  // Close the file
-  file.close();
-} 
+
+
+
+
+
+
+
 
 void SCFProfilingResult::buildScfToHSMap(SwitchingInfo& switchInfo, SCFFile& scfFile) {
-  for (size_t i = 0; i < switchInfo.funcOpNames.size(); i++) {
+  for (size_t i = 0; i < switchInfo.staticinfo.funcOpNames.size(); i++) {
     std::string scfName = scfFile.opNameList[i];
-    std::string hsName = switchInfo.funcOpNames[i];
+    std::string hsName = switchInfo.staticinfo.funcOpNames[i];
 
     scfToHandshakeNameMap[scfName] = hsName;
 
@@ -397,7 +263,7 @@ SCFFile::SCFFile(StringRef scfFile) {
           // If not constant
           // Remove unwanted characters
           std::string tmpName = std::regex_replace(*vecIter, nonNameExpr, "");
-        
+          
           if (tmpName.find("constant") == std::string::npos) {
             // Also remove all index_cast node
             if (tmpName.find("index_cast") == std::string::npos) {
@@ -410,4 +276,42 @@ SCFFile::SCFFile(StringRef scfFile) {
   }
   // Close the file
   file.close();
+}
+
+void SCFProfilingResult::constructSegExeCount() {
+  unsigned segCounter = 0;
+  unsigned numExecPhase = 0;
+  unsigned globalCounter = 0;
+  std::string prevSeg = "S";
+
+  for (const auto& selSeg: executedSegTrace) {
+    if (selSeg != prevSeg) {
+      execPhaseToSegExecNumMap[numExecPhase] = std::make_pair(prevSeg, segCounter);
+      prevSeg = selSeg;
+      numExecPhase++;
+      segCounter = 1;
+    } else {
+      segCounter++;
+    }
+
+    if (segToStartIterIndexMap.find(selSeg) == segToStartIterIndexMap.end()) {
+      segToStartIterIndexMap[selSeg] = globalCounter;
+    }
+
+    // Update the globalCounter
+    globalCounter++;
+  }
+
+  // Add the ending section
+  execPhaseToSegExecNumMap[numExecPhase] = std::make_pair("E", 1);
+}
+
+void SCFProfilingResult::insertValuePair(int opValue, unsigned iterIndex, std::string opName) {
+  // Check wheter the key exist in the map or not
+  if (opNameToValueListMap.find(opName) != opNameToValueListMap.end()) {
+    opNameToValueListMap[opName].push_back(std::make_pair(opValue, iterIndex));
+  } else {
+    std::vector<std::pair<int, unsigned>> newVector = {std::make_pair(opValue, iterIndex)};
+    opNameToValueListMap[opName] = newVector;
+  }
 }

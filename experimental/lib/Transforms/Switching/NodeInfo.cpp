@@ -113,44 +113,47 @@ handshakeUpdateFlag = true;
 }
 
 void AdjNode::totalDataSwitchingCounting(bool mapped) {
-for (const auto &[suc, valueVec] : dataOut) {
-// Define tmp storing structure
-unsigned numSwitches = 0;
+  // Reset total before recalculating
+  totalDataSwitching = 0;
+  
+  for (const auto &[suc, valueVec] : dataOut) {
+    // Define tmp storing structure
+    unsigned numSwitches = 0;
 
-// If this suc is one of the units at scf level
-int lastInput = mapped && valueVec[0] == -1 ? 1 : valueVec[0];
+    // If this suc is one of the units at scf level
+    int lastInput = mapped && valueVec[0] == -1 ? 1 : valueVec[0];
 
-// The corresponding output channel maynot have dataout
-// Check the validity of the data channel value
-for (unsigned i = 0; i < valueVec.size(); i++) {
-int curVal = (valueVec[i] == -1) ? 1 : valueVec[i];
-int diff = lastInput ^ curVal;
+    // The corresponding output channel maynot have dataout
+    // Check the validity of the data channel value
+    for (unsigned i = 0; i < valueVec.size(); i++) {
+      int curVal = (valueVec[i] == -1) ? 1 : valueVec[i];
+      int diff = lastInput ^ curVal;
 
-// Count bits
-unsigned bitCount = 0;
-while (diff) {
-bitCount += (diff & 1);
-diff >>= 1;
-}
-numSwitches += bitCount;
-lastInput = curVal;
-}
+      // Count bits
+      unsigned bitCount = 0;
+      while (diff) {
+        bitCount += (diff & 1);
+        diff >>= 1;
+      }
+      numSwitches += bitCount;
+      lastInput = curVal;
+    }
 
-// Store the total number of channel switches
-dataSwitches[suc] = numSwitches;
-totalDataSwitching += numSwitches;
-}
+    // Store the total number of channel switches
+    dataSwitches[suc] = numSwitches;
+    totalDataSwitching += numSwitches;
+  }
 }
 
 std::vector<unsigned> AdjNode::getPositionList(int number) {
-std::vector<unsigned> positions;
-unsigned idx = 0;
-int tmp = number;
-while (tmp) {
-if (tmp & 1)
-positions.push_back(idx);
-tmp >>= 1;
-idx++;
+  std::vector<unsigned> positions;
+  unsigned idx = 0;
+  int tmp = number;
+  while (tmp) {
+    if (tmp & 1)
+      positions.push_back(idx);
+    tmp >>= 1;
+    idx++;
 }
 
 return positions;
@@ -175,7 +178,7 @@ inline void printVector(const T& selVec) {
 
 
 // Define all the printing functions to faciliate debug
-void AdjNode::printDetail() {
+void AdjNode::printNodeDetails() {
 llvm::dbgs()
 << "[DEBUG] "
 "\t=============================================================\n";

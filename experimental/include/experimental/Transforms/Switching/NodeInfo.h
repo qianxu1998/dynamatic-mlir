@@ -42,7 +42,7 @@ class AdjNode {
     bool handshakeSwitchingChecking();
   
     // This function prints all information of the node
-    virtual void printDetail();
+    virtual void printNodeDetails();
   
     // This function prints details of handshake switching
     void printHandshakeSwitching();
@@ -70,8 +70,8 @@ class AdjNode {
   
     // Support LLVM node casting
     // Following enum class is needed for isa<> and dyn_cast<>
-    enum class NodeKind {AdjNodeKind, BufferNodeKind, JoinNodeKind, PassNodeKind, CmpiNodeKind, AddiNodeKind,
-                          SubiNodeKind, MuliNodeKind, ExtsiNodeKind, DLoadNodeKind, DStoreNodeKind, MergeNodeKind,
+    enum class NodeKind {AdjNodeKind, BufferNodeKind, JoinNodeKind, PassNodeKind, CmpiNodeKind, CmpfNodeKind, AddiNodeKind, AddfNodeKind,
+                          SubiNodeKind, MuliNodeKind, MulfNodeKind, ExtsiNodeKind, DLoadNodeKind, DStoreNodeKind, MergeNodeKind, SelectNodeKind,
                           CMergeNodeKind, ForkNodeKind, CBrNodeKind, ShliNodeKind, ShrsiNodeKind, ShruiNodeKind, MuxNodeKind, TrunciNodeKind,
                           ExtuiNodeKind, ConstantNodeKind, OriNodeKind, AndiNodeKind, SourceNodeKind, EndNodeKind, SinkNodeKind, StartNodeKind};
   
@@ -94,7 +94,8 @@ class AdjNode {
     // Memory controller is exclueded from the pres and sucs
     std::vector<std::string> pres;  // Vector storing the predecessors of the node in the segemnt
     std::vector<std::string> sucs;  // Vector storing the successors of the node in the segement
-  
+    std::vector<AdjNode*>    sucsPtrs;  // ← p
+
     // Handshake Signal Switching
     std::map<std::string, unsigned> validSignal;    // Map used to store number of switching of the node's valid signals (per channel, e.x., {"node_name" : 2})
     std::map<std::string, unsigned> readySignal;    // Map used to store number of switching of the node's ready signals (per channel, e.x., {"node_name" : 2})
@@ -118,6 +119,7 @@ class AdjNode {
     // Update Flag
     bool handshakeUpdateFlag = false;
   };
+
 
 
   #endif

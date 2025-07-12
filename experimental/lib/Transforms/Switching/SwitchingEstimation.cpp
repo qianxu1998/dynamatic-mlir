@@ -7,13 +7,17 @@
 
 #include "experimental/Transforms/Switching/SwitchingEstimation.h"
 #include "experimental/Transforms/Switching/SwitchingSupport.h"
-#include "experimental/Transforms/Switching/NodeId.h"
-#include "experimental/Transforms/Switching/NameTable.h"
+#include "experimental/Transforms/Switching/DFSKernel.h"
+#include "experimental/Transforms/Switching/DataChannelPropagation.h"
+
 #include "experimental/Transforms/Switching/DataGlitches.h"
+#include "experimental/Transforms/Switching/utils.h"
 
 #include "experimental/Transforms/Switching/ProfilingAnalyzer.h"
 #include "experimental/Transforms/Switching/DataChannelCal.h"
 #include "experimental/Transforms/Switching/HandShakeChannelCal.h"
+#include "experimental/Transforms/Switching/HandShakeBufferAnalysis.h"
+
 #include "dynamatic/Dialect/Handshake/HandshakeOps.h"
 #include "dynamatic/Dialect/Handshake/HandshakeAttributes.h"
 #include "dynamatic/Support/DynamaticPass.h"
@@ -28,6 +32,8 @@
 #include "mlir/IR/Value.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/Parallel.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace mlir;
 using namespace dynamatic;
@@ -43,22 +49,23 @@ struct SwitchingEstimationPass
         SwitchingEstimationPass> {
 
   SwitchingEstimationPass(StringRef dataTrace,
-                          StringRef bbList,
+
                           StringRef frequencies,
                           StringRef timingModels) {
     this->dataTrace = dataTrace.str();
-    this->bbList = bbList.str();
     this->frequencies = frequencies.str();
     this->timingModels = timingModels.str();
   }
 
   // Main Interface
-  void runDynamaticPass() override;
+void runDynamaticPass() override;
 
   // 
   //  Define global storing structure
   //
   SwitchingInfo switchInfo;
+
+  HandshakeInfo handshakeInfo;
 
   // 
   //  Information Extraction Related Functions
@@ -72,65 +79,21 @@ struct SwitchingEstimationPass
 
   // Extract all op names of the alus in order
   void extractHandshakeOpNames(handshake::FuncOp& topFunc);
-// DFS utility for topological sort
-void topologicalSortUtil(const std::string& node,
-  const std::unordered_map<std::string, std::vector<std::string>>& adj,
-  std::unordered_map<std::string, bool>& visited,
-  std::stack<std::string>& Stack)
-{
-visited[node] = true;
-//  for all dependencies
-auto it = adj.find(node);
-if (it != adj.end()) {
-for (const auto& dep : it->second) {
-if (!visited[dep]) {
-topologicalSortUtil(dep, adj, visited, Stack);
-}
-}
-}
-Stack.push(node);
-}
 
-// Main function to do topological sort for all nodes in the dependency graph
-std::vector<std::string> topologicalSort(
-  const std::unordered_map<std::string, std::vector<std::string>>& adj)
-{
-  std::unordered_map<std::string, bool> visited;
-  visited.reserve(adj.size());
-  for (const auto& p : adj) {
-      visited.try_emplace(p.first, false);
-      for (const auto& dep : p.second)
-          visited.try_emplace(dep, false);
-  }
-
-
-  std::stack<std::string> result;
-  for (auto& p : visited) {
-      if (!p.second)
-          topologicalSortUtil(p.first, adj, visited, result);
-  }
-    // 3) Pop into a vector the sorted order
-    std::vector<std::string> sorted;
-    sorted.reserve(visited.size());
-    while (!result.empty()) {
-        sorted.push_back(result.top());
-        result.pop();
-    }
-    return sorted;
-}
   // 
   //  DataChannel Switching Calculation
   //
   // Function calculates the number of switches in the data channels
   void calDataChannelSwitching(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults);
-
+  void dumpSwitchingResults(const SwitchingInfo &info,
+      llvm::StringRef outPath = "estimation_cpp.csv");
   // 
   //  Handshake Channel Switching Calculation
   //
-  void calHSChannelSwitchingSteady(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults);
+  void computeSteadyStateHandshakeSwitching(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults);
 
   // This function calculates the handshake channel switching for the entire circuit simulation
-  void countHSChannelSwitchingOverall(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults);
+  void computeTotalHandshakeSwitching(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults);
 };
 } // namespace 
 
@@ -149,41 +112,42 @@ void SwitchingEstimationPass::runDynamaticPass() {
 
   // Step 1: Parse the SCF level profiling results
   llvm::dbgs() << "[DEBUG] [Step 1] Parsing Profiling Results\n";
-  llvm::dbgs() << "[DEBUG] \tBBList Log file: " << bbList << "\n";
+  // llvm::dbgs() << "[DEBUG] \tBBList Log file: " << bbList << "\n";
   llvm::dbgs() << "[DEBUG] \tData Profiling Log file: " << dataTrace << "\n";
-  SCFProfilingResult profilingResults(dataTrace, bbList, switchInfo);// works at scf level, converts to HS
+  SCFProfilingResult profilingResults(dataTrace, switchInfo);
 
   // Step 2: Build Adjacency graph for each CFDFC
   std::vector<std::pair<std::string, std::string>> allBackedges;
   llvm::dbgs() << "[DEBUG] [Step 2] Build Adjacency Graph for Each Segment\n";
-  
-  for (const auto& [mgIndex, mgInstance]: switchInfo.cfdfcs) {
+  bool debug=1;
+  for (const auto& [mgIndex, mgInstance]: switchInfo.staticinfo.cfdfcs) {
     llvm::dbgs() << "[DEBUG] \tMG : " << mgIndex << "\n";
-    // AdjGraph a(mgInstance, timingDB, switchInfo.cfdfcIIs[mgIndex], mgIndex);
+    // AdjGraph a(mgInstance, timingDB, switchInfo.staticinfo.cfdfcIIs[mgIndex], mgIndex);
 
 
-    auto adj = std::make_shared<AdjGraph>(mgInstance, timingDB, switchInfo.cfdfcIIs[mgIndex], mgIndex);
-    // AdjGraph tmpAdjGraph(mgInstance, timingDB, switchInfo.cfdfcIIs[mgIndex], mgIndex);
-    switchInfo.segToAdjGraphMap.insert_or_assign(std::to_string(mgIndex), adj);
-  
+    auto adj = std::make_shared<AdjGraph>(mgInstance, timingDB, switchInfo.staticinfo.cfdfcIIs[mgIndex], mgIndex,debug);
+    // AdjGraph tmpAdjGraph(mgInstance, timingDB, switchInfo.staticinfo.cfdfcIIs[mgIndex], mgIndex);
+    switchInfo.staticinfo.segToGraph.insert_or_assign(std::to_string(mgIndex), adj);
+
     // Update the backedge list
     for (const auto& selPair : adj->backedges) {
       allBackedges.push_back(selPair);
     }
   }
-// AdjGraph>(mgInstance, timingDB, switchInfo.cfdfcIIs[mgIndex], mgIndex)
+
+// AdjGraph>(mgInstance, timingDB, switchInfo.staticinfo.cfdfcIIs[mgIndex], mgIndex)
   // Step 3: Build the graph for the entire dataflow graph
   llvm::dbgs() << "[DEBUG] [STEP 3] Construct the Adj Graph for the entire DFG and sort the multiplexers\n";
   /// Step 3.1: First store the information of the backedges in the circuit
-  for (const auto& [selSegLabel, segBBList] : switchInfo.segToBBListMap) {
-    if (selSegLabel.find("S") != std::string::npos) {
+  for (const auto& [selSegLabel, segBBList] : switchInfo.staticinfo.segToBBs) {
+    if (contains(selSegLabel,"S")) {
       switchInfo.segInvalidBackedgesMap[selSegLabel] = allBackedges;
-    } else if (selSegLabel.find("E") != std::string::npos) {
+    } else if (contains(selSegLabel,"E")) {
       switchInfo.segInvalidBackedgesMap[selSegLabel] = allBackedges;
-    } else if (selSegLabel.find("T") != std::string::npos) {
-      auto sucMg = switchInfo.transToSucMGMap[selSegLabel];
+    } else if (contains(selSegLabel,"T")) {
+      auto sucMg = switchInfo.staticinfo.transToSucMGMap[selSegLabel];
       std::vector<std::pair<std::string, std::string>> tmpInvalidBackedges; 
-      for (const auto& [selCFDFCIndex, selGraph]: switchInfo.segToAdjGraphMap) {
+      for (const auto& [selCFDFCIndex, selGraph]: switchInfo.staticinfo.segToGraph) {
         if (selCFDFCIndex != sucMg) {
           for (const auto& selPair: selGraph->backedges) {
             tmpInvalidBackedges.push_back(selPair);
@@ -206,35 +170,34 @@ void SwitchingEstimationPass::runDynamaticPass() {
   // Step 3.2: Create the storing structure for the entire dataflow graph
   for (handshake::FuncOp funcOp : topModule.getOps<handshake::FuncOp>()) {
     // Contruct the Adj graph for the entire dataflow circuit
-    switchInfo.dataflowGraph = std::make_shared<AdjGraph>(timingDB, switchInfo.cfdfcIIs[0], funcOp, allBackedges);
+    switchInfo.staticinfo.dataflowGraph = std::make_shared<AdjGraph>(timingDB, switchInfo.staticinfo.cfdfcIIs[0], funcOp, allBackedges,debug);
   }
-  llvm::dbgs() << "[DEBUG] \t sort muxes:\n";
-  std::vector<std::string> allMuxNodes;
-  for (const auto& [name, node] : switchInfo.dataflowGraph->nodes) {
-    if (name.find("mux") != std::string::npos)
-        allMuxNodes.push_back(name);
-}
-std::unordered_map<std::string, std::vector<std::string>> muxDeps;
-for (const auto& mux : allMuxNodes) {
-  for (const auto& [port, src] : switchInfo.dataflowGraph->muxToSrcNodeMap[mux]) {
-      if (port == "control") continue;
-      if (src.find("mux") != std::string::npos)
-          muxDeps[mux].push_back(src);
-  }
-}
-switchInfo.orderedMuxNodes =topologicalSort(muxDeps);
-llvm::dbgs() << "[DEBUG] \t mux sorting finished:\n";
 
-  llvm::dbgs() << "[DEBUG] [STEP 4] Determining the Global start time and shifting for each MG\n";
-  for (auto& [mgIndex, selGraph]: switchInfo.segToAdjGraphMap) {
+
+llvm::dbgs() << "[DEBUG] [STEP 4] Determining the Global start time and shifting for each MG\n";
+
+  // auto &graphMap = switchInfo.staticinfo.segToGraph;
+
+  // // Collect pointers to AdjGraph
+  // std::vector<std::shared_ptr<AdjGraph>> graphs;
+  // graphs.reserve(graphMap.size());
+  // for (auto &entry : graphMap)
+  //   graphs.push_back(entry.second);
+  
+  // // Parallel processing
+  // llvm::parallelForEach(graphs, [](const auto &selGraph) {
+  //   selGraph->obtainNodeGlobalOrder();
+  //   selGraph->computeStartNodeShifts();
+  // });
+
+  for (auto& [mgIndex, selGraph]: switchInfo.staticinfo.segToGraph) {
     // Step 4.1: Determining the latest start time for each node cfdfc
     selGraph->obtainNodeGlobalOrder();
-
+    
     //! Testing
-    // llvm::dbgs() << "[DEBUG] \t\t Global order calculated\n"; 
-
+    // llvm::dbgs() << "[DEBUG] \t\t Global order calculated"<<(++a)<<"\n"; 
     // Step 4.2: Check the shifting between different start node within a graph
-    selGraph->analyzeStartNodeShifting();
+    selGraph->computeStartNodeShifts();
   }
 
   // Step 5: Calculate switches in data channel 
@@ -243,11 +206,46 @@ llvm::dbgs() << "[DEBUG] \t mux sorting finished:\n";
 
   // Step 6: Calculate switches in handshake channels
   llvm::dbgs() << "[DEBUG] [STEP 6] Calculate Handshake Channel Switching\n";
-  calHSChannelSwitchingSteady(topModule, profilingResults);
+  computeSteadyStateHandshakeSwitching(topModule, profilingResults);
 
   // Step 7: Calculate switches in handshake channels for the entire simualtion
   llvm::dbgs() << "[DEBUG] [STEP 7] Calculate Handshake Channel Switching for the entire simulation\n";
-  countHSChannelSwitchingOverall(topModule, profilingResults);
+
+  computeTotalHandshakeSwitching(topModule, profilingResults);
+
+    
+  // Step 8: Dump node switching results for post‑processing
+  dumpSwitchingResults(switchInfo);
+}
+
+
+//===----------------------------------------------------------------------===//
+// Dump Switching Results to CSV (node,data,valid,ready)
+//===----------------------------------------------------------------------===//
+void SwitchingEstimationPass::dumpSwitchingResults(const SwitchingInfo &info,
+                                                   llvm::StringRef outPath) {
+  std::error_code EC;
+  llvm::raw_fd_ostream OS(outPath, EC);
+  if (EC) {
+    llvm::errs() << "[ERROR] Could not open output file " << outPath
+                 << ": " << EC.message() << "\n";
+    return;
+  }
+
+  // CSV header
+  OS << "node,data,valid,ready\n";
+
+  auto graph = info.staticinfo.dataflowGraph;
+  for (const auto &entry : graph->nodes) {
+    const auto &nodeName = entry.first();
+    if (contains(nodeName,"mem_controller")){
+      continue;}
+
+    const auto *node = entry.second.get();
+    OS << nodeName << ',' << node->totalDataSwitching << ','
+       << node->totalValidSwitching << ',' << node->totalReadySwitching
+       << '\n';
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -260,17 +258,17 @@ void SwitchingEstimationPass::calDataChannelSwitching(mlir::ModuleOp& topModule,
   llvm::dbgs() << "[DEBUG]  [SS0] Construct the segLable to IterIdx Map\n";
   for (unsigned i = 0; i < profileResults.executedSegTrace.size(); i++) {
     std::string segLabel = profileResults.executedSegTrace[i];
-    if (switchInfo.segToExecutedIter.find(segLabel) == switchInfo.segToExecutedIter.end()) {
-      switchInfo.segToExecutedIter[segLabel] = i;
+    if (switchInfo.data.firstExecutedIter.find(segLabel) == switchInfo.data.firstExecutedIter.end()) {
+      switchInfo.data.firstExecutedIter[segLabel] = i;
     }
   }
 
   // Step 1: Get the iteration index for the frist execution of each segment
   llvm::dbgs() << "[DEBUG]  [SS1] Get the BB Pair to Control Merge Output Map\n";
-  constructBBPairToCMResMap(switchInfo);
+  mapBBPairToControlMerge(switchInfo);
 
   //! Testing
-  for (const auto& [pair1, cmVec]: switchInfo.bbPairToCMResultMap) {
+  for (const auto& [pair1, cmVec]: switchInfo.data.bbPairToCtrlMerge) {
     llvm::dbgs() << "[DEBUG] \t(" << pair1.first << ", " << pair1.second << ") : \n";
     for (auto selPair: cmVec) {
       llvm::dbgs() << "[DEBUG] \t\t[" << selPair.first << " " << selPair.second << "]\n";
@@ -281,7 +279,7 @@ void SwitchingEstimationPass::calDataChannelSwitching(mlir::ModuleOp& topModule,
   llvm::dbgs() << "[DEBUG]  [SS2] Get all the database nodes in each segments\n";
   getDataBaseNodes(switchInfo, profileResults);
   //! Testing
-  for (auto& [segLabel, selDB]: switchInfo.segToDataBaseVecMap) {
+  for (auto& [segLabel, selDB]: switchInfo.data.segToDataBaseVec) {
     llvm::dbgs() << "[DEBUG] \t[SEGMENT] " << segLabel << "\n";
     printDataBaseNodesTriple(selDB);
   }
@@ -289,14 +287,13 @@ void SwitchingEstimationPass::calDataChannelSwitching(mlir::ModuleOp& topModule,
   // Step 3: Contruct the data source node info of mux, condbr and mem node
   llvm::dbgs() << "[DEBUG]  [SS3] Construct the data source node storing structure for different nodes in the dataflow graph\n";
   // TODO: Sometimes the source node of a mux node is from the block argumnet, need to add new nodes in the grpah.
-  switchInfo.dataflowGraph->buildMuxSrcMap();
-  switchInfo.dataflowGraph->buildCondandStoreSrcMap();
+  switchInfo.staticinfo.dataflowGraph->builSrcMaps();
 
   //! Testing
-  printMuxToSrcNodeMap(switchInfo.dataflowGraph->muxToSrcNodeMap);
-  printSrcNodeToMuxMap(switchInfo.dataflowGraph->srcNodeToMuxMap);
+  printMuxToSrcNodeMap(switchInfo.staticinfo.dataflowGraph->muxToSrcNodeMap);
+  printSrcNodeToMuxMap(switchInfo.staticinfo.dataflowGraph->srcNodeToMuxMap);
   llvm::dbgs() << "[DEBUG] \tcondBr Node to control src map: \n";
-  for (const auto& [cbrNode, controlSrc]: switchInfo.dataflowGraph->condBrToConSrcMap) {
+  for (const auto& [cbrNode, controlSrc]: switchInfo.staticinfo.dataflowGraph->condBrToConSrcMap) {
     llvm::dbgs() << "[DEBUG] \t\t(" << cbrNode << ", " << controlSrc << ")\n";
   }
 
@@ -306,7 +303,7 @@ void SwitchingEstimationPass::calDataChannelSwitching(mlir::ModuleOp& topModule,
 
   // Step 5: Build succeeding node list for data base nodes in different segments
   llvm::dbgs() << "[DEBUG]  [SS5] Build succeeding node list\n";
-  conSegSuccNodesList(switchInfo, profileResults);
+  buildSegmentSuccNodesList(switchInfo, profileResults);
 
   // Step 6: Get all glitching base node in each MG
   llvm::dbgs() << "[DEBUG]  [SS6] Find all glitching nodes\n";
@@ -319,6 +316,15 @@ void SwitchingEstimationPass::calDataChannelSwitching(mlir::ModuleOp& topModule,
   // Step 8: Propagate all the data base value
   llvm::dbgs() << "[DEBUG]  [SS8] Final data channel value updates\n";
   dfgDataChannelPropagate(switchInfo, profileResults, false);
+  llvm::dbgs() << "[DEBUG]  [SS9] Calculate final data switching counts\n";
+  for (const auto &entry : switchInfo.staticinfo.dataflowGraph->nodes) {
+      const auto &nodeName = entry.first();
+      if (nodeName.find("mem_controller") != std::string::npos) {
+          continue;
+      }
+      auto *node = entry.second.get();
+      node->totalDataSwitchingCounting(false);  // Calculate final switching counts
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -326,28 +332,40 @@ void SwitchingEstimationPass::calDataChannelSwitching(mlir::ModuleOp& topModule,
 // Handshake Channel Switching
 //
 //===----------------------------------------------------------------------===//
-void SwitchingEstimationPass::calHSChannelSwitchingSteady(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults) {
+void SwitchingEstimationPass::computeSteadyStateHandshakeSwitching(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults) {
   // For each MG, we do the following two steps
   //  Step 1: Update buffer information
   //  Step 2: Calculate the steady state handhshake channel switching
 
   // Step 1
-  for (unsigned i = 0; i < switchInfo.cfdfcThroughput.size(); i++) {
-    extractBufferInfo(switchInfo, std::to_string(i), true);
+  bool debugbuffer{1};
+  for (unsigned i = 0; i < switchInfo.staticinfo.cfdfcThroughput.size(); i++) {
+    updateMGBufferSwitching(switchInfo, std::to_string(i), debugbuffer);
   }
 
   // Step 2
-  for (unsigned i = 0; i < switchInfo.cfdfcThroughput.size(); i++) {
-    mgHandshakeSwitchingCounting(switchInfo, std::to_string(i), true);
+  bool debughscount{1};
+  for (unsigned i = 0; i < switchInfo.staticinfo.cfdfcThroughput.size(); i++) {
+    mgHandshakeSwitchingCounting(switchInfo,handshakeInfo, std::to_string(i), debughscount);
+  }
+  
+  // Debug: Print steady-state handshake values after calculation
+  llvm::dbgs() << "[DEBUG] [STEP 6 RESULTS] Steady-state handshake values:\n";
+  for (const auto& [mgIndex, mgGraph] : switchInfo.staticinfo.segToGraph) {
+    llvm::dbgs() << "[DEBUG] \tMG " << mgIndex << ":\n";
+    for (const auto& [nodeName, nodePtr] : mgGraph->nodes) {
+      llvm::dbgs() << "[DEBUG] \t\tNode " << nodeName << ": V=" << nodePtr->totalValidSwitching 
+                   << " R=" << nodePtr->totalReadySwitching << "\n";
+    }
   }
 }
 
-void SwitchingEstimationPass::countHSChannelSwitchingOverall(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults) {
+void SwitchingEstimationPass::computeTotalHandshakeSwitching(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults) {
   /* -----------------------------------------------------------------------
      Assumptions
        • For nodes that belong to an MG segment we re-use the steady-state
          switching numbers that were computed previously.
-       • If an MG is executed only once we apply the “buffer-only” rule for
+       • If an MG is executed only once we apply the "buffer-only" rule for
          buffers and the steady-state rule for the other nodes.
        • For nodes that live in an S / E / T segment we assume that:
            – every Valid output toggles twice  (0→1→0)
@@ -357,29 +375,46 @@ void SwitchingEstimationPass::countHSChannelSwitchingOverall(mlir::ModuleOp& top
   //--------------------------------------------------------------------+
   // 1)  Iterate over the execution segments in sequential order
   //--------------------------------------------------------------------+
-  for (auto it = profileResults.execPhaseToSegExecNumMap.begin(); it != profileResults.execPhaseToSegExecNumMap.end(); ++it) {
-    auto segIdx = it->first;
+  for (auto it = profileResults.execPhaseToSegExecNumMap.begin();
+       it != profileResults.execPhaseToSegExecNumMap.end(); ++it) {
+
+    auto segIdx   = it->first;
     auto segLabel = it->second.first;
-    auto numExec = it->second.second;
-    llvm::dbgs() << "[DEBUG] \tSegIndex: " << segIdx << "; MG_Label: " << segLabel << ", Num Exec: " << numExec << "\n";
+    unsigned numExec = it->second.second;
+
+    // ------------------------------------------------------------------
+    // Fallback: some MG segments appear with an execution count of 0 in
+    // execPhaseToSegExecNumMap.  When that happens we derive the real
+    // count directly from the execution trace so that handshake scaling
+    // uses the correct multiplier.
+    // ------------------------------------------------------------------
+    if (numExec == 0) {
+      numExec = static_cast<unsigned>(
+          std::count(profileResults.executedSegTrace.begin(),
+                     profileResults.executedSegTrace.end(),
+                     segLabel));
+    }
+
+    llvm::dbgs() << "[DEBUG] \tSegIndex: " << segIdx
+                 << "; MG_Label: "      << segLabel
+                 << ", Num Exec: "      << numExec << "\n";
     
     //------------------------------------------------------------------+
-    // 2-A)  SEGMENT TYPE :  “S”  or  “T”
+    // 2-A)  SEGMENT TYPE :  "S"  or  "T"
     //------------------------------------------------------------------+
     // TODO: Define a separate data storing structure for active nodes in the seg
-    if (segLabel.find("S") != std::string::npos || segLabel.find("T") != std::string::npos) {
+    if (contains(segLabel,"S") || contains(segLabel,"T")) {
       llvm::dbgs() << "[DEBUG] \t[SEGMENT] " << segLabel << "\n";
       llvm::dbgs() << "[DEBUG] \t\t[Type] S or T\n";
-
+      
       // Traverse all active nodes in the segment
-      for (const auto& nodeName: switchInfo.dataflowGraph->orderedNodeName) {
+      // for (const auto& nodeName: switchInfo.staticinfo.dataflowGraph->orderedNodeName) {
+      auto graph= switchInfo.staticinfo.dataflowGraph;
+      for(auto* node :   graph->nodePtrs){
         // Get the node
-        AdjNode *node = switchInfo.dataflowGraph->nodes[nodeName].get();
+        // AdjNode *node = switchInfo.staticinfo.dataflowGraph->nodes[nodeName].get();
         
-        auto segBBList = switchInfo.segToBBListMap[segLabel];
-        if (std::find(segBBList.begin(), segBBList.end(), node->bbindex) == segBBList.end()) {
-          continue;
-        }
+        // No BB-index filtering for S/T segments – every active node counts.
         // Calculate the number of valid switches
         unsigned numSucs = node->sucs.size();
         unsigned numValidSwitches = 2 * numSucs;
@@ -390,56 +425,55 @@ void SwitchingEstimationPass::countHSChannelSwitchingOverall(mlir::ModuleOp& top
         // Update the storing structure
         node->updateHandshakeChannelSwitching(numValidSwitches, numReadySwitches);
 
-        // Update per channel switching information
-        for (const auto& suc: node->sucs) {
-          if (node->validSignal.find(suc) != node->validSignal.end()) {
-            node->validSignal[suc] += 2;
-          } else {
-            node->validSignal[suc] = 2;
-          }
+        // Update per-channel maps
+        for (const auto &suc : node->sucs) {
+          node->validSignal[suc] += 2;       // (create-if-absent already handled)
         }
+
+        // NOW fold maps → scalar totals
+        node->totalHandshakeSwitchingUpdate();
       }
 
       // Skip the rest of the steps
       continue;
-    } else if (segLabel.find("E") != std::string::npos) {
+    } else if (contains(segLabel,"E")) {
       llvm::dbgs() << "[DEBUG] \t[SEGMENT] " << segLabel << "\n";
       // Get the previous segment
       std::string prevSegLabel = std::prev(it)->second.first;
       llvm::dbgs() << "[DEBUG] \t\t[Prev Segment] " << prevSegLabel << "\n";
 
       // Traverse all active nodes in the segment
-      for (const auto& nodeName: switchInfo.dataflowGraph->orderedNodeName) {
+      for (const auto& nodeName: switchInfo.staticinfo.dataflowGraph->orderedNodeName) {
         // Get the node
-        AdjNode *node = switchInfo.dataflowGraph->nodes[nodeName].get();
+        AdjNode *node = switchInfo.staticinfo.dataflowGraph->nodes[nodeName].get();
         
         // This node is in segment E
-        auto segBBList = switchInfo.segToBBListMap[segLabel];
-        if (std::find(segBBList.begin(), segBBList.end(), node->bbindex) == segBBList.end()) {
+        auto segBBList = switchInfo.staticinfo.segToBBs[segLabel];
+        if (!containsValue(segBBList, node->bbindex)) {
           continue;
         }
 
         // Check wheter the node is in previous section or not
         //* Assumption: Seg E will only be following MG ?
-        auto prevSegBBList = switchInfo.segToBBListMap[prevSegLabel];
-        if (std::find(prevSegBBList.begin(), prevSegBBList.end(), node->bbindex) != prevSegBBList.end()) {
+        auto prevSegBBList = switchInfo.staticinfo.segToBBs[prevSegLabel];
+        if (containsValue(prevSegBBList, node->bbindex)) {
           // Get the node info in the previous segment
-          AdjNode *prevNode = switchInfo.segToAdjGraphMap[prevSegLabel]->nodes[nodeName].get();
+          AdjNode *prevNode = switchInfo.staticinfo.segToGraph[prevSegLabel]->nodes[nodeName].get();
           // Node in the previous segment
           unsigned numValidSwitches = prevNode->totalValidSwitching;
           unsigned numSucs = prevNode->sucs.size();
 
-          if (numValidSwitches != (numSucs * 2)) {
-            if (nodeName.find("constant") == std::string::npos && nodeName.find("source") == std::string::npos) {
-              // This is the ending segment transition 1 -> 0
-              numValidSwitches += (numSucs * 2 - numValidSwitches) / 2;
-            }
+          // Always add the final 1→0 transition of the last token so that
+          // each Valid line ends with the falling edge seen in the Python
+          // reference implementation.
+          if ((!contains(nodeName,"constant")) && (!contains(nodeName,"source"))) {
+            numValidSwitches += (numSucs * 2 - numValidSwitches) / 2;
           }
 
           unsigned numReadySwitches = prevNode->totalReadySwitching;
 
           // Check whether this is a load unit
-          if (nodeName.find("load") != std::string::npos) {
+          if (contains(nodeName,"load")) {
             numValidSwitches *= 2;
             numReadySwitches *= 2;
           }
@@ -483,12 +517,13 @@ void SwitchingEstimationPass::countHSChannelSwitchingOverall(mlir::ModuleOp& top
 
           // Update the storing structure
           node->updateHandshakeChannelSwitching(numValidSwitches, numReadySwitches);
+          node->totalHandshakeSwitchingUpdate();
         } else {
           // Get node type
           auto selNodeType = getNodeType(nodeName);
           unsigned numValidSwitches = 0;
           unsigned numReadySwitches = 0;
-          if (selNodeType.find("cond_br") != std::string::npos) {
+          if (contains(selNodeType,"cond_br")) {
             numValidSwitches = 2;
             numReadySwitches = 4;
           } else if (JOIN_NODE.find(selNodeType) != JOIN_NODE.end()) {
@@ -502,6 +537,7 @@ void SwitchingEstimationPass::countHSChannelSwitchingOverall(mlir::ModuleOp& top
 
           // Update the storing structure
           node->updateHandshakeChannelSwitching(numValidSwitches, numReadySwitches);
+          node->totalHandshakeSwitchingUpdate();
         }
         
       }
@@ -511,10 +547,16 @@ void SwitchingEstimationPass::countHSChannelSwitchingOverall(mlir::ModuleOp& top
       // TODO: Update the logic here for the rest of the nodes
       
       // Traverse all active nodes in the segment
-      for (const auto & nodeName: switchInfo.segToAdjGraphMap[segLabel]->orderedNodeName) {
+      for (const auto & nodeName: switchInfo.staticinfo.segToGraph[segLabel]->orderedNodeName) {
         // Get the node
-        AdjNode *graphNode = switchInfo.dataflowGraph->nodes[nodeName].get();
-        AdjNode *mgNode = switchInfo.segToAdjGraphMap[segLabel]->nodes[nodeName].get();
+        AdjNode *graphNode = switchInfo.staticinfo.dataflowGraph->nodes[nodeName].get();
+        AdjNode *mgNode = switchInfo.staticinfo.segToGraph[segLabel]->nodes[nodeName].get();
+        
+        // Debug: Print what values we're accessing
+        llvm::dbgs() << "[DEBUG] \t\tNode " << nodeName << " in MG " << segLabel 
+                     << ": mgNode->validtot=" << mgNode->totalValidSwitching
+                     << " mgNode->readytot=" << mgNode->totalReadySwitching
+                     << " numExec=" << numExec << "\n";
         
         // Get the number of switching
         unsigned numValidSwitches = numExec * mgNode->totalValidSwitching;
@@ -558,16 +600,21 @@ void SwitchingEstimationPass::countHSChannelSwitchingOverall(mlir::ModuleOp& top
         }
         
         // Check whether this is a load unit
-        if (nodeName.find("load") != std::string::npos) {
+        if (contains(nodeName,"load")) {
           numValidSwitches *= 2;
           numReadySwitches *= 2;
         }
 
         // Update the storing structure
         graphNode->updateHandshakeChannelSwitching(numValidSwitches, numReadySwitches);
+        graphNode->totalHandshakeSwitchingUpdate();
       }
     }
   } 
+
+// -----------------------------------------------------------------------------------------------------------------
+for (auto &[name, n] : switchInfo.staticinfo.dataflowGraph->nodes)
+  n->totalHandshakeSwitchingUpdate();   // idempotent
 }
 
 //===----------------------------------------------------------------------===//
@@ -584,7 +631,7 @@ void SwitchingEstimationPass::extractHandshakeOpNames(handshake::FuncOp& topFunc
     std::string opType = removeDigits(opName);
 
     if (NAME_SENSE_LIST.find(opType) != NAME_SENSE_LIST.end()) {
-      switchInfo.funcOpNames.push_back(opName);
+      switchInfo.staticinfo.funcOpNames.push_back(opName);
     }
   }
 }
@@ -623,7 +670,7 @@ LogicalResult SwitchingEstimationPass::extractAllCFDFCs(mlir::ModuleOp& topModul
     }
 
     // Get all Backedges
-    switchInfo.backEdges = extractBackedges(archs);
+    switchInfo.staticinfo.backEdges = extractBackedges(archs);
 
     // Extract all needed attributes
     DictionaryAttr throughputAttr = getDialectAttr<handshake::CFDFCThroughputAttr>(funcOp).getThroughputMap();
@@ -642,8 +689,8 @@ LogicalResult SwitchingEstimationPass::extractAllCFDFCs(mlir::ModuleOp& topModul
         if (auto IIValue = IIValueAttr.dyn_cast<mlir::FloatAttr>()) {
           cfdfcII = 1.0 / IIValue.getValueAsDouble();
 
-          switchInfo.cfdfcIIs[std::stoul(cfdfcIndex)] = cfdfcII;
-          switchInfo.cfdfcThroughput[std::stoul(cfdfcIndex)] = IIValue.getValueAsDouble();
+          switchInfo.staticinfo.cfdfcIIs[std::stoul(cfdfcIndex)] = cfdfcII;
+          switchInfo.staticinfo.cfdfcThroughput[std::stoul(cfdfcIndex)] = IIValue.getValueAsDouble();
         }
       }
 
@@ -662,7 +709,7 @@ LogicalResult SwitchingEstimationPass::extractAllCFDFCs(mlir::ModuleOp& topModul
           curBBId = (*iter).cast<IntegerAttr>().getUInt();
 
           // Check whether this is a backedge
-          if (std::find(switchInfo.backEdges.begin(), switchInfo.backEdges.end(), std::make_pair(prevBBId, curBBId)) != switchInfo.backEdges.end()) {
+          if (std::find(switchInfo.staticinfo.backEdges.begin(), switchInfo.staticinfo.backEdges.end(), std::make_pair(prevBBId, curBBId)) != switchInfo.staticinfo.backEdges.end()) {
             tmpArchs.push_back(experimental::ArchBB(prevBBId, curBBId, 0, true));
 
             switchInfo.insertBE(prevBBId, curBBId, cfdfcIndex);
@@ -680,7 +727,7 @@ LogicalResult SwitchingEstimationPass::extractAllCFDFCs(mlir::ModuleOp& topModul
         }
 
         // Check the loop back edge
-        if (std::find(switchInfo.backEdges.begin(), switchInfo.backEdges.end(), std::make_pair(prevBBId, startBBId)) != switchInfo.backEdges.end()) {
+        if (std::find(switchInfo.staticinfo.backEdges.begin(), switchInfo.staticinfo.backEdges.end(), std::make_pair(prevBBId, startBBId)) != switchInfo.staticinfo.backEdges.end()) {
           tmpArchs.push_back(experimental::ArchBB(prevBBId, startBBId, 0, true));
 
           switchInfo.insertBE(prevBBId, startBBId, cfdfcIndex);
@@ -694,7 +741,7 @@ LogicalResult SwitchingEstimationPass::extractAllCFDFCs(mlir::ModuleOp& topModul
           llvm::dbgs() << "[DEBUG] \t[Edge] Arch: (" << prevBBId << ", " << startBBId << ") Found in CFDFC: " << cfdfcIndex << "\n";
         }
       } else {
-        if (std::find(switchInfo.backEdges.begin(), switchInfo.backEdges.end(), std::make_pair(prevBBId, curBBId)) != switchInfo.backEdges.end()) {
+        if (std::find(switchInfo.staticinfo.backEdges.begin(), switchInfo.staticinfo.backEdges.end(), std::make_pair(prevBBId, curBBId)) != switchInfo.staticinfo.backEdges.end()) {
           tmpArchs.push_back(experimental::ArchBB(prevBBId, curBBId, 0, true));
 
           switchInfo.insertBE(prevBBId, curBBId, cfdfcIndex);
@@ -717,11 +764,11 @@ LogicalResult SwitchingEstimationPass::extractAllCFDFCs(mlir::ModuleOp& topModul
 
       // Since we don't care about the execution number of each CFDFC, it's set to 0
       buffer::CFDFC tmpMG(funcOp, archSet, 0);
-      switchInfo.cfdfcs.insert_or_assign(std::stoul(cfdfcIndex), tmpMG);
+      switchInfo.staticinfo.cfdfcs.insert_or_assign(std::stoul(cfdfcIndex), tmpMG);
 
       // Insert to the segment map as well
       std::vector<unsigned> newVector(tmpMG.cycle.begin(), tmpMG.cycle.end());
-      switchInfo.segToBBListMap[cfdfcIndex] = newVector;
+      switchInfo.staticinfo.segToBBs[cfdfcIndex] = newVector;
     }
   }
   
@@ -735,8 +782,8 @@ namespace switching {
 
 // Return a unique pointer for the switching estimation pass
 std::unique_ptr<dynamatic::DynamaticPass>
-createSwitchingEstimation(StringRef dataTrace, StringRef bbList, StringRef frequencies, StringRef timingModels) {
-  return std::make_unique<SwitchingEstimationPass>(dataTrace, bbList, frequencies, timingModels);
+createSwitchingEstimation(StringRef dataTrace,  StringRef frequencies, StringRef timingModels) {
+  return std::make_unique<SwitchingEstimationPass>(dataTrace, frequencies, timingModels);
 }
 
 } // namespace switching

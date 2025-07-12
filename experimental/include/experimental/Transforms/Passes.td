@@ -123,8 +123,6 @@ def SwitchingEstimation : DynamaticPass<"switching-estimation"> {
   let options = [
     Option<"dataTrace", "data-trace", "std::string", "",
            "Path to the scf data profiling results">,
-    Option<"bbList", "bb-list", "std::string", "",
-           "Path to the scf bb execution list profiling result">,
     Option<"frequencies", "frequencies", "std::string", "",
            "Path to the scf level frequency profiling result, a csv file generated during the buffer placement process">,
     Option<"timingModels", "timing-models", "std::string", "",

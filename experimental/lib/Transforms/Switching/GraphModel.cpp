@@ -7,34 +7,35 @@
 //===----------------------------------------------------------------------===//
 
 #include "experimental/Transforms/Switching/GraphModel.h"
-#include "experimental/Transforms/Switching/ExecModel.h"
+#include "experimental/Transforms/Switching/DFSKernel.h"
+
+#include "experimental/Transforms/Switching/SwitchingNodeModels/SwitchingNodeModels.h"
 #include "experimental/Transforms/Switching/NodeInfo.h"
+#include "experimental/Transforms/Switching/utils.h"
 
-#include "dynamatic/Support/CFG.h"
 #include "dynamatic/Support/Attribute.h"
-
-
+#include "dynamatic/Support/CFG.h"
 
 /// Function declaration
 static unsigned extractNodeLatency(mlir::Operation *op,
-  TimingDatabase timingDB);
+                                   TimingDatabase timingDB);
 
 void SwitchingInfo::insertBE(unsigned srcBB, unsigned dstBB,
-StringRef mgLabel) {
-std::pair<unsigned, unsigned> BBPair = {srcBB, dstBB};
+                             StringRef mgLabel) {
+  std::pair<unsigned, unsigned> BBPair = {srcBB, dstBB};
 
-// Update the seg label to Backedge pair list
-segToBackedgePairMap[mgLabel.str()] = BBPair;
+  // Update the seg label to Backedge pair list
+  segToBackedgePairMap[mgLabel.str()] = BBPair;
 
-// Check the existence of the backedge pair
-if (backEdgeToCFDFCMap.find(BBPair) != backEdgeToCFDFCMap.end()) {
-backEdgeToCFDFCMap[BBPair].push_back(
-static_cast<unsigned>(std::stoul(mgLabel.str())));
-} else {
-std::vector<unsigned> tmpVector{
-static_cast<unsigned>(std::stoul(mgLabel.str()))};
-backEdgeToCFDFCMap[std::make_pair(srcBB, dstBB)] = tmpVector;
-}
+  // Check the existence of the backedge pair
+  if (contains(staticinfo.backEdgeToCFDFC,BBPair)) {
+    staticinfo.backEdgeToCFDFC[BBPair].push_back(
+        static_cast<unsigned>(std::stoul(mgLabel.str())));
+  } else {
+    std::vector<unsigned> tmpVector{
+        static_cast<unsigned>(std::stoul(mgLabel.str()))};
+        staticinfo.backEdgeToCFDFC[std::make_pair(srcBB, dstBB)] = tmpVector;
+  }
 }
 // ===----------------------------------------------------------------------===//
 //
@@ -43,7 +44,7 @@ backEdgeToCFDFCMap[std::make_pair(srcBB, dstBB)] = tmpVector;
 //===----------------------------------------------------------------------===//
 // Initialize the whole adjacency graph for the selected segment
 AdjGraph::AdjGraph(const buffer::CFDFC &cfdfc, const TimingDatabase &timingDB,
-                   const unsigned &II, const unsigned &mgIndex) {
+                   const unsigned &II, const unsigned &mgIndex, bool debug) {
   cfdfcIndex = mgIndex;
   cfdfcII = II;
 
@@ -60,7 +61,8 @@ AdjGraph::AdjGraph(const buffer::CFDFC &cfdfc, const TimingDatabase &timingDB,
       std::string dstName =
           dstOp->getAttrOfType<StringAttr>("handshake.name").str();
 
-      // Get the BB of the dstOp, in which BB tjhe destination operation lives in
+      // Get the BB of the dstOp, in which BB tjhe destination operation lives
+      // in
       unsigned dstBB;
       if (std::optional<unsigned> optBB = getLogicBB(dstOp); !optBB.has_value())
         continue;
@@ -110,11 +112,12 @@ AdjGraph::AdjGraph(const buffer::CFDFC &cfdfc, const TimingDatabase &timingDB,
     }
 
     //! Testing
+    if(debug){
     llvm::dbgs() << "[DEBUG] \t=================================\n";
     llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n";
     llvm::dbgs() << "[DEBUG] \tNode Latency From DataBase: " << nodeLatency
                  << "\n";
-
+                }
     // Step 2.1: Construct the node storing structure
     auto newNode = createNodeFromOperation(selNode, nodeToPresMap[unitName],
                                            nodeToSucsMap[unitName], nodeLatency,
@@ -124,55 +127,60 @@ AdjGraph::AdjGraph(const buffer::CFDFC &cfdfc, const TimingDatabase &timingDB,
       continue;
 
     //! Testing
-    newNode->printDetail();
+    if(debug) newNode->printNodeDetails();
 
     // Store the new node
     nodes[unitName] = newNode;
   }
 
+  // 1. Collect all names referenced as pres/sucs but not in nodes map
+  std::set<std::string> neededNames;
+  // For the CFDFC constructor:
+  for (const auto &[name, preds] : nodeToPresMap)
+    neededNames.insert(name), neededNames.insert(preds.begin(), preds.end());
+  for (const auto &[name, sucs] : nodeToSucsMap)
+    neededNames.insert(name), neededNames.insert(sucs.begin(), sucs.end());
 
-
-// 1. Collect all names referenced as pres/sucs but not in nodes map
-std::set<std::string> neededNames;
-// For the CFDFC constructor:
-for (const auto& [name, preds] : nodeToPresMap)
-  neededNames.insert(name), neededNames.insert(preds.begin(), preds.end());
-for (const auto& [name, sucs] : nodeToSucsMap)
-  neededNames.insert(name), neededNames.insert(sucs.begin(), sucs.end());
-
-// For the FuncOp constructor:
-for (auto& [unitName, node] : nodes) {
-    for (const auto& p : node->pres) neededNames.insert(p);
-    for (const auto& s : node->sucs) neededNames.insert(s);
-}
-for (const auto& name : orderedNodeName) neededNames.insert(name);
-
-// 2. Create a dummy AdjNode for each missing node
-for (const auto& name : neededNames) {
-    if (nodes.find(name) == nodes.end()) {
-        // Use the generic base AdjNode kind, with empty pres/sucs, latency 0, etc.
-        nodes[name] = std::make_shared<AdjNode>(
-          nullptr,                       // <-- not name!
-          std::vector<std::string>{},
-          std::vector<std::string>{},
-          std::map<std::string, unsigned>{},
-          0, 100);
+  // For the FuncOp constructor:
+  for (auto &[unitName, node] : nodes) {
+    for (const auto &p : node->pres)
+      neededNames.insert(p);
+    for (const auto &s : node->sucs)
+      neededNames.insert(s);
+  }
+  for (const auto &name : orderedNodeName)
+    neededNames.insert(name);
+    
+    nodePtrs.reserve(orderedNodeName.size());
+    for (auto &name : orderedNodeName) {
+      // we know nodes[name] must exist
+      nodePtrs.push_back(nodes[name].get());
     }
-}
+    
+  // 2. Create a dummy AdjNode for each missing node
+  for (const auto &name : neededNames) {
+    if (!contains(nodes,name )) {
+      // Use the generic base AdjNode kind, with empty pres/sucs, latency 0,
+      // etc.
+      nodes[name] = std::make_shared<AdjNode>(
+          nullptr, // <-- not name!
+          std::vector<std::string>{}, std::vector<std::string>{},
+          std::map<std::string, unsigned>{}, 0, 100);
+    }
+  }
 }
 
 AdjGraph::AdjGraph(
     const TimingDatabase &timingDB, const unsigned &II,
     handshake::FuncOp funcOp,
-    std::vector<std::pair<std::string, std::string>> &allBackedges)
+    std::vector<std::pair<std::string, std::string>> &allBackedges, bool debug)
     : backedges(allBackedges) {
   cfdfcII = II;
   // Iterate over all the ops in the funcop
   for (Operation &op : funcOp.getOps()) {
     std::string unitName = op.getAttrOfType<StringAttr>("handshake.name").str();
     // For now, we exclude lsq and mem_controller
-    if (unitName.find("lsq") != std::string::npos ||
-        unitName.find("mem_controller") != std::string::npos)
+    if (contains(unitName, "lsq") || contains(unitName, "mem_controller"))
       continue;
 
     // Preserve the relative order of nodes
@@ -180,9 +188,10 @@ AdjGraph::AdjGraph(
 
     //! Testing
     //! Testing
+    if(debug){
     llvm::dbgs() << "[DEBUG] \t=================================\n";
     llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n";
-
+    }
     std::vector<std::string> pres;
     std::vector<std::string> sucs;
     // Construct the sucs
@@ -195,8 +204,7 @@ AdjGraph::AdjGraph(
           user->getAttrOfType<StringAttr>("handshake.name").str();
 
       // Excluding lsq and mem_controller
-      if (dstName.find("lsq") == std::string::npos &&
-          dstName.find("mem_controller") == std::string::npos)
+      if ((!contains(dstName,"lsq")) && (!contains(dstName,"mem_controller") )  )
         sucs.push_back(dstName);
     }
 
@@ -208,8 +216,7 @@ AdjGraph::AdjGraph(
         std::string preName = operand.getDefiningOp()
                                   ->getAttrOfType<StringAttr>("handshake.name")
                                   .str();
-        if (preName.find("lsq") == std::string::npos &&
-            preName.find("mem_controller") == std::string::npos)
+        if ((!contains(preName,"lsq")) && (!contains(preName,"mem_controller") ))
           pres.push_back(preName);
       }
     }
@@ -234,44 +241,60 @@ AdjGraph::AdjGraph(
       continue;
 
     //! Testing
-    newNode->printDetail();
+    if(debug) newNode->printNodeDetails();
 
     // Store the new node
     nodes[unitName] = newNode;
   }
 
-// 1. Collect all names referenced as pres/sucs but not in nodes map
-std::set<std::string> neededNames;
-for (auto& [unitName, node] : nodes) {
-    for (const auto& p : node->pres) neededNames.insert(p);
-    for (const auto& s : node->sucs) neededNames.insert(s);
-}
-for (const auto& name : orderedNodeName) neededNames.insert(name);
-// For the FuncOp constructor:
-for (auto& [unitName, node] : nodes) {
-    for (const auto& p : node->pres) neededNames.insert(p);
-    for (const auto& s : node->sucs) neededNames.insert(s);
-}
-for (const auto& name : orderedNodeName) neededNames.insert(name);
+  // 1. Collect all names referenced as pres/sucs but not in nodes map
+  std::set<std::string> neededNames;
+  for (auto &[unitName, node] : nodes) {
+    for (const auto &p : node->pres)
+      neededNames.insert(p);
+    for (const auto &s : node->sucs)
+      neededNames.insert(s);
+  }
+  for (const auto &name : orderedNodeName)
+    neededNames.insert(name);
+  // For the FuncOp constructor:
+  for (auto &[unitName, node] : nodes) {
+    for (const auto &p : node->pres)
+      neededNames.insert(p);
+    for (const auto &s : node->sucs)
+      neededNames.insert(s);
+  }
+  for (const auto &name : orderedNodeName)
+    neededNames.insert(name);
 
-// 2. Create a dummy AdjNode for each missing node
-for (const auto& name : neededNames) {
-    if (nodes.find(name) == nodes.end()) {
-        // Use the generic base AdjNode kind, with empty pres/sucs, latency 0, etc.
-        nodes[name] = std::make_shared<AdjNode>(
-          nullptr,                       // <-- not name!
-          std::vector<std::string>{},
-          std::vector<std::string>{},
-          std::map<std::string, unsigned>{},
-          0, 100);
+  // 2. Create a dummy AdjNode for each missing node
+  for (const auto &name : neededNames) {
+    if (!contains(nodes,name)) {
+      // Use the generic base AdjNode kind, with empty pres/sucs, latency 0,
+      // etc.
+      nodes[name] = std::make_shared<AdjNode>(
+          nullptr, // <-- not name!
+          std::vector<std::string>{}, std::vector<std::string>{},
+          std::map<std::string, unsigned>{}, 0, 100);
     }
-}
+  }
+
+
+  nodePtrs.reserve(orderedNodeName.size());
+  for (auto &name : orderedNodeName) {
+    // we know nodes[name] must exist
+    nodePtrs.push_back(nodes[name].get());
+  }
+  
+
+
+
 }
 
 void AdjGraph::insertToSurroundingList(
     std::map<std::string, std::vector<std::string>> &selMap, std::string &key,
     std::string &value) {
-  if (selMap.find(key) != selMap.end()) {
+  if (contains(selMap,key)) {
     selMap[key].push_back(value);
   } else {
     std::vector<std::string> tmpVec = {value};
@@ -315,6 +338,11 @@ std::shared_ptr<AdjNode> AdjGraph::createNodeFromOperation(
             op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
+      .Case<handshake::AddFOp>([&](auto selNode) {
+        auto node = std::make_shared<AddfNode>(
+            op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
+        return node;
+      })
       // handshake::SubIOp operator
       .Case<handshake::SubIOp>([&](auto selNode) {
         auto node = std::make_shared<SubiNode>(
@@ -327,9 +355,21 @@ std::shared_ptr<AdjNode> AdjGraph::createNodeFromOperation(
             op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
+      .Case<handshake::MulFOp>([&](auto selNode) {
+        auto node = std::make_shared<MulfNode>(
+            op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
+        return node;
+      })
       // handshake::CmpIOp operator
       .Case<handshake::CmpIOp>([&](handshake::CmpIOp selNode) {
         auto node = std::make_shared<CmpiNode>(
+            op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
+        return node;
+      })
+      // handshake::CmpFOp operator
+
+      .Case<handshake::CmpFOp>([&](handshake::CmpFOp selNode) {
+        auto node = std::make_shared<CmpfNode>(
             op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
@@ -358,32 +398,36 @@ std::shared_ptr<AdjNode> AdjGraph::createNodeFromOperation(
 
         // Get the occupancy value
         float_t occValue = -1;
-        auto key= std::to_string(cfdfcIndex);
+        auto key = std::to_string(cfdfcIndex);
         //  Try dialect-based attribute (preferred for Dynamatic)
-        if (auto occDictAttr = getDialectAttr<handshake::BufferOccupancyAttr>(op)) {
+        if (auto occDictAttr =
+                getDialectAttr<handshake::BufferOccupancyAttr>(op)) {
           auto occDict = occDictAttr.getBufferOccMap();
-          if (auto occAttr = occDict.get(key).dyn_cast_or_null<mlir::FloatAttr>()) {
-              occValue = occAttr.getValueAsDouble();
+          if (auto occAttr =
+                  occDict.get(key).dyn_cast_or_null<mlir::FloatAttr>()) {
+            occValue = occAttr.getValueAsDouble();
           }
         }
 
-        //Fallback: direct dictionary attribute (older IRs or special cases)
+        // Fallback: direct dictionary attribute (older IRs or special cases)
         if (occValue < 0 && op->hasAttr("handshake.bufOcc")) {
-          auto dict = op->getAttr("handshake.bufOcc").dyn_cast<mlir::DictionaryAttr>();
+          auto dict =
+              op->getAttr("handshake.bufOcc").dyn_cast<mlir::DictionaryAttr>();
           if (dict) {
-              // Try key first
-              auto occAttr = dict.get(key);
-              if (occAttr && occAttr.isa<mlir::FloatAttr>()) {
-                  occValue = occAttr.cast<mlir::FloatAttr>().getValueAsDouble();
-              } else {
-                  // Fallback: use the *first* FloatAttr in dict
-                  for (auto attr : dict) {
-                      if (auto floatAttr = attr.getValue().dyn_cast<mlir::FloatAttr>()) {
-                          occValue = floatAttr.getValueAsDouble();
-                          break;
-                      }
-                  }
+            // Try key first
+            auto occAttr = dict.get(key);
+            if (occAttr && occAttr.isa<mlir::FloatAttr>()) {
+              occValue = occAttr.cast<mlir::FloatAttr>().getValueAsDouble();
+            } else {
+              // Fallback: use the *first* FloatAttr in dict
+              for (auto attr : dict) {
+                if (auto floatAttr =
+                        attr.getValue().dyn_cast<mlir::FloatAttr>()) {
+                  occValue = floatAttr.getValueAsDouble();
+                  break;
+                }
               }
+            }
           }
         }
 
@@ -403,12 +447,18 @@ std::shared_ptr<AdjNode> AdjGraph::createNodeFromOperation(
             op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
+      .Case<handshake::SelectOp>([&](handshake::SelectOp selNode) {
+        auto node = std::make_shared<SelectNode>(
+            op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
+        return node;
+      })
       // handshake::OrIOp operator
       .Case<handshake::OrIOp>([&](handshake::OrIOp selNode) {
         auto node = std::make_shared<OriNode>(
             op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
       })
+
       // handshake::AndIOp operator
       .Case<handshake::AndIOp>([&](handshake::AndIOp selNode) {
         auto node = std::make_shared<AndiNode>(
@@ -540,9 +590,7 @@ unsigned AdjGraph::calPathLatency(const Path &selPath, bool useGlobalOrder) {
     latencySum += nodes[selNode]->nodeLatency;
 
     if (useGlobalOrder) {
-      if ((std::find(segStartNodes.begin(), segStartNodes.end(), selNode) ==
-           segStartNodes.end()) &&
-          latencySum < graphGlobalOrder[selNode].second) {
+      if ((!containsValue(segStartNodes,selNode) ) && latencySum < graphGlobalOrder[selNode].second) {
         latencySum = graphGlobalOrder[selNode].second;
       }
     }
@@ -556,12 +604,89 @@ unsigned AdjGraph::calPathLatency(const Path &selPath, bool useGlobalOrder) {
 
   return latencySum;
 }
+void AdjGraph::computeStartNodeShiftsold() {
+  // Find the largest value in the global order map
+  unsigned tmpMaxValue = 0;
+  for (const auto& [nodeName, delayPair]: graphGlobalOrder) {
+    if (delayPair.second > tmpMaxValue) {
+      tmpMaxValue = delayPair.second;
+      baseNode = delayPair.first;
+    }
+  }
 
+  // Update the cycle time of the MG
+  for (const auto& selBackedge: backedges) {
+    unsigned tmpLonPath = 0;
+    auto tmpPaths = findPaths(selBackedge.second, selBackedge.first, false, true);
+
+    for (auto selPath: tmpPaths) {
+      if (selPath.latency > tmpLonPath) {
+        tmpLonPath = selPath.latency;
+      }
+    }
+    cycleTimeMap[selBackedge.second] = tmpLonPath;
+  }
+
+  // Analyze the shifting between different start ndoes and the base node
+  for (const auto& selStart : segStartNodes) {
+    auto nodeVal = cycleTimeMap[selStart];
+    auto baseVal = cycleTimeMap[baseNode];
+
+    if (selStart == baseNode) {
+      startBaseNodeShiftMap[selStart] = baseVal % cfdfcII;
+      continue;
+    }
+
+    if ((nodeVal % cfdfcII) == (baseVal % cfdfcII)) {
+      startBaseNodeShiftMap[selStart] = 0;
+    } else {
+      if (nodeVal > baseVal) {
+        int tmpDiff = nodeVal - baseVal;
+        startBaseNodeShiftMap[selStart] = tmpDiff % cfdfcII;
+      } else {
+        int tmpDiff = baseVal - nodeVal;
+        startBaseNodeShiftMap[selStart] = -1 * (tmpDiff % cfdfcII);
+      }
+    }
+  }
+}
+void AdjGraph::obtainNodeGlobalOrderold() {
+  // Iterate over all nodes in the AdjGraph
+  for (const auto& name: orderedNodeName) {
+    if (std::find(segStartNodes.begin() , segStartNodes.end(), name) != segStartNodes.end()) {
+      continue;
+    } else {
+      unsigned maxLatency = 0;
+      std::string finalStartNode = "";
+
+      for (const auto& selStartNode: segStartNodes) {
+        //! Testing
+        // llvm::dbgs() << "[DEBUG] \t\tNode: " << selStartNode << "\n";
+
+        auto foundPaths = findPaths(selStartNode, name, true, false);
+
+        if (foundPaths.size() > 0) {
+          for (const auto& selPath: foundPaths) {
+            auto tmpPathLat = selPath.latency;
+            if (tmpPathLat >= maxLatency) {
+              maxLatency = tmpPathLat;
+              finalStartNode = selStartNode;
+            }
+          }
+        }
+      }
+      // Store the global order
+      graphGlobalOrder[name] = std::make_pair(finalStartNode, maxLatency);
+
+      //! Testing
+      // llvm::dbgs() << "[DEBUG] \tNode: " << name << "; Global Order: (" << finalStartNode << ", " << maxLatency << ");\n";
+    }
+  }
+}
 void AdjGraph::obtainNodeGlobalOrder() {
   // Iterate over all nodes in the AdjGraph
   for (const auto &name : orderedNodeName) {
-    if (std::find(segStartNodes.begin(), segStartNodes.end(), name) !=
-        segStartNodes.end()) {
+    if (containsValue(segStartNodes, name)) {
       continue;
     } else {
       unsigned maxLatency = 0;
@@ -571,11 +696,12 @@ void AdjGraph::obtainNodeGlobalOrder() {
         //! Testing
         // llvm::dbgs() << "[DEBUG] \t\tNode: " << selStartNode << "\n";
 
-        auto [tmpPathLat,_unused] = getMaxLatency(selStartNode, name, true, false);
-            if (tmpPathLat >= maxLatency) {
-              maxLatency = tmpPathLat;
-              finalStartNode = selStartNode;
-            }
+        auto [tmpPathLat, _unused] =
+            getMaxLatency(selStartNode, name, true, false);
+        if (tmpPathLat >= maxLatency) {
+          maxLatency = tmpPathLat;
+          finalStartNode = selStartNode;
+        }
       }
       // Store the global order
       graphGlobalOrder[name] = std::make_pair(finalStartNode, maxLatency);
@@ -614,7 +740,7 @@ std::vector<Path> AdjGraph::findPaths(const std::string &srcNode,
   while (!mainStack.empty()) {
     // avoid out of bounds access eg if adjstack empty
     if (adjStack.empty()) {
-      llvm::errs()<< "[ERROR] AdjStack is empty while MainStack is not!\n";
+      llvm::errs() << "[ERROR] AdjStack is empty while MainStack is not!\n";
       break; // or return foundPaths;
     }
     std::vector<std::string> curAdjList = adjStack.back();
@@ -626,21 +752,20 @@ std::vector<Path> AdjGraph::findPaths(const std::string &srcNode,
 
       mainStack.push_back(curNode);
       adjStack.push_back(curAdjList);
-      if (nodes.find(curNode) == nodes.end()) {
-        llvm::errs()<< "[ERROR] Node " << curNode << " not in nodes map!\n";
+      if (!contains(nodes,curNode)) {
+        llvm::errs() << "[ERROR] Node " << curNode << " not in nodes map!\n";
         mainStack.pop_back();
         continue;
-    }
+      }
       // Insert new adj_list
       std::vector<std::string> tmpAdjList;
       std::vector<std::string> newAdjList = nodes[curNode]->sucs;
 
       // If node not in the mainStack and the excluding list
       for (const auto &n : newAdjList) {
-        bool inStack = (std::find(mainStack.begin(), mainStack.end(), n) !=
-                        mainStack.end());
-        bool isExcluded = (excludingSet.find(n) != excludingSet.end());
-        if (!inStack && !isExcluded) {
+        bool inStack = containsValue(mainStack, n);
+        bool isExcluded = contains(excludingSet,n);
+        if (!inStack && !isExcluded) {//if not in stack and  not excluded and 
           tmpAdjList.push_back(n);
         }
       }
@@ -669,8 +794,7 @@ std::vector<Path> AdjGraph::findPaths(const std::string &srcNode,
 
       // Retrieve all the backedges in the path
       for (auto &edge : edgeList) {
-        if (std::find(backedges.begin(), backedges.end(), edge) !=
-            backedges.end())
+        if (containsValue(backedges, edge))
           selPath.add_backedge(edge);
       }
 
@@ -700,7 +824,7 @@ AdjGraph::graphBacktrack(std::string srcNode,
   // llvm::dbgs() << "\n";
 
   // If srcNode is in baseNodes => return it
-  if (baseNodeSet.find(srcNode) != baseNodeSet.end()) {
+  if (contains(baseNodeSet,srcNode)) {
     return srcNode;
   }
 
@@ -710,9 +834,11 @@ AdjGraph::graphBacktrack(std::string srcNode,
 
   // Initialization
   mainStack.push_back(srcNode);
-  if (nodes[srcNode]->getKind() ==AdjNode::NodeKind::CBrNodeKind ) {
+  if (contains(srcNode,"cond_br") ) {//nodes[srcNode]->getKind() == AdjNode::NodeKind::CBrNodeKind
     if (auto *cbrNode = dyn_cast<CBrNode>(nodes[srcNode].get())) {
       std::string tmpDataPreNode = cbrNode->dataPreNodeName;
+      if(tmpDataPreNode.empty())
+        tmpDataPreNode = cbrNode->condPreNodeName;
       adjStack.push_back({tmpDataPreNode});
     }
   } else {
@@ -735,12 +861,12 @@ AdjGraph::graphBacktrack(std::string srcNode,
       curAdjList.pop_back();
       adjStack.push_back(curAdjList);
 
-      if (baseNodeSet.find(curNode) != baseNodeSet.end()) {
+      if (contains(baseNodeSet,curNode)) {
         return curNode;
       } else {
         mainStack.push_back(curNode);
 
-        if (curNode.find("cond_br") != std::string::npos) {
+        if (contains(curNode, "cond_br")) {
           if (auto *cbrNode = dyn_cast<CBrNode>(nodes[curNode].get())) {
             std::string tmpDataPreNode = cbrNode->dataPreNodeName;
             if (std::find(mainStack.begin(), mainStack.end(), tmpDataPreNode) ==
@@ -753,8 +879,7 @@ AdjGraph::graphBacktrack(std::string srcNode,
           std::vector<std::string> newAdjList = nodes[curNode]->pres;
 
           for (const auto &n : newAdjList) {
-            bool inStack = (std::find(mainStack.begin(), mainStack.end(), n) !=
-                            mainStack.end());
+            bool inStack{ containsValue(mainStack, n)};
             if (!inStack)
               tmpAdjList.push_back(n);
           }
@@ -776,7 +901,7 @@ AdjGraph::graphBacktrack(std::string srcNode,
   return "";
 }
 
-void AdjGraph::analyzeStartNodeShifting() {
+void AdjGraph::computeStartNodeShifts() {
   // Find the largest value in the global order map
   unsigned tmpMaxValue = 0;
   for (const auto &[nodeName, delayPair] : graphGlobalOrder) {
@@ -788,7 +913,7 @@ void AdjGraph::analyzeStartNodeShifting() {
 
   // Update the cycle time of the MG
   for (const auto &selBackedge : backedges) {
-    auto [tmpPaths,_pathname_unused] =
+    auto [tmpPaths, _pathname_unused] =
         getMaxLatency(selBackedge.second, selBackedge.first, false, true);
     cycleTimeMap[selBackedge.second] = tmpPaths;
   }
@@ -817,74 +942,69 @@ void AdjGraph::analyzeStartNodeShifting() {
   }
 }
 
-void AdjGraph::buildMuxSrcMap() {
-  // Traverse all nodes in the dataflow graph
+void AdjGraph::builSrcMaps() {
   for (const auto &selNode : orderedNodeName) {
-    // If this is a mux node
-    if ( nodes[selNode]->getKind() ==AdjNode::NodeKind::MuxNodeKind  ) {
-      //! Testing
-      llvm::dbgs() << "[DEBUG] \t\tMux Node Name: " << selNode << "\n";
-
-      // Ger the mux node storing structure
+    switch (nodes[selNode]->getKind()) {
+    case AdjNode::NodeKind::MuxNodeKind: {
       auto *selMuxNode = dyn_cast<MuxNode>(nodes[selNode].get());
-      //
-      std::map<std::string, std::string> tmpMuxPortMap;
-      std::string conPreNodeName = selMuxNode->conPreNodeName;
+      std::string ctrlPreNodeName = selMuxNode->conPreNodeName;
       std::string dataPre0NodeName = "";
       std::string dataPre1NodeName = "";
-
       for (const auto &[nodeName, portIdx] : selMuxNode->preNameToPortIdxMap) {
-        if (portIdx == 1) {
+        if (portIdx == 1)
           dataPre0NodeName = nodeName;
-        } else if (portIdx == 2) {
+        else if (portIdx == 2)
           dataPre1NodeName = nodeName;
-        }
       }
 
-      // Get the source node for all three ports
-      std::string conSrcNodeName =
-          graphBacktrack(conPreNodeName, allDataBaseNode);
-      std::string dataPre0SrcName =
-          graphBacktrack(dataPre0NodeName, allDataBaseNode);
-      std::string dataPre1SrcName =
-          graphBacktrack(dataPre1NodeName, allDataBaseNode);
 
-      // Update the control_merge to mux map
-      if (cmToMuxMap.find(conSrcNodeName) != cmToMuxMap.end()) {
-        cmToMuxMap[conSrcNodeName].push_back(selNode);
+      auto fail = [&](std::string const &what){
+        if (what.empty())
+            llvm::errs() << "[ERROR] graphBacktrack returned empty for "<<selNode << '\n';
+    };
+
+
+
+      // Get the source node for all three ports
+      std::string   ctrlSrc = graphBacktrack(ctrlPreNodeName, allDataBaseNode);
+      std::string  dataSrc0 = graphBacktrack(dataPre0NodeName.empty()? ctrlPreNodeName : dataPre0NodeName, allDataBaseNode);
+
+       std::string dataSrc1 = graphBacktrack(dataPre1NodeName, allDataBaseNode);
+       fail(ctrlSrc);
+       fail(dataSrc0);
+       fail(dataSrc1);
+       llvm::dbgs()<<"[DEBUG]\t build src maps for node "<< selNode << "\n\t\tctrlsrc: "<<ctrlSrc << "\n\t\tdataSrc0: "<<dataSrc0<<"\n\t\tdataSrc1: "<<dataSrc1<<" \n";
+       // Update the control_merge to mux map
+      if (contains(cmToMuxMap,ctrlSrc)) {
+        cmToMuxMap[ctrlSrc].push_back(selNode);
       } else {
-        cmToMuxMap[conSrcNodeName] = {selNode};
+        cmToMuxMap[ctrlSrc] = {selNode};
       }
 
       // Build mux src map
-      tmpMuxPortMap["control"] = conSrcNodeName;
-      tmpMuxPortMap["0"] = dataPre0SrcName;
-      tmpMuxPortMap["1"] = dataPre1SrcName;
-
+      std::map<std::string, std::string> tmpMuxPortMap{// structured bingings
+                                                       {"control", ctrlSrc},
+                                                       {"0", dataSrc0},
+                                                       {"1", dataSrc1}};
       // Update the global map
       muxToSrcNodeMap[selNode] = tmpMuxPortMap;
 
       // Update the src to mux map
-      if (srcNodeToMuxMap.find(dataPre0SrcName) != srcNodeToMuxMap.end()) {
-        srcNodeToMuxMap[dataPre0SrcName].push_back(std::make_pair(selNode, 0));
+      if (contains(srcNodeToMuxMap,dataSrc0)){
+        srcNodeToMuxMap[dataSrc0].push_back(std::make_pair(selNode, 0));
       } else {
-        srcNodeToMuxMap[dataPre0SrcName] = {std::make_pair(selNode, 0)};
+        srcNodeToMuxMap[dataSrc0] = {std::make_pair(selNode, 0)};
       }
 
-      if (srcNodeToMuxMap.find(dataPre1SrcName) != srcNodeToMuxMap.end()) {
-        srcNodeToMuxMap[dataPre1SrcName].push_back(std::make_pair(selNode, 1));
+      if (contains(srcNodeToMuxMap,dataSrc1)) {
+        srcNodeToMuxMap[dataSrc1].push_back(std::make_pair(selNode, 1));
       } else {
-        srcNodeToMuxMap[dataPre1SrcName] = {std::make_pair(selNode, 1)};
+        srcNodeToMuxMap[dataSrc1] = {std::make_pair(selNode, 1)};
       }
+
+      break;
     }
-  }
-}
-
-void AdjGraph::buildCondandStoreSrcMap() {
-  // Traverse all nodes in the dataflow graph
-  for (const auto &selNode : orderedNodeName) {
-    // If this is a cond_br node
-    if (selNode.find("cond_br") != std::string::npos) {
+    case AdjNode::NodeKind::CBrNodeKind: {
       // Ger the cond_br node storing structure
       auto *selCBrNode = dyn_cast<CBrNode>(nodes[selNode].get());
 
@@ -894,11 +1014,11 @@ void AdjGraph::buildCondandStoreSrcMap() {
 
       // Updated the connected buffers as well
       for (const auto &selSucNode : selCBrNode->sucs) {
-        if (nodes[selSucNode]->getKind() ==AdjNode::NodeKind::BufferNodeKind ) {
+        if (nodes[selSucNode]->getKind() == AdjNode::NodeKind::BufferNodeKind) {
           // Get the port index
           unsigned selPortIdx =
               selCBrNode->outChannelNameToIndexMap[selSucNode];
-          if (condBrToBufferMap.find(selNode) != condBrToBufferMap.end()) {
+          if (contains (condBrToBufferMap,selNode)) {
             condBrToBufferMap[selNode].push_back(
                 std::make_pair(selSucNode, selPortIdx));
           } else {
@@ -907,26 +1027,22 @@ void AdjGraph::buildCondandStoreSrcMap() {
           }
         }
       }
-    } else if (nodes[selNode]->getKind() ==AdjNode::NodeKind::DStoreNodeKind ) {
-      auto *selStoreNode = dyn_cast<DStoreNode>(nodes[selNode].get());
 
+      break;
+    }
+    case AdjNode::NodeKind::DStoreNodeKind: {
+      auto *selStoreNode = dyn_cast<DStoreNode>(nodes[selNode].get());
       std::string addrPreNode = selStoreNode->addressInNode;
       std::string dataPreNode = selStoreNode->dataInNode;
-
       selStoreNode->addressInSrcNode =
           graphBacktrack(addrPreNode, allDataBaseNode);
       selStoreNode->dataInSrcNode =
           graphBacktrack(dataPreNode, allDataBaseNode);
-
-      //! Testing
-      // llvm::dbgs() << "[DEBUG] \tStore Node: " << selNode << "\n";
-      // llvm::dbgs() << "[DEBUG] \t\tData Src Node: " <<
-      // selStoreNode->dataInSrcNode << "\n"; llvm::dbgs() << "[DEBUG] \t\tAddr
-      // Src Node: " << selStoreNode->addressInSrcNode << "\n";
+      break;
+    }
     }
   }
 }
-
 
 /// Extracts the latency for each operation
 /// This is done in 3 ways:
@@ -936,27 +1052,28 @@ void AdjGraph::buildCondandStoreSrcMap() {
 /// timing attribute
 /// 3. If the operation is neither, then its latency is set to 0
 static unsigned extractNodeLatency(mlir::Operation *op,
-  TimingDatabase timingDB) {
-double latency = 0;
+                                   TimingDatabase timingDB) {
+  double latency = 0;
 
-if (!failed(timingDB.getLatency(op, SignalType::DATA, latency))) {
-return latency;
+  if (!failed(timingDB.getLatency(op, SignalType::DATA, latency))) {
+    return latency;
+  }
+
+  if (isa<handshake::BufferOp>(op)) {
+    auto params = op->getAttrOfType<DictionaryAttr>(RTL_PARAMETERS_ATTR_NAME);
+    if (!params)
+      return 0;
+
+    auto optTiming = params.getNamed(handshake::BufferOp::TIMING_ATTR_NAME);
+    if (!optTiming)
+      return 0;
+
+    if (auto timing = dyn_cast<handshake::TimingAttr>(optTiming->getValue())) {
+      handshake::TimingInfo info = timing.getInfo();
+      return info.getLatency(SignalType::DATA).value_or(0);
+    }
+  }
+
+  return 0;
 }
 
-if (isa<handshake::BufferOp>(op)) {
-auto params = op->getAttrOfType<DictionaryAttr>(RTL_PARAMETERS_ATTR_NAME);
-if (!params)
-return 0;
-
-auto optTiming = params.getNamed(handshake::BufferOp::TIMING_ATTR_NAME);
-if (!optTiming)
-return 0;
-
-if (auto timing = dyn_cast<handshake::TimingAttr>(optTiming->getValue())) {
-handshake::TimingInfo info = timing.getInfo();
-return info.getLatency(SignalType::DATA).value_or(0);
-}
-}
-
-return 0;
-}

@@ -26,7 +26,7 @@ namespace switching {
 
 std::unique_ptr<dynamatic::DynamaticPass> 
 createSwitchingEstimation(StringRef dataTrace = "",
-                          StringRef bbList = "",
+
                           StringRef frequencies = "",
                           StringRef timingModels = "");
 

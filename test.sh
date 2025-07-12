@@ -88,7 +88,19 @@ echo_info "Data Profiling Finished"
 
 # Run the switching estimation pass
 echo_section "[Step 2] Running Switching Estiamtion Pass for ${KERNEL_NAME}"
-"$DYNAMATIC_OPT_BIN" "$F_HANDSHAKE_EXPORT" \
-  --switching-estimation="data-trace=$TRACE_LOG bb-list=$BB_LOG frequencies=$FREQUENCIES timing-models=$DYNAMATIC_DIR/data/components.json" \
+export LSAN_OPTIONS=verbosity=1:log_threads=1
+export UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
+/usr/bin/time -v "$DYNAMATIC_OPT_BIN" "$F_HANDSHAKE_EXPORT" \
+  --switching-estimation="data-trace=$TRACE_LOG  frequencies=$FREQUENCIES timing-models=$DYNAMATIC_DIR/data/components.json" \
  2>&1 | tee "$F_HANDSHAKE_SWITCH"
 
+
+# valgrind \
+#   --tool=callgrind \
+#   --callgrind-out-file=callgrind.out.${KERNEL_NAME} \
+#   --dump-instr=yes \
+#   --collect-jumps=yes \
+#   --instr-atstart=yes \
+#   "$DYNAMATIC_OPT_BIN" "$F_HANDSHAKE_EXPORT" \
+#     --switching-estimation="data-trace=$TRACE_LOG bb-list=$BB_LOG frequencies=$FREQUENCIES timing-models=$DYNAMATIC_DIR/data/components.json" \
+#   2>&1 | tee "$F_HANDSHAKE_SWITCH"

@@ -15,6 +15,7 @@
 
 #include <string>
 #include <unordered_set>
+#include "llvm/ADT/StringMap.h"
 
 #include "dynamatic/Support/LLVM.h"
 #include "dynamatic/Support/TimingModels.h"
@@ -37,13 +38,12 @@ class AdjGraph {
 public:
   AdjGraph();
   AdjGraph(const buffer::CFDFC& cfdfc, const TimingDatabase& timingDB, 
-            const unsigned &II, const unsigned &mgIndex);
+            const unsigned &II, const unsigned &mgIndex,bool debug);
 
   
   // Create an AdjGraph from the funcop
-  AdjGraph(const TimingDatabase& timingDB, const unsigned &II, 
-            handshake::FuncOp funcOp,
-            std::vector<std::pair<std::string, std::string>> &allBackedges);
+  AdjGraph(const TimingDatabase& timingDB, const unsigned &II, handshake::FuncOp funcOp,
+            std::vector<std::pair<std::string, std::string>> &allBackedge,bool debug);
 
   // This function insert a new element to the given map
   void insertToSurroundingList(std::map<std::string, std::vector<std::string>>& selMap, 
@@ -74,14 +74,18 @@ public:
   // The following function calculates the global order of the units and cycle times in the AdjGraph
   // the results will be stored in graphGlobalOrder
   void obtainNodeGlobalOrder();
+  void obtainNodeGlobalOrderold();
+
   // During handshake and path latency analysis, we use those start nodes as the base points for analysis
   // However, they may not be active at the same time, so we need to take the shifting into account.
-  void analyzeStartNodeShifting();
+  void computeStartNodeShifts();
+  void computeStartNodeShiftsold();
+
   // This function constructs the src map for all mux nodes in the dfg
   // While building the src dict, this function also update the mapping from src node to the corresponding mux node with the following format
-  void buildMuxSrcMap();
   // This funciton finds the cond_src node for all cond_br nodes and data/address src for store nodes in the dfg
-  void buildCondandStoreSrcMap();
+  //This function constructs the source map for all mux ,cond_br and Dstore nodes in the dfg
+  void builSrcMaps();
 
   //===----------------------------------------------------------------------===//
   // Data Channel Switching Calculation Variables
@@ -92,18 +96,18 @@ public:
   std::unordered_set<std::string> allDataBaseNode;
   // mux node to data source map
   // Format: {"mux_node_name" : {"control" : control_src_node_name, 0 : src_node_name_0, 1 : src_node_name_1}}
-  std::map<std::string, std::map<std::string, std::string>> muxToSrcNodeMap;
+  llvm::StringMap< std::map<std::string, std::string>> muxToSrcNodeMap;
   // Source node to vector of mux and port pair map
   // Format: {"src_node_name" : [(mux_node_name, corresponding_input_port_id)]}.
-  std::map<std::string, std::vector<std::pair<std::string, unsigned>>> srcNodeToMuxMap;
+  llvm::StringMap<  std::vector<std::pair<std::string, unsigned>>> srcNodeToMuxMap;
   // Control_merge to mux node map
   // The control port of the mux node is always connecting to a control_merge node
-  std::map<std::string, std::vector<std::string>> cmToMuxMap;
+  llvm::StringMap<  std::vector<std::string>> cmToMuxMap;
   // CondBr to control source node map
-  std::map<std::string, std::string> condBrToConSrcMap;
+  llvm::StringMap<  std::string> condBrToConSrcMap;
   // Map from cond_br node to the directly connected buffer nodes and the corresponding port idx, if exists
   // Format: {"cond_br_node" : [(buffer_name, port_idx), ], }
-  std::map<std::string, std::vector<std::pair<std::string, unsigned>>> condBrToBufferMap;
+  llvm::StringMap<  std::vector<std::pair<std::string, unsigned>>> condBrToBufferMap;
 
   // 
   //  Internal Storing Variables
@@ -113,19 +117,21 @@ public:
   unsigned cfdfcII = 0;                                       // The II of the cfdfc
   std::string baseNode;                                       // The node that serves as the base point for path calculation
   std::vector<std::string> segStartNodes;                     // Vector storing all starting nodes in the segment
-  std::map<std::string, std::shared_ptr<AdjNode>> nodes;      // Map from unit name to the corresponding node storing structure
+  llvm::StringMap<  std::shared_ptr<AdjNode>> nodes;      // Map from unit name to the corresponding node storing structure
   std::vector<std::pair<std::string, std::string>> backedges; // Vector storing all backedges in the Adjacency graph;
   // Map storing the global order (actual start time) of different nodes in the graph
   // the format is like : {node_name : (start_node, delay)}
-  std::map<std::string, std::pair<std::string, unsigned>> graphGlobalOrder;
+  llvm::StringMap< std::pair<std::string, unsigned>> graphGlobalOrder;
   // Map storing the maximum cycle time from different start node in the graph
   // This will be used to analyze the shifting between start node
-  std::map<std::string, unsigned> cycleTimeMap;
+  llvm::StringMap<  unsigned> cycleTimeMap;
   // Map storing the shifting between different different start node and the base node
-  std::map<std::string, int> startBaseNodeShiftMap;
+  llvm::StringMap<  int> startBaseNodeShiftMap;
   // List storing the name of nodes in the graph in program order
   std::vector<std::string> orderedNodeName;
+  std::vector<AdjNode*>   nodePtrs;
 
+  // std::vector<BufferNode*> bufferPtrs;
 
 
 
@@ -171,12 +177,13 @@ public:
     auto it=maxLatencycache.find(key);
     //Case 1 : cache hit
       if(it!=maxLatencycache.end()){
-        // llvm::dbgs() <<"step4 found\n";
+        // llvm::dbgs() <<"cache hit \n";
         return    it->second;// return cached latency and node name
       }
 
           // Case 2: cache miss
           // llvm::dbgs() << "step4 longest path data channel "<< srcNode<<" "<< dstNode <<"\n";
+          // llvm::dbgs() << "cache miss for data channel "<< srcNode<<" "<< dstNode <<"\n";
 
       std::vector<Path> tmppaths=  findPaths(srcNode,dstNode,noStartingNode,useGlobalOrder);
       unsigned maxLatency{0};
@@ -195,3 +202,44 @@ public:
 
 
 #endif
+
+
+
+// getmaclaten cy withmultiplejpath
+// ongestPathResult2 getMaxLatency(const std::string &srcNode,
+//   const std::string &dstNode,
+//   bool noStartingNode,
+//   bool useGlobalOrder) {
+
+//   Pathkey key(srcNode,dstNode,noStartingNode,useGlobalOrder);
+
+//   auto it=maxLatencycache.find(key);
+//   //Case 1 : cache hit
+//     if(it!=maxLatencycache.end()){
+//       llvm::dbgs() <<"cache hit \n";
+//       return    it->second;// return cached latency and node name
+//     }
+
+//         // Case 2: cache miss
+//         llvm::dbgs() << "cache miss for data channel "<< srcNode<<" "<< dstNode <<"\n";
+
+//     std::vector<Path> paths=  findPaths(srcNode,dstNode,noStartingNode,useGlobalOrder);
+//     // unsigned maxLatency{0};
+//     // std::string bestSrcNode{""};
+//     LongestPathResult2 best;
+//     best.latency=0;
+//     for (const auto &p:paths){
+//       if (p.latency >= best.latency) {
+//         best.latency = p.latency;
+//         best.StartNode = (noStartingNode) ? p.nodeList.front() : srcNode;
+//         // best.path=p.nodeList;
+//         best.allPaths.clear();
+//         best.allPaths.push_back(p.nodeList);
+//     }  else if (p.latency == best.latency) {
+//       best.allPaths.push_back(p.nodeList);
+//     }
+//   }
+//   maxLatencycache.emplace(key,best);
+//   return  best;
+
+// }  

@@ -16,7 +16,7 @@
 #include "experimental/Transforms/Switching/SwitchingSupport.h"
 #include "experimental/Transforms/Switching/DataChannelCal.h"
 #include "experimental/Transforms/Switching/ProfilingAnalyzer.h"
-#include "experimental/Transforms/Switching/ExecModel.h"
+#include "experimental/Transforms/Switching/SwitchingNodeModels/SwitchingNodeModels.h"
 #include "dynamatic/Transforms/BufferPlacement/CFDFC.h"
 #include "mlir/IR/Attributes.h"
 #include "dynamatic/Dialect/Handshake/HandshakeAttributes.h"
@@ -40,17 +40,11 @@ using namespace mlir;
 using namespace dynamatic;
 using namespace dynamatic::handshake;
 
-// This function calculates the valid start time of different buffers in the specified cfdfc
-// With this information, we can determine the Active time range of the ready and valid signal
-// of different buffers.
-// All info will be stored in the corresponding structure in the corresponding buffer node
-void extractBufferInfo(SwitchingInfo &switchInfo, std::string selMG, bool debug);
-
 // This function iterativly counts the number of handshake switches of all nodes in the selected cfdfc
-void mgHandshakeSwitchingCounting(SwitchingInfo &switchInfo, std::string selMG, bool debug);
+void mgHandshakeSwitchingCounting(SwitchingInfo &switchInfo, HandshakeInfo& handshakeEst, std::string selMG, bool debug);
 
 // This function updates the status of the selected node's handshake signals
-void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::string &selMG, unsigned selMGII, bool debug);
+void nodeHandshakeUpdate(SwitchingInfo &switchInfo, HandshakeInfo& handshakeEst ,std::string &selNode, std::string &selMG, unsigned selMGII, bool debug);
 
 // This function update information for all Join type node in the pending list to faciliatate Handshake signal updates
 // *Assumption: we assume at this stage all Join type node's valid signal is resolved
@@ -61,7 +55,7 @@ std::vector<std::string> breakHandshakeUpdateDeadlock(SwitchingInfo &switchInfo,
 // Functions for DFS in the graph, should be merged with the other functions if possible
 //
 //===---------------------------------------------------------------------------------===//
-std::vector<std::string> findInfluencedLoadNodes(SwitchingInfo &switchInfo, std::string selMG, std::vector<std::string> bufferList);
+std::vector<std::string> getLoadsInfluencedByBuffers(SwitchingInfo &switchInfo, std::string selMG, std::vector<std::string> bufferList);
 
 // This function will return the steady state starting time for the selected node in the specified mg
 int mgGetNodeStartingPoint(SwitchingInfo &switchInfo, std::string &selNode, std::string &selMG);

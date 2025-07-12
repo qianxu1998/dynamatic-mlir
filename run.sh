@@ -10,7 +10,7 @@ HDL="vhdl"
 
 # f_benchmark_src="mvt_float/mvt_float.c"
 # f_benchmark_src="sharing/share_test_2/share_test_2.c"
-# f_benchmark_src="fir/fir.c"
+f_benchmark_src="fir/fir.c"
 # f_benchmark_src="atax/atax.c"
 # f_benchmark_src="dct/dct.c"
 # f_benchmark_src="cnn/cnn.c"
@@ -30,10 +30,8 @@ HDL="vhdl"
 # f_benchmark_src="atax/atax.c"
 # f_benchmark_src="atax_float/atax_float.c"
 # f_benchmark_src="syr2k_float/syr2k_float.c"
-# f_benchmark_src="bicg_float/bicg_float.c"
 # f_benchmark_src="gesummv_float/gesummv_float.c"
 # f_benchmark_src="gemm_float/gemm_float.c"
-f_benchmark_src="gemm/gemm.c"
 # f_benchmark_src="memory/test_memory_11/test_memory_11.c"
 # f_benchmark_src="memory/test_memory_8/test_memory_8.c"
 # f_benchmark_src="symm_float/symm_float.c"
@@ -56,18 +54,24 @@ f_benchmark_src="gemm/gemm.c"
 # f_benchmark_src="while_loop_2/while_loop_2.c"
 # f_benchmark_src="simple_example_1/simple_example_1.c"
 # f_benchmark_src="lu/lu.c"
-# f_benchmark_src="matvec/matvec.c"
 # f_benchmark_src="histogram/histogram.c"
+
 # f_benchmark_src="gemver_float/gemver_float.c"
 # f_benchmark_src="gemver/gemver.c"
+# f_benchmark_src="gcd/gcd.c"
+# f_benchmark_src="bicg_float/bicg_float.c"
+# f_benchmark_src="bicg/bicg.c"
+# f_benchmark_src="binary_search/binary_search.c"
+
+# f_benchmark_src="matvec/matvec.c"
 # f_benchmark_src="polyn_mult/polyn_mult.c"
 # f_benchmark_src="gsum/gsum.c"
 # f_benchmark_src="admm/admm.c"
 # f_benchmark_src="sobel/sobel.c"
-# f_benchmark_src="gcd/gcd.c"
 # f_benchmark_src="matrix_power/matrix_power.c"
 # f_benchmark_src="video_filter/video_filter.c"
 # f_benchmark_src="vector_rescale/vector_rescale.c"
+# f_benchmark_src="external_integration/external_integration.c" IGNOOOOOORE since profielr doesnt work in main too
 
 s_source_file="$dynamatic_path/integration-test/$f_benchmark_src"
 [ -f "$s_source_file" ] || \
@@ -77,9 +81,8 @@ echo "set-dynamatic-path .; \
   set-src ./integration-test/$f_benchmark_src; \
   set-clock-period 8; \
   compile $SHARING $BUFFER_ALGORITHM; \
-  # write-hdl --hdl $HDL; \
-  # simulate; \
-  # visualize; \
+  write-hdl --hdl $HDL; \
+  simulate; \
   exit" \
   | bin/dynamatic --exit-on-failure --debug
 
