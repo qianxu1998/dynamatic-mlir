@@ -311,6 +311,20 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, HandshakeInfo& hs, std::stri
     llvm::dbgs() << "\tSteady State Start Cycle: " << tmpNodeSSStart << "\n";
   }
 
+
+  // Early exit for  nodes withou successors): setting predecessors as always-ready (as in python)
+  auto nodePtr = selNodeStoringDict[selNode];
+  if (nodePtr->sucs.empty()) {
+    if (debug)
+      llvm::dbgs() << "[DEBUG] Leaf node `" << selNode << "`: no successors, marking all ready early.\n";
+    for (const auto &pre : nodePtr->pres) {
+      setReady(nodePtr.get(), pre, 0);
+      setRSet(nodePtr.get(), pre, IISet(selMGII, true));
+
+    }
+    return;
+  }
+
   // Calculate handshake switching for different types of node
   auto node = selNodeStoringDict[selNode];
 
