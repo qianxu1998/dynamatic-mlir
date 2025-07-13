@@ -193,11 +193,15 @@ llvm::dbgs() << "[DEBUG] [STEP 4] Determining the Global start time and shifting
   for (auto& [mgIndex, selGraph]: switchInfo.staticinfo.segToGraph) {
     // Step 4.1: Determining the latest start time for each node cfdfc
     selGraph->obtainNodeGlobalOrder();
+    // selGraph->obtainNodeGlobalOrderold();
     
     //! Testing
     // llvm::dbgs() << "[DEBUG] \t\t Global order calculated"<<(++a)<<"\n"; 
     // Step 4.2: Check the shifting between different start node within a graph
     selGraph->computeStartNodeShifts();
+    // selGraph->computeStartNodeShiftsold();
+
+    
   }
 
   // Step 5: Calculate switches in data channel 
@@ -552,11 +556,7 @@ void SwitchingEstimationPass::computeTotalHandshakeSwitching(mlir::ModuleOp& top
         AdjNode *graphNode = switchInfo.staticinfo.dataflowGraph->nodes[nodeName].get();
         AdjNode *mgNode = switchInfo.staticinfo.segToGraph[segLabel]->nodes[nodeName].get();
         
-        // Debug: Print what values we're accessing
-        llvm::dbgs() << "[DEBUG] \t\tNode " << nodeName << " in MG " << segLabel 
-                     << ": mgNode->validtot=" << mgNode->totalValidSwitching
-                     << " mgNode->readytot=" << mgNode->totalReadySwitching
-                     << " numExec=" << numExec << "\n";
+
         
         // Get the number of switching
         unsigned numValidSwitches = numExec * mgNode->totalValidSwitching;

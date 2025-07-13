@@ -584,31 +584,11 @@ void buildSegmentSuccNodesList(SwitchingInfo &switchInfo,
         std::vector<std::string> dataExcludVec = {conSucNode};
         tmpMGInfo.control = segCtrlMergeSuccSearch(switchInfo, selBaseNode,
                                                   controlExcludVec, label);
-
-
-        // for (int i=0; i<controlori.size();++i){
-
-        //   llvm::dbgs()<<" segCtrlMergeSuccSearc original " << controlori[i] << " \n"  ;
-
-        // }
-        // for (int i=0;  i<tmpMGInfo.control.size() ;++i){
-        //   llvm::dbgs()<<" segCtrlMergeSuccSearch new" <<tmpMGInfo.control[i] << " \n"  ;
-        // }
-        
         tmpMGInfo.data = segCtrlMergeSuccSearch(switchInfo, selBaseNode,
           dataExcludVec, label);
-          // auto dataori = segCtrlMergeSuccSearch(switchInfo, selBaseNode,
-          //   dataExcludVec, label);
-          // llvm::dbgs()<<" segCtrlMergeSuccSearch new size " <<  tmpMGInfo.data.size() << " \n"  ;
-          // llvm::dbgs()<<" segCtrlMergeSuccSearch original size " << dataori.size() << " \n"  ;
-          
-          // llvm::dbgs()<<" segCtrlMergeSuccSearch assert " << (tmpMGInfo.data == dataori) << " \n"  ;
         tmpMGInfo.glitch = segCtrlMergeGlitchSuccSearch(switchInfo, selBaseNode,
                                                        controlExcludVec, label);
-          auto glitchori = segCtrlMergeGlitchSuccSearch(switchInfo, selBaseNode,
-            controlExcludVec, label);
 
-            // llvm::dbgs()<<" segCtrlMergeGlitchSuccSearch assert" <<(tmpMGInfo.glitch ==glitchori) << " \n"  ;
         // Update the stroing structure
         switchInfo.data.dfgBaseNodeValue[selBaseNode]->segSucNodeMap[label] =
             tmpMGInfo;
@@ -768,6 +748,8 @@ auto onExit = [&](const std::string &n) {
 
   tmpMgNodeInfo.dataWidthMap[lastNode] = minDataWidth;
   return tmpMgNodeInfo;
+  if (lastNode.empty())
+  tmpMgNodeInfo.dataWidthMap[startNode] = 32;
 }
 
 

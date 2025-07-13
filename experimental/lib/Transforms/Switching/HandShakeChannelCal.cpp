@@ -319,7 +319,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, HandshakeInfo& hs, std::stri
       llvm::dbgs() << "[DEBUG] Leaf node `" << selNode << "`: no successors, marking all ready early.\n";
     for (const auto &pre : nodePtr->pres) {
       setReady(nodePtr.get(), pre, 0);
-      setRSet(nodePtr.get(), pre, IISet(selMGII, true));
+      setRSet(nodePtr.get(), pre, IISet(selMGII, true/* all cyceles set to 1*/));
 
     }
     return;

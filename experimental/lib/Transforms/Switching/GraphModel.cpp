@@ -869,6 +869,8 @@ AdjGraph::graphBacktrack(std::string srcNode,
         if (contains(curNode, "cond_br")) {
           if (auto *cbrNode = dyn_cast<CBrNode>(nodes[curNode].get())) {
             std::string tmpDataPreNode = cbrNode->dataPreNodeName;
+            if(tmpDataPreNode.empty())
+            tmpDataPreNode = cbrNode->condPreNodeName;
             if (std::find(mainStack.begin(), mainStack.end(), tmpDataPreNode) ==
                 mainStack.end()) {
               adjStack.push_back({tmpDataPreNode});
