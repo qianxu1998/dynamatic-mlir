@@ -65,8 +65,11 @@ void dataGlitchNodeSearch(SwitchingInfo &switchInfo, SCFProfilingResult &profile
     auto selAdjGraph = switchInfo.staticinfo.segToGraph[label];
     std::string mgBaseNode = selAdjGraph->baseNode;
     auto mgII = switchInfo.staticinfo.cfdfcIIs[std::stoul(std::string(label))];
-    auto selDataBaseNodes = switchInfo.data.segToDataBaseVec[label].data;
+
     auto orderedNodes =selAdjGraph->orderedNodeName;
+    auto &orderedALUs = switchInfo.data.segToOrderedALUNodes[label];
+
+
     //! Testing
     llvm::dbgs() << "[DEBUG] \t\tMG II: " << mgII << "\n";
 
@@ -74,18 +77,19 @@ void dataGlitchNodeSearch(SwitchingInfo &switchInfo, SCFProfilingResult &profile
     std::vector<std::string> tmpGlitchNodes;
 
     // Iterate over all mapped nodes (orderedMappedList).
-    for (const auto& selNode: orderedNodes) {
-      if (containsValue(selDataBaseNodes,selNode) ) {
-        // Get the type of the node
-        auto nodeType = getNodeType(selNode);
+    for (const auto& selNode: orderedALUs) {
 
-        if (contains(GLITCH_NODE,nodeType)) {
+      llvm::dbgs() << "[DEBUG] glitch node \t: " << selNode << "\n";
+
+
+
           // ALU will only have two inputs
           auto preNodeLists = selAdjGraph->nodes[selNode]->pres;
+          if (preNodeLists.size() != 2) continue;//guard
 
           // Unpack the pre_node_list
-          std::string preNode1 = preNodeLists[0];
-          std::string preNode2 = preNodeLists[1];
+          const std::string& preNode1 = preNodeLists[0];
+          const std::string& preNode2 = preNodeLists[1];
 
           // Get the source of the two inputs
           std::string srcNode1 = segNodeDataSrcSearch(switchInfo, preNode1, selAdjGraph.get());
@@ -175,8 +179,8 @@ void dataGlitchNodeSearch(SwitchingInfo &switchInfo, SCFProfilingResult &profile
             }
           }
         } 
-      }
-    }
+      // }
+    // }
     
     // Store the glitching info
     switchInfo.data.glitches[label] = tmpGlitchDict;
@@ -862,7 +866,7 @@ std::string getMuxDataSrcold(SwitchingInfo &switchInfo, std::string selMuxNode,
 auto selMuxSrcMap = switchInfo.staticinfo.dataflowGraph->muxToSrcNodeMap;
 // The cond input src will always be a control merge node
 std::string muxCondInput = selMuxSrcMap[selMuxNode]["control"];
-auto *val = switchInfo.data.dfgBaseNodeValue[muxCondInput].get();
+
 
 // TODO: Prevent the following situation from happening
 if (muxCondInput.find("buffer")) {

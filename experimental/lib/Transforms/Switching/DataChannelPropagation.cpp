@@ -401,7 +401,7 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
 
           // Step 2: Update all glitching nodes in the succeeding list
           // Defensive check for segSucNodeMap access
-          if (contains(switchInfo.data.dfgBaseNodeValue[selNode]->segSucNodeMap,executedSeg)) {
+          if (!contains(switchInfo.data.dfgBaseNodeValue[selNode]->segSucNodeMap,executedSeg)) {
             // llvm::dbgs() << "[DEBUG] Warning: segment " << executedSeg << " not found in segSucNodeMap for other node " << selNode << "\n";
             continue;
           }
