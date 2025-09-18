@@ -38,6 +38,9 @@ public:
   /// file.
   mlir::raw_indented_ostream &operator*() { return *logStream; }
 
+  /// Returns a reference to an underlying writer stream to the log file.
+  llvm::raw_ostream &stream();
+
   Logger(const Logger &other) = delete;
   Logger operator=(const Logger &other) = delete;
 

@@ -36,6 +36,10 @@ Logger::Logger(StringRef filepath, std::error_code &ec) {
   logStream = new mlir::raw_indented_ostream(*logFile);
 }
 
+llvm::raw_ostream &Logger::stream() {   
+  assert(logFile && "Logger::stream() called on null logFile!");
+  return *logFile; }
+
 Logger::~Logger() {
   // First delete the stream, the the file descriptor
   if (logStream)
