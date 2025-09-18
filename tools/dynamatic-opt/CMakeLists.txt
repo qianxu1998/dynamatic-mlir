@@ -22,6 +22,7 @@ target_link_libraries(dynamatic-opt
   DynamaticRigidification
   DynamaticFormalPropertyAnnotation
   DynamaticExperimentalResourceSharing
+  DynamaticSwitchingEstimation
   DynamaticCfToHandshake
   DynamaticHandshake
   DynamaticHandshakeToHW

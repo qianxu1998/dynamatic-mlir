@@ -16,6 +16,7 @@
 
 #include "dynamatic/Support/LLVM.h"
 #include "experimental/Analysis/FormalPropertyAnnotation/HandshakeAnnotateProperties.h"
+#include "experimental/Analysis/SwitchingEstimation/SwitchingEstimation.h"
 #include "mlir/Pass/Pass.h"
 
 namespace dynamatic {
