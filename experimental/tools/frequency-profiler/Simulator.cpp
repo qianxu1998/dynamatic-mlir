@@ -51,8 +51,7 @@ public:
               std::vector<Any> &results, std::vector<double> &resultTimes,
               std::vector<std::vector<Any>> &store,
               std::vector<double> &storeTimes, StdProfiler &prof,
-              Logger *traceLogger,
-              Logger *bbListLogger);
+              Logger *traceLogger);
 
   LogicalResult succeeded() const {
     return successFlag ? success() : failure();
@@ -145,14 +144,14 @@ private:
                         std::vector<Any> &);
   LogicalResult execute(mlir::cf::BranchOp, std::vector<Any> &,
                         std::vector<Any> &, DominanceInfo &,
-                        Logger *, Logger *);
+                        Logger *);
   LogicalResult execute(mlir::cf::CondBranchOp, std::vector<Any> &,
                         std::vector<Any> &, DominanceInfo &,
-                        Logger *, Logger *);
+                        Logger *);
   LogicalResult execute(func::ReturnOp, std::vector<Any> &, std::vector<Any> &);
   LogicalResult execute(mlir::CallOpInterface, std::vector<Any> &,
                         std::vector<Any> &, DominanceInfo &,
-                        Logger *, Logger *);
+                        Logger *);
 
 private:
   /// Execution context variables.
@@ -169,7 +168,6 @@ private:
 
   /// Optional data trace loggers.
   Logger *traceLogger;
-  Logger *bbListLogger;
 
   /// Flag indicating whether execution was successful.
   bool successFlag = true;
@@ -698,8 +696,7 @@ LogicalResult StdExecuter::execute(mlir::memref::AllocOp op,
 LogicalResult StdExecuter::execute(mlir::cf::BranchOp branchOp,
                                    std::vector<Any> &in, std::vector<Any> &,
                                    DominanceInfo &DomInfo,
-                                   Logger *traceLogger,
-                                   Logger *bbListLogger) {
+                                   Logger *traceLogger) {
   mlir::Block *dest = branchOp.getDest();
   for (auto out : enumerate(dest->getArguments())) {
     LLVM_DEBUG(debugArg("ARG", out.value(), in[out.index()], time));
@@ -708,21 +705,15 @@ LogicalResult StdExecuter::execute(mlir::cf::BranchOp branchOp,
   }
   prof.transitions[std::make_pair(branchOp->getBlock(), dest)]++;
 
-  if (traceLogger && bbListLogger) {
+  if (traceLogger) {
     if (DomInfo.dominates(dest, branchOp->getBlock())) {
       // This is a back edge
       traceLogger->stream()
           << "[BEdge] " << num_edges << " (" << BlocktoIDs[branchOp->getBlock()]
           << "," << BlocktoIDs[dest] << ")\n";
-      bbListLogger->stream()
-            << "[BEdge] " << num_edges << " (" << BlocktoIDs[branchOp->getBlock()]
-            << "," << BlocktoIDs[dest] << ")\n";
     } else {
       // This is not a backedge
       traceLogger->stream()
-          << "[Edge] " << num_edges << " (" << BlocktoIDs[branchOp->getBlock()]
-          << "," << BlocktoIDs[dest] << ")\n";
-      bbListLogger->stream()
           << "[Edge] " << num_edges << " (" << BlocktoIDs[branchOp->getBlock()]
           << "," << BlocktoIDs[dest] << ")\n";
     }
@@ -737,8 +728,7 @@ LogicalResult StdExecuter::execute(mlir::cf::BranchOp branchOp,
 LogicalResult StdExecuter::execute(mlir::cf::CondBranchOp condBranchOp,
                                    std::vector<Any> &in, std::vector<Any> &,
                                    DominanceInfo &DomInfo,
-                                   Logger *traceLogger,
-                                   Logger *bbListLogger) {
+                                   Logger *traceLogger) {
   APInt condition = any_cast<APInt>(in[0]);
   mlir::Block *dest;
   std::vector<Any> inArgs;
@@ -770,23 +760,17 @@ LogicalResult StdExecuter::execute(mlir::cf::CondBranchOp condBranchOp,
   instIter = dest->begin();
   prof.transitions[std::make_pair(condBranchOp->getBlock(), dest)]++;
 
-  if (traceLogger && bbListLogger) {
+  if (traceLogger) {
     if (DomInfo.dominates(dest, condBranchOp->getBlock())) {
       // This is a backedge
       traceLogger->stream() << "[BEdge] " << num_edges << " ("
                              << BlocktoIDs[condBranchOp->getBlock()] << ","
                              << BlocktoIDs[dest] << ")\n";
-      bbListLogger->stream() << "[BEdge] " << num_edges << " ("
-                              << BlocktoIDs[condBranchOp->getBlock()] << ","
-                              << BlocktoIDs[dest] << ")\n";
     } else {
       // This is not a backedge
       traceLogger->stream() << "[Edge] " << num_edges << " ("
                              << BlocktoIDs[condBranchOp->getBlock()] << ","
                              << BlocktoIDs[dest] << ")\n";
-      bbListLogger->stream() << "[Edge] " << num_edges << " ("
-                              << BlocktoIDs[condBranchOp->getBlock()] << ","
-                              << BlocktoIDs[dest] << ")\n";
     }
     // Update edge status
     num_edges++;
@@ -807,8 +791,7 @@ LogicalResult StdExecuter::execute(func::ReturnOp op, std::vector<Any> &in,
 LogicalResult StdExecuter::execute(mlir::CallOpInterface callOp,
                                    std::vector<Any> &in, std::vector<Any> &,
                                    DominanceInfo &DomInfo,
-                                   Logger *traceLogger,
-                                   Logger *bbListLogger) {
+                                   Logger *traceLogger) {
   // implement function calls.
   auto *op = callOp.getOperation();
   mlir::Operation *calledOp = callOp.resolveCallable();
@@ -829,7 +812,7 @@ LogicalResult StdExecuter::execute(mlir::CallOpInterface callOp,
           timeMap[op->getOperand(inIt.index())];
     }
     StdExecuter(funcOp, newValueMap, newTimeMap, results, resultTimes, store,
-                storeTimes, prof, traceLogger, bbListLogger);
+                storeTimes, prof, traceLogger);
     for (auto out : enumerate(op->getResults())) {
       valueMap[out.value()] = results[out.index()];
       timeMap[out.value()] = resultTimes[out.index()];
@@ -852,11 +835,10 @@ StdExecuter::StdExecuter(mlir::func::FuncOp &toplevel,
                          std::vector<double> &resultTimes,
                          std::vector<std::vector<Any>> &store,
                          std::vector<double> &storeTimes, StdProfiler &prof,
-                         Logger *traceLogger, 
-                         Logger *bbListLogger)
+                         Logger *traceLogger)
     : valueMap(valueMap), timeMap(timeMap), results(results),
       resultTimes(resultTimes), store(store), storeTimes(storeTimes),
-      prof(prof), traceLogger(traceLogger), bbListLogger(bbListLogger) {
+      prof(prof), traceLogger(traceLogger) {
   successFlag = true;
   mlir::Block &entryBlock = toplevel.getBody().front();
   instIter = entryBlock.begin();
@@ -907,7 +889,7 @@ StdExecuter::StdExecuter(mlir::func::FuncOp &toplevel,
             .Case<cf::BranchOp, cf::CondBranchOp, CallOpInterface>(
                 [&](auto op) {
                   strat = ExecuteStrategy::Continue;
-                  return execute(op, inValues, outValues, domInfo, traceLogger, bbListLogger);
+                  return execute(op, inValues, outValues, domInfo, traceLogger);
                 })
             .Case<func::ReturnOp>([&](auto op) {
               strat = ExecuteStrategy::Return;
@@ -957,8 +939,7 @@ StdExecuter::StdExecuter(mlir::func::FuncOp &toplevel,
 }
 
 LogicalResult simulate(func::FuncOp funcOp, ArrayRef<std::string> inputArgs,
-                       StdProfiler &prof, Logger *traceLogger,
-                       Logger *bbListLogger) {
+                       StdProfiler &prof, Logger *traceLogger) {
   // The store associates each allocation in the program
   // (represented by a int) with a vector of values which can be
   // accessed by it.   Currently values are assumed to be an integer.
@@ -1026,6 +1007,6 @@ LogicalResult simulate(func::FuncOp funcOp, ArrayRef<std::string> inputArgs,
   std::vector<double> resultTimes(numOutputs);
 
   return StdExecuter(funcOp, valueMap, timeMap, results, resultTimes, store,
-                     storeTimes, prof, traceLogger, bbListLogger)
+                     storeTimes, prof, traceLogger)
       .succeeded();
 }
