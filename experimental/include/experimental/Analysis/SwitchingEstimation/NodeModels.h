@@ -289,7 +289,7 @@ public:
   //   - For address output: if the new address is -10, reuse the last valid value.
   void updateDataout(int &inputData, int addressValue);
 
-  void printNodeDetails();
+  void printNodeDetails() override;
 
   DEFINE_NODE_KIND(DLoadNode, NodeKind::DLoadNodeKind);
 
@@ -329,7 +329,7 @@ public:
   // Update data output based on the source input node.
   void updateDataout(int inputData, const std::string &srcInputNode);
 
-  void printNodeDetails();
+  void printNodeDetails() override;
 
   // Handshake checking (e.g. comparing size of readySignal with number of predecessors)
   bool handshakeSwitchingChecking();
@@ -601,7 +601,7 @@ public:
   void updateDataout(int inputData);
 
   // Print details: First call the base class version, then print the control-channel successor name.
-  void printNodeDetails();
+  void printNodeDetails() override;
 
   DEFINE_NODE_KIND(CMergeNode, NodeKind::CMergeNodeKind);
 
@@ -661,7 +661,7 @@ public:
   void updateDataout(int inputData, unsigned condValue);
 
   // Print details: call base class printDetail(), then print extra CBrNode info.
-  void printNodeDetails();
+  void printNodeDetails() override;
 
   DEFINE_NODE_KIND(CBrNode, NodeKind::CBrNodeKind);
 
@@ -736,7 +736,7 @@ public:
                    unsigned II);
 
   // Print detail: call the base class printDetail() and then print extra info.
-  void printNodeDetails();
+  void printNodeDetails() override;
 
   // LLVM Casting support
   NodeKind getKind() const override { return NodeKind::MuxNodeKind; }

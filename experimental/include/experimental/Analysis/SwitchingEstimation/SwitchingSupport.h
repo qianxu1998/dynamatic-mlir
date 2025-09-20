@@ -69,26 +69,28 @@ struct NodeGlitchInfo {
 };
 
 // Helper datatype for switching estimation. Aggregates all useful information
-// for the swithicng estimation process
+// for the switching estimation process
 struct StaticInfo{
   // 
   //  Internal Storing Variables
   //
-    // All backedge BB pairs in the dataflow circuit
-  llvm::SmallVector<std::pair<unsigned, unsigned>> backEdges;
+  // All backedge BB pairs in the dataflow circuit
+  SmallVector<std::pair<unsigned, unsigned>> backEdges;
+  // Map from CFDFC index to the CFDFC info stroing class
+  std::map<unsigned, CFDFC *> cfdfcInfoMap;
   // Map from Backedge pair to the list of CFDFC lable vector
   // i.e. {(1, 1) : [1]}
   std::map<std::pair<unsigned, unsigned>, std::vector<unsigned>> backEdgeToCFDFC;
-  std::map<std::pair<unsigned, unsigned>, std::vector<unsigned>> backEdgeToCFDFCfast;
-  llvm::StringMap<std::vector<unsigned>> segToBBs;
+  // Map from Transaction Segment label (including cfdfc index) to the list of BBs
+  StringMap<std::vector<unsigned>> segToBBs;
   // Map from Transaction Segment label to the successing MG label
     // Map from Segment Label (CFDFC and temporal transaction sections that are not MGs)
-    llvm::StringMap< std::string> transToSucMGMap;
+    StringMap< std::string> transToSucMGMap;
   // Map storing the subgraph of different segments in the dataflow circuit
-  llvm::StringMap< std::shared_ptr<AdjGraph>> segToGraph;
-  // Set of names of the ALUs in the Handshake level mlir file
+  StringMap< std::shared_ptr<AdjGraph>> segToGraph;
+  // Set of nodes that are expected to appear during scf profiling
   // Used to retrieve the date from SCF level profiling
-  std::vector<std::string> funcOpNames;
+  std::vector<std::string> traceOpNames;
     // dataflow graph
   // Below has to be a shared pointer, otherwise need to override the clonePass() implementation in MLIR
   std::shared_ptr<AdjGraph> dataflowGraph;
@@ -97,31 +99,27 @@ struct StaticInfo{
   
   // Map from CFDFC index to the corresponding throughput
   llvm::DenseMap<unsigned, double_t> cfdfcThroughput;
-  // Map from CFDFC index to the CFDFC info stroing class
-  // Only contain the number of edges, backedges etc.
-  // No info about unit delay, node neighbors etc.
-  std::map<unsigned, buffer::CFDFC> cfdfcs;
 };
 
 // helper struct to store relevant info for data channel pass
 struct DataInfo{
   // Map from segment index to dataBaseNode struct
-  llvm::StringMap< DataBaseNodesTriple> segToDataBaseVec;
+  StringMap< DataBaseNodesTriple> segToDataBaseVec;
 
-  llvm::StringMap< std::map<std::string, std::vector<NodeGlitchInfo>>> glitches;
+  StringMap< std::map<std::string, std::vector<NodeGlitchInfo>>> glitches;
   // Map from seg label to ordered ALU nodes
-  llvm::StringMap<std::vector<std::string>> segToOrderedALUNodes;
+  StringMap<std::vector<std::string>> segToOrderedALUNodes;
   // Map from seg label to ordered mux and control merge node list
-  llvm::StringMap< muxCMNodesList> controlNodes;
+  StringMap< muxCMNodesList> controlNodes;
   // Map stroing the first iteration index that the seg is executed
-  llvm::StringMap<unsigned> firstExecutedIter;
+  StringMap<unsigned> firstExecutedIter;
     // Map from node name to DataBase class
-    llvm::StringMap<std::shared_ptr<DataBase>> dfgBaseNodeValue;
+    StringMap<std::shared_ptr<DataBase>> dfgBaseNodeValue;
   // Map from pair of BB sequence to the corresponding control_merge output
   // Format: {(preBB, curBB) : [(control_merge_node, output_value)]}
   std::map<std::pair<unsigned, unsigned>, std::vector<std::pair<std::string, int>>> bbPairToCtrlMerge;
   // Map from seg label to ordered Data base nodes
-  llvm::StringMap<std::vector<std::string>> segToOrderedDataBaseNodes;
+  StringMap<std::vector<std::string>> segToOrderedDataBaseNodes;
   // Mux Nodes topologically ordered
   std::vector<std::string> orderedMuxNodes;
 };
@@ -134,9 +132,9 @@ struct SwitchingInfo {
   // This function insert (backedge pair, mgLabel) to the backEdgeToCFDFC
   void insertBE(unsigned srcBB, unsigned dstBB, StringRef mgLabel);
   // Map from segLabel to the corresponding backedge pair
-  llvm::StringMap< std::pair<unsigned, unsigned>> segToBackedgePairMap;// TODO delete
+  StringMap< std::pair<unsigned, unsigned>> segToBackedgePairMap;// TODO delete
   // Map from segment label to the vector of invalid backedges
-  llvm::StringMap< std::vector<std::pair<std::string, std::string>>> segInvalidBackedgesMap;
+  StringMap< std::vector<std::pair<std::string, std::string>>> segInvalidBackedgesMap;
   
   // 
   //  Variables for handshake channel switching calculation
@@ -152,8 +150,6 @@ struct SwitchingInfo {
 //
 //===----------------------------------------------------------------------===//
 // Define the constant name sensitive list used for parsing the profiling results
-// As the name of the same operation in scf level IR and the final handshake IR
-// is different, we need to map the scf level op to the handshake mlir file.
 // TODO: Add support for more node types
 const std::set<std::string> NAME_SENSE_LIST = {
   "muli",
@@ -328,25 +324,19 @@ template <typename T>
 inline void printVector(const T& selVec) {
   int counter = 0;
 
-  llvm::dbgs() << "[DEBUG] Vector Contents: "; 
+  dbgs() << "[DEBUG] Vector Contents: "; 
 
   for (auto& selVal : selVec) {
-    llvm::dbgs() << "[" << counter << "] : " << selVal << "; ";
+    dbgs() << "[" << counter << "] : " << selVal << "; ";
 
     counter++;
   }
 
-  llvm::dbgs() << ";\n";
+  dbgs() << ";\n";
 }
 
 // This function remove the digits in the given string and keep the rest
 std::string removeDigits(const std::string& inStr);
-
-// This function split a given string into a vector based on the delimiter
-std::vector<std::string> split(const std::string &s, const std::string& delimiter);
-
-// This function removes the starting and ending empty space
-std::string strip(const std::string &inputStr, const std::string &toRemove);
 
 // Get unsigned number from a float
 unsigned getUnsigned(float_t inputValue);

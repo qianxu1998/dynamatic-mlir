@@ -51,3 +51,60 @@ void SwitchingInfo::insertBE(unsigned srcBB, unsigned dstBB, StringRef mgLabel) 
   }
 }
 
+//===----------------------------------------------------------------------===//
+//
+// Helper Functions
+//
+//===----------------------------------------------------------------------===//
+
+std::string getHandshakeNodeName(mlir::Value &selRes) {
+  for (mlir::Operation *user : selRes.getUsers()) {
+    // Try to get the successor's name attribute.
+    if (auto nameAttr =
+            user->getAttrOfType<mlir::StringAttr>("handshake.name")) {
+      return nameAttr.getValue().str();
+    }
+  }
+}
+
+void printBEToCFDFCMap(const std::map<std::pair<unsigned, unsigned>,
+                                      std::vector<unsigned>> &selMap) {
+  for (const auto &selPair : selMap) {
+    const std::pair<unsigned, unsigned> &key = selPair.first;
+    const std::vector<unsigned> mgList = selPair.second;
+
+    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tBackEdge Pair: (" << key.first << ", "
+                 << key.second << ") : [");
+
+    for (const auto &selMG : mgList) {
+      LLVM_DEBUG(llvm::dbgs() << selMG << ", ");
+    }
+
+    LLVM_DEBUG(llvm::dbgs() << "]\n");
+  }
+}
+
+void printSegToBBListMap(
+    const std::map<std::string, mlir::SetVector<unsigned>> &selMap) {
+  for (const auto &selPair : selMap) {
+    const std::string segLabel = selPair.first;
+    const mlir::SetVector<unsigned> BBList = selPair.second;
+
+    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tSeg Label: " << segLabel << " : [");
+
+    for (const auto &selBB : BBList) {
+      LLVM_DEBUG(llvm::dbgs() << selBB << ", ");
+    }
+
+    LLVM_DEBUG(llvm::dbgs() << "]\n");
+  }
+}
+
+std::string removeDigits(const std::string &inStr) {
+  std::regex digitsRegex("\\d");
+
+  std::string outStr = std::regex_replace(inStr, digitsRegex, "");
+
+  return outStr;
+}
+

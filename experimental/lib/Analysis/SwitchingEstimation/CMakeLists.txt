@@ -2,6 +2,7 @@ add_dynamatic_library(DynamaticSwitchingEstimation
   SwitchingEstimation.cpp
   GraphModel.cpp
   SwitchingSupport.cpp
+  ProfilingAnalyzer.cpp
   NodeModels.cpp
 
   DEPENDS
