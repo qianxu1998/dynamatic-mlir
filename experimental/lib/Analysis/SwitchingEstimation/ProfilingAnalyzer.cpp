@@ -221,9 +221,6 @@ void SCFProfilingResult::parseUnifiedLogFile(StringRef tracePath, SwitchingInfo&
 
       auto tup = customSplit(valStr, ",");
       std::string hsName = customStrip(tup[0], "\"");
-
-      //! Testing
-      LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 1]\tData Value: " << tup.back() << ", OpName: " << hsName << ", Iter: " << curIter << "\n");
       
       if (parts.size() > 1) {
         int opValue = std::stoi(tup.back());
@@ -244,9 +241,6 @@ void SCFProfilingResult::parseUnifiedLogFile(StringRef tracePath, SwitchingInfo&
 
       // Record the name of the argument
       argNamesVec.push_back(arg);
-
-      //! Testing
-      LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 1]\tArgument Value: " << val << ", ArgName: " << arg << ", Iter: " << curIter << "\n");
     } else if (parts[0] == "[Edge]" || parts[0] == "[BEdge]") {
       unsigned idx = std::stoul(parts[1]);
       if (std::find(iterEndIndex.begin(), iterEndIndex.end(), idx) != iterEndIndex.end()) {

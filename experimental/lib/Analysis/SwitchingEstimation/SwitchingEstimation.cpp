@@ -12,6 +12,7 @@
 #include "experimental/Analysis/SwitchingEstimation/SwitchingSupport.h"
 #include "experimental/Analysis/SwitchingEstimation/utils.h"
 #include "experimental/Analysis/SwitchingEstimation/ProfilingAnalyzer.h"
+#include "experimental/Analysis/SwitchingEstimation/DataChannelCal.h"
 
 #include "dynamatic/Analysis/CFDFCAnalysis.h"
 #include "dynamatic/Analysis/NameAnalysis.h"
@@ -54,13 +55,20 @@ struct SwitchingEstimationPass
   // 
   //  Information Extraction Related Functions
   //
-
   // This function extract all CFDFC related information from the CFDFC analysis
   LogicalResult parseCFDFCInfo(handshake::FuncOp& funcOp, CFDFCAnalysis &cfdfcAnalysis);
 
   // This function extracts and store the names of the ALU nodes in order
   void extractALUNodesInOrder(handshake::FuncOp& funcOp);
 
+  // Dump the switching information
+  void dumpSwitchingResults(const SwitchingInfo& switchInfo, StringRef dumpPath);
+  
+  // 
+  //  DataChannel Switching Calculation
+  //
+  // This function calculates the data channel switching number based on the profiling results
+  void calDataChannelSwitching(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults);
 
 };
 
@@ -102,6 +110,81 @@ void SwitchingEstimationPass::runOnOperation() {
   LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 1] Parsing SCF profiling results\n");
   LLVM_DEBUG(llvm::dbgs() << "[DEBUG] Data trace file path: " << dataTrace << "\n");
   SCFProfilingResult profilingResults(dataTrace, switchingInfo);
+
+  // [STEP 2] Build Adjacency graph for each CFDFC
+  std::vector<std::pair<std::string, std::string>> allBackedges;
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 2] Building adjacency graph for each CFDFC\n");
+
+  for (auto [mgIndex, selCFDFC] : switchingInfo.staticinfo.cfdfcInfoMap) {
+    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 2] \tProcessing CFDFC index: " << mgIndex << "\n");
+    auto adj = std::make_shared<AdjGraph>(selCFDFC, timingDB,
+                                          switchingInfo.staticinfo.cfdfcIIs[mgIndex],
+                                          mgIndex, targetPeriod);
+    switchingInfo.staticinfo.segToGraph.insert_or_assign(std::to_string(mgIndex), adj);
+
+    // Update the global backedge list
+    for (const auto& selPair : adj->backedges) {
+      allBackedges.push_back(selPair);
+    }
+  }
+
+  // [STEP 3] Build the graph for the entire dataflow graph (Final storage structure)
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 3] Building the graph for the entire dataflow graph\n");
+  // [STEP 3.1] First store the information of the backedges in the circuit
+  for (const auto& [selSegLabel, segBBList] : switchingInfo.staticinfo.segToBBs) {
+    if (contains(selSegLabel,"S")) {
+      switchingInfo.segInvalidBackedgesMap[selSegLabel] = allBackedges;
+    } else if (contains(selSegLabel,"E")) {
+      switchingInfo.segInvalidBackedgesMap[selSegLabel] = allBackedges;
+    } else if (contains(selSegLabel,"T")) {
+      auto sucMg = switchingInfo.staticinfo.transToSucMGMap[selSegLabel];
+      std::vector<std::pair<std::string, std::string>> tmpInvalidBackedges; 
+      for (const auto& [selCFDFCIndex, selGraph]: switchingInfo.staticinfo.segToGraph) {
+        if (selCFDFCIndex != sucMg) {
+          for (const auto& selPair: selGraph->backedges) {
+            tmpInvalidBackedges.push_back(selPair);
+          }
+        }
+      }
+    }
+  }
+
+  //! Testing
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tInvalue Backedge list map:\n");
+  for (const auto& [segLabel, edgeList] : switchingInfo.segInvalidBackedgesMap) {
+    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tsegLabel: " << segLabel << " : ");
+    for (const auto& selPair: edgeList) {
+      LLVM_DEBUG(llvm::dbgs() << "(" << selPair.first << ", " << selPair.second << "), ");
+    }
+    LLVM_DEBUG(llvm::dbgs() << "\n");
+  }
+
+  // [STEP 3.2] Create the storing structure for the entire dataflow graph
+  for (handshake::FuncOp funcOp : topModule.getOps<handshake::FuncOp>()) {
+    // Contruct the Adj graph for the entire dataflow circuit
+    switchingInfo.staticinfo.dataflowGraph = std::make_shared<AdjGraph>(timingDB, switchingInfo.staticinfo.cfdfcIIs[0], funcOp, allBackedges, targetPeriod);
+  }
+
+  // [STEP 4] Determining the Global start time and shifting for each CFDFC
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 4] Determining the global start time and shifting for each CFDFC\n");
+  for (auto& [mgIndex, selCFDFC] : switchingInfo.staticinfo.segToGraph) {
+    // [STEP 4.1] Determine the latest start time for each cfdfc
+    selCFDFC->obtainNodeGlobalOrder();
+
+    // [STEP 4.2] Determine the shifting for each start node in the cfdfc
+    selCFDFC->computeStartNodeShifts();
+  }
+
+  // [STEP 5] Calculate Data channel switching
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 5] Calculating data channel switching\n");
+  calDataChannelSwitching(topModule, profilingResults);
+
+
+  // [STEP 6] Calculate Steady State Handshake channel switching
+
+  // [Step 7] Propagate handshake switching to the entire dataflow graph
+
+  // [Step 8] Dump the switching estimation results
 
 }
 
@@ -202,4 +285,97 @@ LogicalResult SwitchingEstimationPass::parseCFDFCInfo(handshake::FuncOp& funcOp,
 
   return success();
 } 
+
+void SwitchingEstimationPass::dumpSwitchingResults(const SwitchingInfo& switchInfo, StringRef dumpPath) {
+  // TODO: Add support for calculating the number of cycles for switching activity
+  std::error_code EC;
+  llvm::raw_fd_ostream OS(dumpPath, EC);
+
+  if (EC) {
+    llvm::errs() << "[ERROR] Could not open output file " << dumpPath
+                 << ": " << EC.message() << "\n";
+    return;
+  }
+
+  // Define csv header
+  // TODO: Redesign the csv format for the following power estimation.
+  OS << "node, data, valid, ready\n";
+
+  // Dump the switching results for each node in the dataflow graph
+  auto graph = switchInfo.staticinfo.dataflowGraph;
+  for (const auto &entry : graph->nodes) {
+    // TODO: Add support for mem_controller
+    const auto &nodeName = entry.first();
+    if (contains(nodeName, "mem_controller")) {
+      continue;
+    }
+
+    const auto *node = entry.second.get();
+    OS << nodeName << "," << node->totalDataSwitching << ","
+        << node->totalValidSwitching << "," << node->totalReadySwitching << "\n";
+  }
+}
+
+//===----------------------------------------------------------------------===//
+//
+// Data Channel Switching Calculation
+//
+//===----------------------------------------------------------------------===//
+
+void SwitchingEstimationPass::calDataChannelSwitching(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults) {
+  // [SS 0] Construct the execution map
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 5.0] Constructing the execution map\n");
+  for (unsigned i = 0; i < profileResults.executedSegTrace.size(); i++) {
+    std::string segLabel = profileResults.executedSegTrace[i];
+    if (switchingInfo.data.firstExecutedIter.find(segLabel) == switchingInfo.data.firstExecutedIter.end()) {
+      switchingInfo.data.firstExecutedIter[segLabel] = i;
+    }
+  }
+
+  // [SS 1] Get the iteration index for the first execution of each segment
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 5.1] Get the BB Pair to Control Merge Output Map\n");
+  mapBBPairToControlMerge(switchingInfo);
+
+  //! Testing
+  for (const auto& [pair1, cmVec]: switchingInfo.data.bbPairToCtrlMerge) {
+    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t(" << pair1.first << ", " << pair1.second << ") : \n");
+    for (auto selPair: cmVec) {
+      LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\t[" << selPair.first << " " << selPair.second << "]\n");
+    }
+  }
+
+  // [SS 2] Construct the list of all data source nodes from scf-level profiling 
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 5.2] Construct the list of all data source nodes from scf-level profiling\n");
+  getDataBaseNodes(switchingInfo, profileResults);
+
+  //! Testing
+  for (auto& [segLabel, selDB]: switchingInfo.data.segToDataBaseVec) {
+    llvm::dbgs() << "[DEBUG] \t[SEGMENT] " << segLabel << "\n";
+    printDataBaseNodesTriple(selDB);
+  }
+
+  // [SS 3] Contruct the data source node info of mux, condbr and mem node
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 5.3] Contruct the data source node info of mux, condbr and mem node\n");
+  switchingInfo.staticinfo.dataflowGraph->buildSrcMaps();
+
+  //! Testing
+  printMuxToSrcNodeMap(switchingInfo.staticinfo.dataflowGraph->muxToSrcNodeMap);
+  printSrcNodeToMuxMap(switchingInfo.staticinfo.dataflowGraph->srcNodeToMuxMap);
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tcondBr Node to control src map: \n");
+  for (const auto& [cbrNode, controlSrc]: switchingInfo.staticinfo.dataflowGraph->condBrToConSrcMap) {
+    llvm::dbgs() << "[DEBUG] \t\t(" << cbrNode << ", " << controlSrc << ")\n";
+  }
+
+  // [SS 4] Update value for all data base nodes
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 5.4] Update value for all data base nodes\n");
+  dataChannelBaseNodesValueUpdate(switchingInfo, profileResults);
+
+  // [SS 5] Build succeeding node list for data base nodes in different segments
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 5.5] Build succeeding node list for data base nodes in different segments\n");
+  buildSegmentSuccNodesList(switchingInfo, profileResults);
+
+  // [SS 6] Get all glitching base node in each MG
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 5.6] Get all glitching base node in each MG\n");
+  
+}
 

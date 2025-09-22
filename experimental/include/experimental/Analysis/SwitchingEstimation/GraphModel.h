@@ -289,8 +289,8 @@ public:
   // 
   //  Internal Storing Variables
   //
-  
-  CFDFC *cfdfcPrt;                                            // Pointer to the corresponding cfdfc structure
+
+  CFDFC *cfdfcPrt = nullptr;                                            // Pointer to the corresponding cfdfc structure
   unsigned cfdfcIndex = 0;                                    // Variable storing the corresponding cfdfc index
   // TODO: Check the rounding of the II
   unsigned cfdfcII = 0;                                       // The II of the cfdfc

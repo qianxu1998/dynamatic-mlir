@@ -124,7 +124,7 @@ public:
   //
   /// Internal variable
   //
-  unsigned START;
+  unsigned START = 0;
   float_t occupancy;
   unsigned numSlots;
   bool transparent;

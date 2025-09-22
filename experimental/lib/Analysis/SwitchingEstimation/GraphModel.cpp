@@ -388,7 +388,7 @@ AdjGraph::AdjGraph(CFDFC* cfdfc, const TimingDatabase& timingDB,
     }
 
     //! Testing
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t=================================\n");
+    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t=============================================================\n");
     LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n");
     LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tNode Latency From DataBase: " << nodeLatency << "\n");
     LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tNode BB Index: " << nodeBBIndex << "\n");
@@ -428,7 +428,7 @@ AdjGraph::AdjGraph(
     orderedNodeName.push_back(unitName);
 
     //! Testing
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t=================================\n");
+    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t=============================================================\n");
     LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n");
 
     std::vector<std::string> pres;
@@ -450,6 +450,7 @@ AdjGraph::AdjGraph(
     // Construct pres
     for (auto operand : op.getOperands()) {
       // TODO: Need to check do we need to include the block argument in the graph or not
+      // TODO: Add support for LSQ and mem_controller
       if (operand.getDefiningOp()) {
         std::string preName = operand.getDefiningOp()
                                   ->getAttrOfType<StringAttr>("handshake.name").str();
@@ -465,7 +466,8 @@ AdjGraph::AdjGraph(
     // We assign a large number to those nodes without a bbIndex
     unsigned nodeBBIndex = 100;
     if (!nodeBBIndexAttr) {
-      LLVM_DEBUG(llvm::dbgs() << "[DEBUG] Can't get the BB index of the op: " << unitName << "\n");
+      // For now we just print a warning message and keep a large number for the bbIndex
+      LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tCan't get the BB index of the op: " << unitName << "\n");
     } else {
       nodeBBIndex = nodeBBIndexAttr.getUInt();
     }
@@ -598,8 +600,15 @@ std::shared_ptr<AdjNode> AdjGraph::createNodeFromOperation(
         node->numSlots = buffSlots;
         node->buffType = buffType;
         node->transparent = transType;
-        // At this step we set a default value for occupancy.
-        node->occupancy = 0;
+        // Get the buffer occupancy from the cfdfc analysis
+        float_t occ = 0.0;
+        if (cfdfcPrt) {
+          if (auto it = cfdfcPrt->unitOccupancy.find(op);
+              it != cfdfcPrt->unitOccupancy.end())
+            occ = it->second;
+        }
+        node->occupancy = occ;
+
         return node;
       })
       // handshake::MuxOp operator
@@ -724,6 +733,25 @@ std::shared_ptr<AdjNode> AdjGraph::createNodeFromOperation(
         auto node = std::make_shared<EndNode>(
             op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
         return node;
+      })
+      // handshake::BranchOp operator
+      // In case the pass is called before the canonicalization pass
+      .Case<handshake::BranchOp>([&](auto selNode) {
+        // Check the number of pres, if only 1, we instantiate it as a pass node
+        if (pres.size() == 1) {
+          auto node = std::make_shared<PassNode>(
+              op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
+          return node;
+        }
+      })
+      // handshake::MergeOp operator
+      .Case<handshake::MergeOp>([&](auto selNode) {
+        // Check the number of pres, if only 1, we instantiate it as a pass node
+        if (pres.size() == 1) {
+          auto node = std::make_shared<PassNode>(
+              op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
+          return node;
+        }
       })
       // Default case: unknown operation
       .Default([](auto selNode) {
@@ -999,7 +1027,7 @@ void AdjGraph::obtainNodeGlobalOrder() {
       graphGlobalOrder[name] = std::make_pair(finalStartNode, maxLatency);
 
       //! Testing
-      // llvm::dbgs() << "[DEBUG] \tNode: " << name << "; Global Order: (" << finalStartNode << ", " << maxLatency << ");\n";
+      llvm::dbgs() << "[DEBUG] \tNode: " << name << "; Global Order: (" << finalStartNode << ", " << maxLatency << ");\n";
     }
   }
 }
@@ -1034,7 +1062,6 @@ void AdjGraph::buildSrcMaps() {
         fail(ctrlSrc);
         fail(dataSrc0);
         fail(dataSrc1);
-        LLVM_DEBUG(llvm::dbgs()<<"[DEBUG]\t build src maps for node "<< selNode << "\n\t\tctrlsrc: "<<ctrlSrc << "\n\t\tdataSrc0: "<<dataSrc0<<"\n\t\tdataSrc1: "<<dataSrc1<<" \n");
         // Update the control_merge to mux map
         if (contains(cmToMuxMap,ctrlSrc)) {
           cmToMuxMap[ctrlSrc].push_back(selNode);
