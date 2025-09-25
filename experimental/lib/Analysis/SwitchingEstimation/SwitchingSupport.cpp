@@ -108,3 +108,20 @@ std::string removeDigits(const std::string &inStr) {
   return outStr;
 }
 
+unsigned getUnsigned(float_t inputValue) {
+  // 1) Apply floor, which returns a double
+  double floored = std::floor(static_cast<double>(inputValue));
+
+  // 2) Cast to unsigned
+  unsigned result = static_cast<unsigned>(floored);
+
+  return result;
+}
+
+std::string getNodeType(const std::string &nodeName) {
+  size_t pos = 0;
+  while (pos < nodeName.size() && std::isalpha(nodeName[pos])) {
+    ++pos;
+  }
+  return nodeName.substr(0, pos);
+}

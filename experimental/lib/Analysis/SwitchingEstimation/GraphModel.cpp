@@ -963,15 +963,9 @@ void AdjGraph::computeStartNodeShifts() {
 
   // Update the cycle time of the MG
   for (const auto& selBackedge: backedges) {
-    unsigned tmpLonPath = 0;
-    auto tmpPaths = findPaths(selBackedge.second, selBackedge.first, false, true);
-
-    for (auto selPath: tmpPaths) {
-      if (selPath.latency > tmpLonPath) {
-        tmpLonPath = selPath.latency;
-      }
-    }
-    cycleTimeMap[selBackedge.second] = tmpLonPath;
+    auto [tmpPaths, _pathname_unused] =
+        getMaxLatency(selBackedge.second, selBackedge.first, false, true);
+    cycleTimeMap[selBackedge.second] = tmpPaths;
   }
 
   // Analyze the shifting between different start ndoes and the base node
@@ -1011,16 +1005,10 @@ void AdjGraph::obtainNodeGlobalOrder() {
         //! Testing
         // llvm::dbgs() << "[DEBUG] \t\tNode: " << selStartNode << "\n";
 
-        auto foundPaths = findPaths(selStartNode, name, true, false);
-
-        if (foundPaths.size() > 0) {
-          for (const auto& selPath: foundPaths) {
-            auto tmpPathLat = selPath.latency;
-            if (tmpPathLat >= maxLatency) {
-              maxLatency = tmpPathLat;
-              finalStartNode = selStartNode;
-            }
-          }
+        auto [tmpPathLat, _skip] = getMaxLatency(selStartNode, name, true, false);
+        if (tmpPathLat > maxLatency) {
+          maxLatency = tmpPathLat;
+          finalStartNode = selStartNode;
         }
       }
       // Store the global order

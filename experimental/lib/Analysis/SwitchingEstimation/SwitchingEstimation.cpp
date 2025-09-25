@@ -13,6 +13,7 @@
 #include "experimental/Analysis/SwitchingEstimation/utils.h"
 #include "experimental/Analysis/SwitchingEstimation/ProfilingAnalyzer.h"
 #include "experimental/Analysis/SwitchingEstimation/DataChannelCal.h"
+#include "experimental/Analysis/SwitchingEstimation/HandShakeChannelCal.h"
 
 #include "dynamatic/Analysis/CFDFCAnalysis.h"
 #include "dynamatic/Analysis/NameAnalysis.h"
@@ -70,6 +71,13 @@ struct SwitchingEstimationPass
   // This function calculates the data channel switching number based on the profiling results
   void calDataChannelSwitching(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults);
 
+  // 
+  //  Handshake Channel Switching Calculation
+  //
+  void computeSteadyStateHandshakeSwitching(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults);
+
+  // This function calculates the handshake channel switching for the entire circuit simulation
+  void computeTotalHandshakeSwitching(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults);
 };
 
 void SwitchingEstimationPass::runOnOperation() {
@@ -179,13 +187,17 @@ void SwitchingEstimationPass::runOnOperation() {
   LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 5] Calculating data channel switching\n");
   calDataChannelSwitching(topModule, profilingResults);
 
-
   // [STEP 6] Calculate Steady State Handshake channel switching
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 6] Calculating steady state handshake channel switching\n");
+  // computeSteadyStateHandshakeSwitching(topModule, profilingResults);
 
   // [Step 7] Propagate handshake switching to the entire dataflow graph
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 7] Propagating handshake switching to the entire dataflow graph\n");
+  // computeTotalHandshakeSwitching(topModule, profilingResults);
 
   // [Step 8] Dump the switching estimation results
-
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 8] Dumping the switching estimation results\n");
+  // dumpSwitchingResults(switchingInfo, dumpFilePath);
 }
 
 //===----------------------------------------------------------------------===//
@@ -376,6 +388,314 @@ void SwitchingEstimationPass::calDataChannelSwitching(mlir::ModuleOp& topModule,
 
   // [SS 6] Get all glitching base node in each MG
   LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 5.6] Get all glitching base node in each MG\n");
+  dataGlitchNodeSearch(switchingInfo, profileResults);
   
+  // [SS 7] Update all glitching value for data base nodes in the dataflow circuit
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 5.7] Update all glitching value for data base nodes in the dataflow circuit\n");
+  dataBaseNodeGlitchUpdate(switchingInfo, profileResults, true);
+
+  // [SS 8] Propagate all the data base value
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 5.8] Propagate all the data base value\n");
+  dfgDataChannelPropagate(switchingInfo, profileResults, true);
+
+  // [SS 9] Calculate the data channel switching for each node in the dataflow graph
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 5.9] Calculate the data channel switching for each node in the dataflow graph\n");
+  for (auto &entry : switchingInfo.staticinfo.dataflowGraph->nodes) {
+    const auto &nodeName = entry.first();
+    if (contains(nodeName, "mem_controller")) {
+      continue;
+    }
+
+    auto *node = entry.second.get();
+    node->totalDataSwitchingCounting(false);
+    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t[Node] " << nodeName << "\n");
+    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tData Switching: " << node->totalDataSwitching << "\n");
+    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tValid Switching: " << node->totalValidSwitching << "\n");
+    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tReady Switching: " << node->totalReadySwitching << "\n");
+  }
 }
 
+//===----------------------------------------------------------------------===//
+//
+// Handshake Channel Switching
+//
+//===----------------------------------------------------------------------===//
+void SwitchingEstimationPass::computeSteadyStateHandshakeSwitching(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults) {
+  // For each MG, we do the following two steps
+  //  Step 1: Update buffer information
+  //  Step 2: Calculate the steady state handshake channel switching
+
+  // Step 1
+  for (unsigned i = 0; i < switchingInfo.staticinfo.cfdfcThroughput.size(); i++) {
+    updateMGBufferSwitching(switchingInfo, std::to_string(i), true);
+  }
+
+  // Step 2
+  for (unsigned i = 0; i < switchingInfo.staticinfo.cfdfcThroughput.size(); i++) {
+    mgHandshakeSwitchingCounting(switchingInfo, std::to_string(i), true);
+  }
+  
+  // Debug: Print steady-state handshake values after calculation
+  llvm::dbgs() << "[DEBUG] [STEP 6 RESULTS] Steady-state handshake values:\n";
+  for (const auto& [mgIndex, mgGraph] : switchingInfo.staticinfo.segToGraph) {
+    llvm::dbgs() << "[DEBUG] \tMG " << mgIndex << ":\n";
+    for (const auto& [nodeName, nodePtr] : mgGraph->nodes) {
+      llvm::dbgs() << "[DEBUG] \t\tNode " << nodeName << ": V=" << nodePtr->totalValidSwitching 
+                   << " R=" << nodePtr->totalReadySwitching << "\n";
+    }
+  }
+}
+
+
+void SwitchingEstimationPass::computeTotalHandshakeSwitching(mlir::ModuleOp& topModule, SCFProfilingResult &profileResults) {
+  /* -----------------------------------------------------------------------
+     Assumptions
+       • For nodes that belong to an MG segment we re-use the steady-state
+         switching numbers that were computed previously.
+       • If an MG is executed only once we apply the “buffer-only” rule for
+         buffers and the steady-state rule for the other nodes.
+       • For nodes that live in an S / E / T segment we assume that:
+           – every Valid output toggles twice  (0→1→0)
+           – every Ready input never toggles   (always 0)
+     ----------------------------------------------------------------------*/
+
+  //--------------------------------------------------------------------+
+  // 1)  Iterate over the execution segments in sequential order
+  //--------------------------------------------------------------------+
+  for (auto it = profileResults.execPhaseToSegExecNumMap.begin(); it != profileResults.execPhaseToSegExecNumMap.end(); ++it) {
+    auto segIdx = it->first;
+    auto segLabel = it->second.first;
+    auto numExec = it->second.second;
+
+    // ------------------------------------------------------------------
+    // Fallback: some MG segments appear with an execution count of 0 in
+    // execPhaseToSegExecNumMap.  When that happens we derive the real
+    // count directly from the execution trace so that handshake scaling
+    // uses the correct multiplier.
+    // ------------------------------------------------------------------
+    if (numExec == 0) {
+      numExec = static_cast<unsigned>(
+          std::count(profileResults.executedSegTrace.begin(),
+                     profileResults.executedSegTrace.end(),
+                     segLabel));
+      llvm::dbgs() << "[DEBUG] \t[WARNING] Segment " << segLabel
+                   << " has 0 executions in execPhaseToSegExecNumMap. "
+                   << "Using " << numExec
+                   << " from executedSegTrace instead.\n";
+    }
+
+    llvm::dbgs() << "[DEBUG] \tSegIndex: " << segIdx << "; MG_Label: " << segLabel << ", Num Exec: " << numExec << "\n";
+    
+    //------------------------------------------------------------------+
+    // 2-A)  SEGMENT TYPE :  “S”  or  “T”
+    //------------------------------------------------------------------+
+    // TODO: Define a separate data storing structure for active nodes in the seg
+    auto graph = switchingInfo.staticinfo.dataflowGraph;
+    if (segLabel.find("S") != std::string::npos || segLabel.find("T") != std::string::npos) {
+      llvm::dbgs() << "[DEBUG] \t[SEGMENT] " << segLabel << "\n";
+      llvm::dbgs() << "[DEBUG] \t\t[Type] S or T\n";
+
+      // Traverse all active nodes in the segment
+      for (const auto& nodeName: graph->orderedNodeName) {
+        // Get the node
+        AdjNode *node = graph->nodes[nodeName].get();
+
+        auto segBBList = switchingInfo.staticinfo.segToBBs[segLabel];
+        if (std::find(segBBList.begin(), segBBList.end(), node->bbindex) == segBBList.end()) {
+          continue;
+        }
+        // Calculate the number of valid switches
+        unsigned numSucs = node->sucs.size();
+        unsigned numValidSwitches = 2 * numSucs;
+
+        // The node will be always ready
+        unsigned numReadySwitches = 0;
+
+        // Update the storing structure
+        node->updateHandshakeChannelSwitching(numValidSwitches, numReadySwitches);
+
+        // Update per channel switching information
+        for (const auto& suc: node->sucs) {
+          if (node->validSignal.find(suc) != node->validSignal.end()) {
+            node->validSignal[suc] += 2;
+          } else {
+            node->validSignal[suc] = 2;
+          }
+        }
+      }
+
+      // Skip the rest of the steps
+      continue;
+    } else if (segLabel.find("E") != std::string::npos) {
+      llvm::dbgs() << "[DEBUG] \t[SEGMENT] " << segLabel << "\n";
+      // Get the previous segment
+      std::string prevSegLabel = std::prev(it)->second.first;
+      llvm::dbgs() << "[DEBUG] \t\t[Prev Segment] " << prevSegLabel << "\n";
+
+      // Traverse all active nodes in the segment
+      for (const auto& nodeName: graph->orderedNodeName) {
+        // Get the node
+        AdjNode *node = graph->nodes[nodeName].get();
+
+        // This node is in segment E
+        auto segBBList = switchingInfo.staticinfo.segToBBs[segLabel];
+        if (std::find(segBBList.begin(), segBBList.end(), node->bbindex) == segBBList.end()) {
+          continue;
+        }
+
+        // Check wheter the node is in previous section or not
+        //* Assumption: Seg E will only be following MG ?
+        auto prevSegBBList = switchingInfo.staticinfo.segToBBs[prevSegLabel];
+        if (containsValue(prevSegBBList, node->bbindex)) {
+          // Get the node info in the previous segment
+          AdjNode *prevNode = switchingInfo.staticinfo.segToGraph[prevSegLabel]->nodes[nodeName].get();
+          // Node in the previous segment
+          unsigned numValidSwitches = prevNode->totalValidSwitching;
+          unsigned numSucs = prevNode->sucs.size();
+
+          // if (numValidSwitches != (numSucs * 2)) {
+          //   if (nodeName.find("constant") == std::string::npos && nodeName.find("source") == std::string::npos) {
+          //     // This is the ending segment transition 1 -> 0
+          //     numValidSwitches += (numSucs * 2 - numValidSwitches) / 2;
+          //   }
+          // }
+
+          // Always add the final 1→0 transition of the last token so that
+          // each Valid line ends with the falling edge seen in the Python
+          // reference implementation.
+          if ((!contains(nodeName,"constant")) && (!contains(nodeName,"source"))) {
+            numValidSwitches += (numSucs * 2 - numValidSwitches) / 2;
+          }
+
+          unsigned numReadySwitches = prevNode->totalReadySwitching;
+
+          // Check whether this is a load unit
+          if (nodeName.find("load") != std::string::npos) {
+            numValidSwitches *= 2;
+            numReadySwitches *= 2;
+          }
+
+          // Update the perchannel information
+          // Valid Channel
+          for (const auto& suc: node->sucs) {
+            unsigned selSucValidSwitching = 0;
+            // Check whether this output is in the previous segment or not
+            if (prevNode->validSignal.find(suc) != prevNode->validSignal.end()) {
+              selSucValidSwitching = prevNode->validSignal[suc];
+            } else {
+              selSucValidSwitching = 1;
+            }
+
+            // Update the valid signal
+            if (node->validSignal.find(suc) != node->validSignal.end()) {
+              node->validSignal[suc] += selSucValidSwitching;
+            } else {
+              node->validSignal[suc] = selSucValidSwitching;
+            }
+          }
+
+          // Ready Channel
+          for (const auto & pre: node->pres) {
+            unsigned selPreReadySwitching = 0;
+            // Check whether this input is in the previous segment or not
+            if (prevNode->readySignal.find(pre) != prevNode->readySignal.end()) {
+              selPreReadySwitching = prevNode->readySignal[pre];
+            } else {
+              selPreReadySwitching = 0;
+            }
+
+            // Update the ready signal
+            if (node->readySignal.find(pre) != node->readySignal.end()) {
+              node->readySignal[pre] += selPreReadySwitching;
+            } else {
+              node->readySignal[pre] = selPreReadySwitching;
+            }
+          }
+
+          // Update the storing structure
+          node->updateHandshakeChannelSwitching(numValidSwitches, numReadySwitches);
+        } else {
+          // Get node type
+          auto selNodeType = getNodeType(nodeName);
+          unsigned numValidSwitches = 0;
+          unsigned numReadySwitches = 0;
+          if (selNodeType.find("cond_br") != std::string::npos) {
+            numValidSwitches = 2;
+            numReadySwitches = 4;
+          } else if (JOIN_NODE.find(selNodeType) != JOIN_NODE.end()) {
+            numValidSwitches = 2;
+            numReadySwitches = 2;
+          } else {
+            unsigned numSucs = node->sucs.size();
+            numValidSwitches = 2 * numSucs;
+            numReadySwitches = 0;
+          }
+
+          // Update the storing structure
+          node->updateHandshakeChannelSwitching(numValidSwitches, numReadySwitches);
+        }
+      }
+    } else {
+      llvm::dbgs() << "[DEBUG] \t[SEGMENT] " << segLabel << "\n";
+      llvm::dbgs() << "[DEBUG] \t\t[Type] MG\n";
+      // TODO: Update the logic here for the rest of the nodes
+      
+      // Traverse all active nodes in the segment
+      for (const auto & nodeName: switchingInfo.staticinfo.segToGraph[segLabel]->orderedNodeName) {
+        // Get the node
+        AdjNode *graphNode = graph->nodes[nodeName].get();
+        AdjNode *mgNode = switchingInfo.staticinfo.segToGraph[segLabel]->nodes[nodeName].get();
+
+        // Get the number of switching
+        unsigned numValidSwitches = numExec * mgNode->totalValidSwitching;
+        unsigned numReadySwitches = numExec * mgNode->totalReadySwitching;
+
+        // Update the per-channel information
+        // Valid Channel
+        for (const auto& suc: graphNode->sucs) {
+          unsigned selSucValidSwitching = 0;
+          // Check whether this output is in the previous segment or not
+          if (mgNode->validSignal.find(suc) != mgNode->validSignal.end()) {
+            selSucValidSwitching = numExec * mgNode->validSignal[suc];
+          } else {
+            selSucValidSwitching = 0;
+          }
+
+          // Update the valid signal
+          if (graphNode->validSignal.find(suc) != graphNode->validSignal.end()) {
+            graphNode->validSignal[suc] += selSucValidSwitching;
+          } else {
+            graphNode->validSignal[suc] = selSucValidSwitching;
+          }
+        }
+
+        // Ready Channel
+        for (const auto & pre: graphNode->pres) {
+          unsigned selPreReadySwitching = 0;
+          // Check whether this input is in the previous segment or not
+          if (mgNode->readySignal.find(pre) != mgNode->readySignal.end()) {
+            selPreReadySwitching = numExec * mgNode->readySignal[pre];
+          } else {
+            selPreReadySwitching = 0;
+          }
+
+          // Update the ready signal
+          if (graphNode->readySignal.find(pre) != graphNode->readySignal.end()) {
+            graphNode->readySignal[pre] += selPreReadySwitching;
+          } else {
+            graphNode->readySignal[pre] = selPreReadySwitching;
+          }
+        }
+        
+        // Check whether this is a load unit
+        if (nodeName.find("load") != std::string::npos) {
+          numValidSwitches *= 2;
+          numReadySwitches *= 2;
+        }
+
+        // Update the storing structure
+        graphNode->updateHandshakeChannelSwitching(numValidSwitches, numReadySwitches);
+      }
+    }
+  }
+}

@@ -4,6 +4,8 @@ add_dynamatic_library(DynamaticSwitchingEstimation
   SwitchingSupport.cpp
   ProfilingAnalyzer.cpp
   NodeModels.cpp
+  DataChannelCal.cpp
+  HandShakeChannelCal.cpp
 
   DEPENDS
   DynamaticExperimentalAnalysisPassIncGen

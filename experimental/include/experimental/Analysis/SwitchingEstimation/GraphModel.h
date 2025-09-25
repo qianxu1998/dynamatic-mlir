@@ -286,6 +286,71 @@ public:
   // Format: {"cond_br_node" : [(buffer_name, port_idx), ], }
   llvm::StringMap<  std::vector<std::pair<std::string, unsigned>>> condBrToBufferMap;
 
+  //===----------------------------------------------------------------------===//
+  // Path Caching Structures
+  //===----------------------------------------------------------------------===//
+  struct PathKey {
+    std::string srcNode;
+    std::string dstNode;
+    bool noStartingNode;
+    bool useGlobalOrder;
+
+    // Constructor
+    PathKey (std::string srcNode, std::string dstNode, bool noStartingNode, bool useGlobalOrder)
+      : srcNode(srcNode), dstNode(dstNode), noStartingNode(noStartingNode), useGlobalOrder(useGlobalOrder) {}
+
+    // Operator overload
+    bool operator == (const PathKey &o) const {
+      return srcNode == o.srcNode && dstNode == o.dstNode &&
+             noStartingNode == o.noStartingNode && useGlobalOrder == o.useGlobalOrder;
+    }
+  };
+
+  struct PathKeyHasher {
+    std::size_t operator()(PathKey const &p) const noexcept {
+      std::size_t h1 = std::hash<std::string>{}(p.srcNode);
+      std::size_t h2 = std::hash<std::string>{}(p.dstNode);
+      std::size_t h3 = std::hash<bool>{}(p.noStartingNode);
+      std::size_t h4 = std::hash<bool>{}(p.useGlobalOrder);
+      return ( (( h1*31) ^ (h2*17)  )>>1) ^ ((h3<<1) | (h4<<2));
+    }
+  };
+
+  // cache for longest paths from each entry node to all other nodes 
+  std::unordered_map<PathKey , std::pair<unsigned, std::string> ,PathKeyHasher> maxLatencyCache;
+
+  // Helper function to get the max latency path from the cache
+  std::pair<unsigned, std::string> getMaxLatency(const std::string &srcNode,
+        const std::string &dstNode, bool noStartingNode, bool useGlobalOrder) {
+    
+    // Get the path key in this graph
+    PathKey selKey(srcNode, dstNode, noStartingNode, useGlobalOrder);
+    
+    // Check whether the key exists in the cache
+    auto it = maxLatencyCache.find(selKey);
+    // [CASE 1] Cache hit
+    if (it != maxLatencyCache.end()) {
+      return it->second;
+    }
+
+    // [CASE 2] Cache miss, recalculate the max latency path
+    std::vector<Path> tmpPaths = findPaths(srcNode, dstNode, noStartingNode, useGlobalOrder);
+    unsigned maxLatency = 0;
+    std::string bestSrcNode = "";
+    for (const auto &selPath : tmpPaths) {
+      auto tmpLatency = selPath.latency;
+      if (tmpLatency >= maxLatency) {
+        maxLatency = tmpLatency;
+        bestSrcNode = srcNode;
+      }
+    }
+
+    // Update the cache
+    maxLatencyCache[selKey] = std::make_pair(maxLatency, bestSrcNode);
+    return std::make_pair(maxLatency, bestSrcNode);
+  }
+
+
   // 
   //  Internal Storing Variables
   //

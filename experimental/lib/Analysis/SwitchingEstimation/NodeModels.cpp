@@ -181,6 +181,7 @@ void PassNode::calReadySet(const std::string &preNodeName,
       tmp.set(nodeStartTime);
       setR[preNodeName] = std::move(tmp);
     } else if (!setV.empty()) {
+      // TODO: Verify the logic here, 21/09/2025
       // Fallback: copy the set from the first key in setVMap if it is not the
       // full set.
       auto it = setV.begin();
