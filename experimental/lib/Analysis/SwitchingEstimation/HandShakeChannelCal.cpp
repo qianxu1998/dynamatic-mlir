@@ -1,4 +1,5 @@
-//===- HandShakeChannelCal.cpp - Estimate Switching Activities ------*- C++ -*-===//
+//===- HandShakeChannelCal.cpp - Estimate Switching Activities ------*- C++
+//-*-===//
 //
 // This file declares all functions used for data channel switching calculation
 //
@@ -22,12 +23,13 @@
 #include "llvm/ADT/DenseMap.h"
 
 void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
-                       bool debug) {
+                             bool debug) {
   // Get the corresponding graph
   auto selAdjGraph = switchInfo.staticinfo.segToGraph[selMG];
 
   // Get needed information
-  double_t selMgThroughput = switchInfo.staticinfo.cfdfcThroughput[std::stoi(selMG)];
+  double_t selMgThroughput =
+      switchInfo.staticinfo.cfdfcThroughput[std::stoi(selMG)];
   // TODO: Validate the following rounding
   float rawII = 1.0f / selMgThroughput;
   unsigned selMGII = selAdjGraph->cfdfcII;
@@ -55,7 +57,8 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
           dyn_cast<BufferNode>(selAdjGraph->nodes[selBuffName].get());
 
       // Get the longest path
-      LongestPathResult tmpLongPath =selLongestPath(switchInfo, selBuffName, selMG);
+      LongestPathResult tmpLongPath =
+          selLongestPath(switchInfo, selBuffName, selMG);
 
       if (debug) {
         llvm::dbgs() << "\t\tStarting node: " << tmpLongPath.selStartNode
@@ -115,7 +118,8 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
       }
 
       IISet tmpBufferValidSet(selMGII, false);
-      if (tmpNumCycles < 0.0f) tmpNumCycles = 0.0f;
+      if (tmpNumCycles < 0.0f)
+        tmpNumCycles = 0.0f;
       for (unsigned i = 0; i < getUnsigned(tmpNumCycles); ++i) {
         unsigned relativeActiveCycle =
             static_cast<unsigned>(finStartPoint + i) % selMGII;
@@ -132,7 +136,8 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
       selBuffNode->calValidSet(selBuffNode->sucs[0], tmpBufferValidSet);
 
       // [Step 3] Calculate SET_R
-       // TODO: Correct the ready channel upadte mechanism with different buffer types
+      // TODO: Correct the ready channel upadte mechanism with different buffer
+      // types
       IISet tmpBufferReadySet(selMGII, false);
       // Handle cascaded buffers (opaque buffer -> transparent buffer)
       // TODO: Validate the following operations through simulation
@@ -177,14 +182,14 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
           }
         }
 
-        //TODO Changed here from unisgned to int
+        // TODO Changed here from unisgned to int
         int tmpMissingCycles = 0;
         if (selBuffTransparent) {
           if (selBufSlots == 1) {
-            tmpMissingCycles = static_cast<int>(
-                ((1 - selMgThroughput) -
-                 (selBufSlots - selBuffOcc - tmpPreBuffOcc)) /
-                selMgThroughput);
+            tmpMissingCycles =
+                static_cast<int>(((1 - selMgThroughput) -
+                                  (selBufSlots - selBuffOcc - tmpPreBuffOcc)) /
+                                 selMgThroughput);
           } else {
             tmpMissingCycles = static_cast<int>(
                 ((1 - selMgThroughput) - (selBufSlots - selBuffOcc)) /
@@ -199,8 +204,10 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
 
         //
         IISet offsetSet(selMGII, false);
-        llvm::dbgs() << "[DEBUG] Missed Cycles temp " << tmpMissingCycles << " \n";
-        if (tmpMissingCycles < 0) tmpMissingCycles = 0;
+        llvm::dbgs() << "[DEBUG] Missed Cycles temp " << tmpMissingCycles
+                     << " \n";
+        if (tmpMissingCycles < 0)
+          tmpMissingCycles = 0;
         for (int i = 0; i < tmpMissingCycles; i++) {
           // TODO: Validate the following rounding
           unsigned relativeActiveCycle =
@@ -209,7 +216,7 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
               selMGII;
           offsetSet.set(relativeActiveCycle);
         }
-        
+
         // Now the buffer is NOT ready in offsetSet, so we want
         // tmpBufferReadySet = Universe - offsetSet
         // i.e. difference: in bitwise operation it translates to   Universe &
@@ -249,11 +256,14 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
   }
 }
 
-// This function iterativly counts the number of handshake switches of all nodes in the selected cfdfc
-void mgHandshakeSwitchingCounting(SwitchingInfo &switchInfo, std::string selMG, bool debug) {
+// This function iterativly counts the number of handshake switches of all nodes
+// in the selected cfdfc
+void mgHandshakeSwitchingCounting(SwitchingInfo &switchInfo, std::string selMG,
+                                  bool debug) {
   // Get the corresponding graph
   auto selAdjGraph = switchInfo.staticinfo.segToGraph[selMG];
-  double_t selMgThroughput = switchInfo.staticinfo.cfdfcThroughput[std::stoi(selMG)];
+  double_t selMgThroughput =
+      switchInfo.staticinfo.cfdfcThroughput[std::stoi(selMG)];
 
   unsigned selMGII = selAdjGraph->cfdfcII;
 
@@ -268,7 +278,8 @@ void mgHandshakeSwitchingCounting(SwitchingInfo &switchInfo, std::string selMG, 
   }
 
   // Get the list of Load nodes influenced by buffers
-  auto selInfluencedLoadUnits = getLoadsInfluencedByBuffers(switchInfo, selMG, bufferList);
+  auto selInfluencedLoadUnits =
+      getLoadsInfluencedByBuffers(switchInfo, selMG, bufferList);
   switchInfo.mgInfluencedLoadUnits.push_back(selInfluencedLoadUnits);
 
   // Status
@@ -370,15 +381,18 @@ void mgHandshakeSwitchingCounting(SwitchingInfo &switchInfo, std::string selMG, 
   //! Testing
   if (debug) {
     llvm::dbgs() << "[DEBUG] [HANDSHAKE CHANNEL SWITCHING SUMMARY]\n";
-    for (const auto& selNode: selAdjGraph->nodes) {
-      llvm::dbgs() << "[DEBUG] \t=============================================================\n";
+    for (const auto &selNode : selAdjGraph->nodes) {
+      llvm::dbgs() << "[DEBUG] "
+                      "\t======================================================"
+                      "=======\n";
       llvm::dbgs() << "[DEBUG] \tNode Name: " << selNode.first() << "\n";
       selNode.second->printNodeDetails();
     }
-  } 
+  }
 }
 
-void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::string &selMG, unsigned selMGII, bool debug) {
+void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
+                         std::string &selMG, unsigned selMGII, bool debug) {
   // Get the corresponding storing structure
   auto selAdjGraph = switchInfo.staticinfo.segToGraph[selMG];
   auto selNodeStoringDict = selAdjGraph->nodes;
@@ -532,7 +546,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
   auto nodePtr = selNodeStoringDict[selNode];
   if (nodePtr->sucs.size() == 0) {
     if (debug) {
-      llvm::dbgs() << "[DEBUG] Leaf node " << selNode << ": no successors, marking all ready to 1.\n";
+      llvm::dbgs() << "[DEBUG] Leaf node " << selNode
+                   << ": no successors, marking all ready to 1.\n";
     }
     for (const auto &pre : nodePtr->pres) {
       setReady(nodePtr.get(), pre, 0);
@@ -542,552 +557,643 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
   }
 
   // Calculate handshake switching for different types of nodes
-  llvm::TypeSwitch<AdjNode*, void>(nodePtr.get())
-    .Case<CmpiNode>([&](CmpiNode *cmpi) {
-      // CMPI Node
-      //! Testing
-      if (debug) llvm::dbgs() << "[CMPI] NODE \n";
-      // Valid Signal
-      for (const auto &selSuc : cmpi->sucs) {
-        // Calculate the number of switching
-        cmpi->calValidSwitching(selSuc, tmpPValidList[0], tmpPValidList[1], selMGII);
-        // Calculate active range
-        cmpi->calValidSet(selSuc, tmpNodeSSStart, selMGII);
-      }
-
-      // Ready signal
-      for (const auto &selPre: cmpi->pres) {
-        // Get the node name of the other input port
-        std::string other;
-        for (const auto &tmpNode : cmpi->pres) {
-          if (tmpNode != selPre) other = tmpNode;
-        }
-
-        cmpi->calReadySwitching(selPre, tmpPValidDict[other], tmpNReadyList[0]);
-        cmpi->calReadySet(selPre, tmpPValidSetDict[other], tmpNReadySetList[0], tmpNodeSSStart, selMGII);
-      }
-    })
-    .Case<AddiNode>([&](AddiNode *addi) {
-      // ADDI NODE
-      if (debug) llvm::dbgs() << "[ADDI NODE] \n";
-      // Valid Signal
-      for (const auto &selSuc : addi->sucs) {
-        // Calculate the number of switching
-        addi->calValidSwitching(selSuc, tmpPValidList[0], tmpPValidList[1], selMGII);
-        // Calculate active range
-        addi->calValidSet(selSuc, tmpNodeSSStart, selMGII);
-      }
-
-      // Ready Signals
-      for (const auto& selPre: addi->pres) {
-        // Get the node name of the other input port
-        std::string other;
-        for (const auto &tmpNode : addi->pres)
-          if (tmpNode != selPre) other = tmpNode;
-
-        addi->calReadySwitching(selPre, tmpPValidDict[other], tmpNReadyList[0]);
-        addi->calReadySet(selPre, tmpPValidSetDict[other], tmpNReadySetList[0], tmpNodeSSStart, selMGII);
-      }
-    })
-    .Case<OriNode>([&](OriNode *ori) {
-      // ORI NODE
-      if (debug) llvm::dbgs() << "[ORI NODE] \n";
-      // Valid Signal
-      for (const auto &selSuc : ori->sucs) {
-        // Calculate the number of switching
-        ori->calValidSwitching(selSuc, tmpPValidList[0], tmpPValidList[1], selMGII);
-        // Calculate active range
-        ori->calValidSet(selSuc, tmpNodeSSStart, selMGII);
-      }
-
-      // Ready Signals
-      for (const auto& selPre: ori->pres) {
-        // Get the node name of the other input port
-        std::string other;
-        for (const auto &tmpNode : ori->pres)
-          if (tmpNode != selPre) other = tmpNode;
-
-        ori->calReadySwitching(selPre, tmpPValidDict[other], tmpNReadyList[0]);
-        ori->calReadySet(selPre, tmpPValidSetDict[other], tmpNReadySetList[0], tmpNodeSSStart, selMGII);
-      }
-    })
-    .Case<AndiNode>([&](AndiNode *andi) {
-      // ANDI NODE
-      if (debug) llvm::dbgs() << "[ANDI NODE] \n";
-      // Valid Signal
-      for (const auto &selSuc : andi->sucs) {
-        // Calculate the number of switching
-        andi->calValidSwitching(selSuc, tmpPValidList[0], tmpPValidList[1], selMGII);
-        // Calculate active range
-        andi->calValidSet(selSuc, tmpNodeSSStart, selMGII);
-      }
-
-      // Ready Signals
-      for (const auto& selPre: andi->pres) {
-        // Get the node name of the other input port
-        std::string other;
-        for (const auto &tmpNode : andi->pres)
-          if (tmpNode != selPre) other = tmpNode;
-
-        andi->calReadySwitching(selPre, tmpPValidDict[other], tmpNReadyList[0]);
-        andi->calReadySet(selPre, tmpPValidSetDict[other], tmpNReadySetList[0], tmpNodeSSStart, selMGII);
-      }
-    })
-    .Case<SubiNode>([&](SubiNode *subi) {
-      // SUBI NODE
-      if (debug) llvm::dbgs() << "[SUBI NODE] \n";
-      // Valid Signal
-      for (const auto &selSuc : subi->sucs) {
-        // Calculate the number of switching
-        subi->calValidSwitching(selSuc, tmpPValidList[0], tmpPValidList[1], selMGII);
-        // Calculate active range
-        subi->calValidSet(selSuc, tmpNodeSSStart, selMGII);
-      }
-
-      // Ready Signals
-      for (const auto& selPre: subi->pres) {
-        // Get the node name of the other input port
-        std::string other;
-        for (const auto &tmpNode : subi->pres)
-          if (tmpNode != selPre) other = tmpNode;
-
-        subi->calReadySwitching(selPre, tmpPValidDict[other], tmpNReadyList[0]);
-        subi->calReadySet(selPre, tmpPValidSetDict[other], tmpNReadySetList[0], tmpNodeSSStart, selMGII);
-      }
-    })
-    .Case<MuliNode>([&](MuliNode* muli) {
-      // MULI Node
-      //! Testing
-      if (debug) llvm::dbgs() << "[MULI NODE] \n";
-      // Valid Signal
-      for (const auto& selSuc: muli->sucs) {
-        // Calculate the number of switching
-        muli->calValidSwitching(selSuc, tmpPValidList[0], tmpPValidList[1], selMGII);
-        // Calculate active range
-        muli->calValidSet(selSuc, tmpNodeSSStart, selMGII);
-      }
-
-      // Ready Signals
-      for (const auto& selPre: muli->pres) {
-        // Get the node name of the other input port
-        std::vector<std::string> otherNodeNames;
-        for (const auto& tmpNode: muli->pres) {
-          if (tmpNode != selPre) otherNodeNames.push_back(tmpNode);
-        }
-
-        muli->calReadySwitching(selPre, tmpPValidDict[otherNodeNames[0]], tmpNReadyList[0]);
-        muli->calReadySet(selPre, tmpPValidSetDict[otherNodeNames[0]], tmpNReadySetList[0], tmpNodeSSStart, selMGII);
-      }
-    })
-    .Case<ExtsiNode>([&](ExtsiNode* ext) {
-      // EXTSI NODE
-      //! Testing
-      if (debug) llvm::dbgs() << "[EXTSI NODE] \n";
-      // Valid Signal
-      for (const auto& selSuc: ext->sucs) {
-        // Number of switching
-        ext->calValidSwitching(selSuc, tmpPValidList[0]);
-        // Active Range
-        ext->calValidSet(selSuc, tmpNodeSSStart, selMGII);
-      }
-
-      // Ready Signal
-      for (const auto& selPre: ext->pres) {
-        // Check the number of successors
-        if (tmpNReadyList.size() == 0) {
-          unsigned numReadySwitch = 0;
-          ext->setReadySwitching(selPre, numReadySwitch);
-          IISet tmpSet(selMGII, true);
-          ext->setReadySet(selPre, tmpSet);
-        } else {
-          // Number of switching
-          ext->calReadySwitching(selPre, tmpNReadyList[0]);
-          ext->calReadySet(selPre, tmpNReadySetList[0], tmpNodeSSStart, selMGII);
-        }
-      }
-    })
-    .Case<ExtuiNode>([&](ExtuiNode* ext) {
-      // EXTUI NODE
-      //! Testing
-      if (debug) llvm::dbgs() << "[EXTUI NODE] \n";
-      // Valid Signal
-      for (const auto& selSuc: ext->sucs) {
-        // Number of switching
-        ext->calValidSwitching(selSuc, tmpPValidList[0]);
-        ext->calValidSet(selSuc, tmpNodeSSStart, selMGII);
-      }
-
-      // Ready Signal
-      for (const auto& selPre: ext->pres) {
-        // Check the number of successors
-        if (tmpNReadyList.size() == 0) {
-          unsigned numReadySwitch = 0;
-          ext->setReadySwitching(selPre, numReadySwitch);
-          IISet tmpSet(selMGII, true);
-          ext->setReadySet(selPre, tmpSet);
-        } else {
-          // Number of switching
-          ext->calReadySwitching(selPre, tmpNReadyList[0]);
-          ext->calReadySet(selPre, tmpNReadySetList[0], tmpNodeSSStart, selMGII);
-        }
-      }
-    })
-    .Case<DLoadNode>([&](DLoadNode* load) {
-      // DLoadNode NODE: This node will only have 1 input and 1 output, all connections to mem_con ignored
-      //! Testing
-      if (debug) llvm::dbgs() << "[DLoad NODE] \n";
-      // Valid Signal
-      for (const auto& selSuc: load->sucs) {
-        // Number of switching
-        load->calValidSwitching(selSuc, tmpPValidList[0]);
-        // Active Range
-        load->calValidSet(selSuc, tmpPValidSetList[0], selMGII);
-      }
-
-      // Ready Signal
-      for (const auto& selPre: load->pres) {
-        // Number of switching
-        if (std::find(switchInfo.mgInfluencedLoadUnits[std::stoul(selMG)].begin(), switchInfo.mgInfluencedLoadUnits[std::stoul(selMG)].end(), selNode) !=
-                    switchInfo.mgInfluencedLoadUnits[std::stoul(selMG)].end()) {
-          int tmpSwitching = 2;
-          load->calReadySwitching(selPre, tmpSwitching);
-        } else {
-          int tmpSwitching = 0;
-          load->calReadySwitching(selPre, tmpSwitching);
-        }
-
-        // Active Range
-        load->calReadySet(selPre, tmpNReadySetList[0], tmpNodeSSStart, selMGII);
-      }
-    })
-    .Case<DStoreNode>([&](DStoreNode* store) {
-      // DStoreNode NODE
-      //! Testing
-      if (debug) llvm::dbgs() << "[DStore NODE] \n";
-      // Valid Signal: This node will not have any successors in the extracted CFDFC, but we still model the switching of MC
-      store->calValidSwitching(tmpPValidList[0], tmpPValidList[1]);
-      // Active Range
-      store->calValidSet(tmpPValidSetList[0], tmpPValidSetList[1], selMGII);
-
-      // Ready Signal
-      for (const auto& selPre: store->pres) {
-        store->calReadySwitching(selPre, tmpPValidList[0], tmpPValidList[1]);
-        store->calReadySet(selPre, tmpPValidSetList[0], tmpPValidSetList[1], selMGII);
-      }
-    })
-    .Case<ForkNode>([&](ForkNode* fork) {
-      // ForkNode NODE
-      //! Testing
-      if (debug) llvm::dbgs() << "[Fork NODE] \n";
-      // Valid Signal
-      for (auto& selSuc: fork->sucs) {
-        // Get Suc Node Start
-        int sucNodeStart = mgGetNodeStartingPoint(switchInfo, selSuc, selMG);
-        // Number of switching
-        fork->calValidSwitching(selSuc, tmpPValidList[0], tmpNReadySetDict, tmpNReadyDict, static_cast<unsigned>(sucNodeStart), tmpNodeSSStart, selMGII);
-        // Active Range
-        fork->calValidSet(selSuc, tmpNodeSSStart, tmpPValidList[0], tmpNReadySetDict, selMGII);
-
+  llvm::TypeSwitch<AdjNode *, void>(nodePtr.get())
+      .Case<CmpiNode>([&](CmpiNode *cmpi) {
+        // CMPI Node
         //! Testing
-        llvm::dbgs() << "Updating Value for Suc: " << selSuc << "\n";
-      }
-
-      // Ready Signal
-      for (const auto& selPre: fork->pres) {
-        // Number of switching
-        fork->calReadySwitching(selPre, tmpNReadyList);
-        fork->calReadySet(selPre, tmpNReadySetDict, selMGII);
-      }
-    })
-    // TODO: Add support for lazy fork Node
-    .Case<MuxNode>([&](MuxNode* mux) {
-      // MuxNode NODE
-      //! Testing
-      if (debug) llvm::dbgs() << "[Mux NODE] \n";
-      // Get the cond input port name
-      std::string condPortName = "";
-      std::string dataInputPortName = "";
-      auto nameToPortIdxMap = mux->preNameToPortIdxMap;
-      for (auto& selPreName: mux->pres) {
-        if (nameToPortIdxMap[selPreName] == 0) {
-          condPortName = selPreName;
-        } else {
-          dataInputPortName = selPreName;
+        if (debug)
+          llvm::dbgs() << "[CMPI] NODE \n";
+        // Valid Signal
+        for (const auto &selSuc : cmpi->sucs) {
+          // Calculate the number of switching
+          cmpi->calValidSwitching(selSuc, tmpPValidList[0], tmpPValidList[1],
+                                  selMGII);
+          // Calculate active range
+          cmpi->calValidSet(selSuc, tmpNodeSSStart, selMGII);
         }
-      }
 
-      // Get the cond value
-      // ! Check the following default value
-      // TODO: May need to change this value
-      int condValue = 1;
-
-      // Get node starting time in steady state
-      int nodeStartTime = mgGetNodeStartingPoint(switchInfo, selNode, selMG);
-
-      // Valid Signal
-      for (auto& selSuc: mux->sucs) {
-        // Number of switching
-        mux->calValidSwitching(selSuc, selMGII);
-        // Active Range
-        mux->calValidSet(selSuc, static_cast<unsigned>(nodeStartTime), selMGII);
-      }
-
-      // Ready Signal
-      for (auto& selPre: mux->pres) {
-        // Number of Switching
-        mux->calReadySwitching(selPre, static_cast<unsigned>(condValue), tmpPValidDict[selPre], tmpPValidSetDict[condPortName], tmpPValidSetDict[dataInputPortName], tmpNReadySetList[0], selMGII);
-        // Active Range
-        mux->calReadySet(selPre, tmpPValidSetDict[condPortName], tmpPValidSetDict[dataInputPortName], tmpNReadySetList[0], selMGII);
-      }
-    })
-    .Case<TrunciNode>([&](TrunciNode* trunci) {
-      // TrunciNode NODE
-      //! Testing
-      if (debug) llvm::dbgs() << "[Trunci NODE] \n";
-      // Valid Signal
-      for (const auto& selSuc: trunci->sucs) {
-        trunci->calValidSwitching(selSuc, tmpPValidList[0]);
-        trunci->calValidSet(selSuc, tmpNodeSSStart, selMGII);
-      }
-
-      // Ready Signal
-      for (auto& selPre: trunci->pres) {
-        trunci->calReadySwitching(selPre, tmpNReadyList[0]);
-        trunci->calReadySet(selPre, tmpNReadySetList[0], tmpNodeSSStart, selMGII);
-      }
-    })
-    .Case<CMergeNode>([&](CMergeNode* cmerge) {
-      // CMergeNode NODE
-      //! Testing
-      if (debug) llvm::dbgs() << "[CMerge NODE] \n";
-      // Get node starting time in steady state
-      int nodeStartTime = mgGetNodeStartingPoint(switchInfo, selNode, selMG);
-
-      // Valid Signal
-      for (auto& selSuc: cmerge->sucs) {
-        // Numebr of Switching
-        cmerge->calValidSwitching(selSuc, selMGII);
-        // Active Range
-        cmerge->calValidSet(selSuc, static_cast<unsigned>(nodeStartTime), selMGII);
-      }
-
-      // Ready Signal
-      for (const auto& selPre: cmerge->pres) {
-        // Number of Switching
-        cmerge->calReadySwitching(selPre);
-        // Active Range
-        cmerge->calReadySet(selPre, selMGII);
-      }
-      
-    })
-    .Case<CBrNode>([&](CBrNode* cbr) {
-      // CBrNode NODE
-      //! Testing
-      if (debug) llvm::dbgs() << "[CBr NODE] \n";
-      // Get the conditional value
-      std::string condPortName = cbr->condPreNodeName;
-
-      // Check the existence of the cond_port_name,
-      // sometime the cond_port_name is the same as the data_port_name
-      if (condPortName == "") {
-        condPortName = cbr->dataPreNodeName;
-      }
-
-      //! Testing
-      // TODO: Calibrate the cond value with the simulation
-      if (debug) {
-        llvm::dbgs() << "Node: " << selNode << "\n";
-        llvm::dbgs() << "\tCond_input Port: " << condPortName << "\n";
-      }
-
-      // Check whether the index exist or not
-      int condValue = 0;
-      if (switchInfo.staticinfo.dataflowGraph->nodes[condPortName]->dataOut[selNode].size() > switchInfo.data.firstExecutedIter[selMG]) {
-        condValue = switchInfo.staticinfo.dataflowGraph->nodes[condPortName]->dataOut[selNode][switchInfo.data.firstExecutedIter[selMG]];
-      } else {
-        condValue = switchInfo.staticinfo.dataflowGraph->nodes[condPortName]->dataOut[selNode][0];
-      }
-
-      //! Testing
-      if (debug) {
-        llvm::dbgs() << "\tCond_value: " << condValue << "\n";
-      }
-
-      std::string selOutputPort = "";
-      auto selNameToPortIdxMap = cbr->outChannelNameToIndexMap;
-
-      for (auto& selSuc: cbr->sucs) {
-        if (selNameToPortIdxMap[selSuc] != static_cast<unsigned>(condValue)) {
-          selOutputPort = selSuc;
-        }
-      }
-
-      //! Testing
-      if (debug) {
-        llvm::dbgs() << "\tSelected Suc Node: " << selOutputPort << "\n";
-      }
-
-      // Sometime we just have one output for cond_br
-      if (selOutputPort == "") {
-        selOutputPort = cbr->sucs[0];
-        condValue = 1 - condValue;
-      }
-
-      // Check the number of input ports
-      unsigned numInputs = cbr->pres.size();
-
-      // Valid Signal
-      for (auto& selSuc: cbr->sucs) {
-        if (numInputs > 1) {
-          // Number of switching
-          cbr->calValidSwitching(selSuc, static_cast<unsigned>(condValue), tmpPValidList[0], tmpPValidList[1]);
-          // Active Range
-          cbr->calValidSet(selSuc, tmpNodeSSStart, static_cast<unsigned>(condValue), selMGII);
-        } else {
-          // Number of switching
-          cbr->calValidSwitching(selSuc, static_cast<unsigned>(condValue), tmpPValidList[0], tmpPValidList[0]);
-          // Active Range
-          cbr->calValidSet(selSuc, tmpNodeSSStart, static_cast<unsigned>(condValue), selMGII);
-        }
-      }
-
-      // Ready Signal
-      for (auto& selPre: cbr->pres) {
-        if (numInputs > 1) {
-          // Get the node_name of the other input port
-          std::vector<std::string> otherNodeNames;
-          for (const auto& tmpNode: cbr->pres) {
-            if (tmpNode != selPre) otherNodeNames.push_back(tmpNode);
+        // Ready signal
+        for (const auto &selPre : cmpi->pres) {
+          // Get the node name of the other input port
+          std::string other;
+          for (const auto &tmpNode : cmpi->pres) {
+            if (tmpNode != selPre)
+              other = tmpNode;
           }
 
-          // Number of switching
-          cbr->calReadySwitching(selPre, tmpPValidDict[otherNodeNames[0]], tmpNReadyDict[selOutputPort]);
-          // Active Range
-          cbr->calReadySet(selPre, tmpPValidSetDict[otherNodeNames[0]], tmpNReadySetDict[selOutputPort], selMGII);
-        } else {
-          // Number of switching
-          cbr->calReadySwitching(selPre, tmpPValidDict[selPre], tmpNReadyDict[selOutputPort]);
-          // Active Range
-          cbr->calReadySet(selPre, tmpPValidSetDict[selPre], tmpNReadySetDict[selOutputPort], selMGII);
+          cmpi->calReadySwitching(selPre, tmpPValidDict[other],
+                                  tmpNReadyList[0]);
+          cmpi->calReadySet(selPre, tmpPValidSetDict[other],
+                            tmpNReadySetList[0], tmpNodeSSStart, selMGII);
         }
-      }
-    })
-    .Case<SourceNode>([&](SourceNode* source) {
-      // Source node: Normally no pre node
-      //! Testing
-      if (debug) llvm::dbgs() << "[Source NODE] \n";
-      // Valid Signals
-      for (auto& selSuc: source->sucs) {
-        // Number of Switching
-        source->calValidSwitching(selSuc);
+      })
+      .Case<AddiNode>([&](AddiNode *addi) {
+        // ADDI NODE
+        if (debug)
+          llvm::dbgs() << "[ADDI NODE] \n";
+        // Valid Signal
+        for (const auto &selSuc : addi->sucs) {
+          // Calculate the number of switching
+          addi->calValidSwitching(selSuc, tmpPValidList[0], tmpPValidList[1],
+                                  selMGII);
+          // Calculate active range
+          addi->calValidSet(selSuc, tmpNodeSSStart, selMGII);
+        }
+
+        // Ready Signals
+        for (const auto &selPre : addi->pres) {
+          // Get the node name of the other input port
+          std::string other;
+          for (const auto &tmpNode : addi->pres)
+            if (tmpNode != selPre)
+              other = tmpNode;
+
+          addi->calReadySwitching(selPre, tmpPValidDict[other],
+                                  tmpNReadyList[0]);
+          addi->calReadySet(selPre, tmpPValidSetDict[other],
+                            tmpNReadySetList[0], tmpNodeSSStart, selMGII);
+        }
+      })
+      .Case<OriNode>([&](OriNode *ori) {
+        // ORI NODE
+        if (debug)
+          llvm::dbgs() << "[ORI NODE] \n";
+        // Valid Signal
+        for (const auto &selSuc : ori->sucs) {
+          // Calculate the number of switching
+          ori->calValidSwitching(selSuc, tmpPValidList[0], tmpPValidList[1],
+                                 selMGII);
+          // Calculate active range
+          ori->calValidSet(selSuc, tmpNodeSSStart, selMGII);
+        }
+
+        // Ready Signals
+        for (const auto &selPre : ori->pres) {
+          // Get the node name of the other input port
+          std::string other;
+          for (const auto &tmpNode : ori->pres)
+            if (tmpNode != selPre)
+              other = tmpNode;
+
+          ori->calReadySwitching(selPre, tmpPValidDict[other],
+                                 tmpNReadyList[0]);
+          ori->calReadySet(selPre, tmpPValidSetDict[other], tmpNReadySetList[0],
+                           tmpNodeSSStart, selMGII);
+        }
+      })
+      .Case<AndiNode>([&](AndiNode *andi) {
+        // ANDI NODE
+        if (debug)
+          llvm::dbgs() << "[ANDI NODE] \n";
+        // Valid Signal
+        for (const auto &selSuc : andi->sucs) {
+          // Calculate the number of switching
+          andi->calValidSwitching(selSuc, tmpPValidList[0], tmpPValidList[1],
+                                  selMGII);
+          // Calculate active range
+          andi->calValidSet(selSuc, tmpNodeSSStart, selMGII);
+        }
+
+        // Ready Signals
+        for (const auto &selPre : andi->pres) {
+          // Get the node name of the other input port
+          std::string other;
+          for (const auto &tmpNode : andi->pres)
+            if (tmpNode != selPre)
+              other = tmpNode;
+
+          andi->calReadySwitching(selPre, tmpPValidDict[other],
+                                  tmpNReadyList[0]);
+          andi->calReadySet(selPre, tmpPValidSetDict[other],
+                            tmpNReadySetList[0], tmpNodeSSStart, selMGII);
+        }
+      })
+      .Case<SubiNode>([&](SubiNode *subi) {
+        // SUBI NODE
+        if (debug)
+          llvm::dbgs() << "[SUBI NODE] \n";
+        // Valid Signal
+        for (const auto &selSuc : subi->sucs) {
+          // Calculate the number of switching
+          subi->calValidSwitching(selSuc, tmpPValidList[0], tmpPValidList[1],
+                                  selMGII);
+          // Calculate active range
+          subi->calValidSet(selSuc, tmpNodeSSStart, selMGII);
+        }
+
+        // Ready Signals
+        for (const auto &selPre : subi->pres) {
+          // Get the node name of the other input port
+          std::string other;
+          for (const auto &tmpNode : subi->pres)
+            if (tmpNode != selPre)
+              other = tmpNode;
+
+          subi->calReadySwitching(selPre, tmpPValidDict[other],
+                                  tmpNReadyList[0]);
+          subi->calReadySet(selPre, tmpPValidSetDict[other],
+                            tmpNReadySetList[0], tmpNodeSSStart, selMGII);
+        }
+      })
+      .Case<MuliNode>([&](MuliNode *muli) {
+        // MULI Node
+        //! Testing
+        if (debug)
+          llvm::dbgs() << "[MULI NODE] \n";
+        // Valid Signal
+        for (const auto &selSuc : muli->sucs) {
+          // Calculate the number of switching
+          muli->calValidSwitching(selSuc, tmpPValidList[0], tmpPValidList[1],
+                                  selMGII);
+          // Calculate active range
+          muli->calValidSet(selSuc, tmpNodeSSStart, selMGII);
+        }
+
+        // Ready Signals
+        for (const auto &selPre : muli->pres) {
+          // Get the node name of the other input port
+          std::vector<std::string> otherNodeNames;
+          for (const auto &tmpNode : muli->pres) {
+            if (tmpNode != selPre)
+              otherNodeNames.push_back(tmpNode);
+          }
+
+          muli->calReadySwitching(selPre, tmpPValidDict[otherNodeNames[0]],
+                                  tmpNReadyList[0]);
+          muli->calReadySet(selPre, tmpPValidSetDict[otherNodeNames[0]],
+                            tmpNReadySetList[0], tmpNodeSSStart, selMGII);
+        }
+      })
+      .Case<ExtsiNode>([&](ExtsiNode *ext) {
+        // EXTSI NODE
+        //! Testing
+        if (debug)
+          llvm::dbgs() << "[EXTSI NODE] \n";
+        // Valid Signal
+        for (const auto &selSuc : ext->sucs) {
+          // Number of switching
+          ext->calValidSwitching(selSuc, tmpPValidList[0]);
+          // Active Range
+          ext->calValidSet(selSuc, tmpNodeSSStart, selMGII);
+        }
+
+        // Ready Signal
+        for (const auto &selPre : ext->pres) {
+          // Check the number of successors
+          if (tmpNReadyList.size() == 0) {
+            unsigned numReadySwitch = 0;
+            ext->setReadySwitching(selPre, numReadySwitch);
+            IISet tmpSet(selMGII, true);
+            ext->setReadySet(selPre, tmpSet);
+          } else {
+            // Number of switching
+            ext->calReadySwitching(selPre, tmpNReadyList[0]);
+            ext->calReadySet(selPre, tmpNReadySetList[0], tmpNodeSSStart,
+                             selMGII);
+          }
+        }
+      })
+      .Case<ExtuiNode>([&](ExtuiNode *ext) {
+        // EXTUI NODE
+        //! Testing
+        if (debug)
+          llvm::dbgs() << "[EXTUI NODE] \n";
+        // Valid Signal
+        for (const auto &selSuc : ext->sucs) {
+          // Number of switching
+          ext->calValidSwitching(selSuc, tmpPValidList[0]);
+          ext->calValidSet(selSuc, tmpNodeSSStart, selMGII);
+        }
+
+        // Ready Signal
+        for (const auto &selPre : ext->pres) {
+          // Check the number of successors
+          if (tmpNReadyList.size() == 0) {
+            unsigned numReadySwitch = 0;
+            ext->setReadySwitching(selPre, numReadySwitch);
+            IISet tmpSet(selMGII, true);
+            ext->setReadySet(selPre, tmpSet);
+          } else {
+            // Number of switching
+            ext->calReadySwitching(selPre, tmpNReadyList[0]);
+            ext->calReadySet(selPre, tmpNReadySetList[0], tmpNodeSSStart,
+                             selMGII);
+          }
+        }
+      })
+      .Case<DLoadNode>([&](DLoadNode *load) {
+        // DLoadNode NODE: This node will only have 1 input and 1 output, all
+        // connections to mem_con ignored
+        //! Testing
+        if (debug)
+          llvm::dbgs() << "[DLoad NODE] \n";
+        // Valid Signal
+        for (const auto &selSuc : load->sucs) {
+          // Number of switching
+          load->calValidSwitching(selSuc, tmpPValidList[0]);
+          // Active Range
+          load->calValidSet(selSuc, tmpPValidSetList[0], selMGII);
+        }
+
+        // Ready Signal
+        for (const auto &selPre : load->pres) {
+          // Number of switching
+          if (std::find(
+                  switchInfo.mgInfluencedLoadUnits[std::stoul(selMG)].begin(),
+                  switchInfo.mgInfluencedLoadUnits[std::stoul(selMG)].end(),
+                  selNode) !=
+              switchInfo.mgInfluencedLoadUnits[std::stoul(selMG)].end()) {
+            int tmpSwitching = 2;
+            load->calReadySwitching(selPre, tmpSwitching);
+          } else {
+            int tmpSwitching = 0;
+            load->calReadySwitching(selPre, tmpSwitching);
+          }
+
+          // Active Range
+          load->calReadySet(selPre, tmpNReadySetList[0], tmpNodeSSStart,
+                            selMGII);
+        }
+      })
+      .Case<DStoreNode>([&](DStoreNode *store) {
+        // DStoreNode NODE
+        //! Testing
+        if (debug)
+          llvm::dbgs() << "[DStore NODE] \n";
+        // Valid Signal: This node will not have any successors in the extracted
+        // CFDFC, but we still model the switching of MC
+        store->calValidSwitching(tmpPValidList[0], tmpPValidList[1]);
         // Active Range
-        source->calValidSet(selSuc, selMGII);
-      }
-      
-    })
-    .Case<ConstantNode>([&](ConstantNode* constant) {
-      // ConstantNode NODE
-      //! Testing
-      if (debug) llvm::dbgs() << "[Constant NODE] \n";
-      // Valid Signal
-      for (const auto& selSuc: constant->sucs) {
-        constant->calValidSwitching(selSuc, tmpPValidList[0]);
-        constant->calValidSet(selSuc, tmpNodeSSStart, selMGII);
-      }
+        store->calValidSet(tmpPValidSetList[0], tmpPValidSetList[1], selMGII);
 
-      // Ready Signal
-      for (auto& selPre: constant->pres) {
-        constant->calReadySwitching(selPre, tmpNReadyList[0]);
-        constant->calReadySet(selPre, tmpNReadySetList[0], tmpNodeSSStart, selMGII);
-      }
-    })
-    .Case<ShliNode>([&](ShliNode* shli) {
-      // ShliNode NODE
-      //! Testing
-      if (debug) llvm::dbgs() << "[Shli NODE] \n";
-      // Valid Signal
-      for (const auto& selSuc: shli->sucs) {
-        // Calculate the number of switching
-        shli->calValidSwitching(selSuc, tmpPValidList[0], tmpPValidList[1], selMGII);
-        // Calculate active range
-        shli->calValidSet(selSuc, tmpNodeSSStart, selMGII);
-      }
+        // Ready Signal
+        for (const auto &selPre : store->pres) {
+          store->calReadySwitching(selPre, tmpPValidList[0], tmpPValidList[1]);
+          store->calReadySet(selPre, tmpPValidSetList[0], tmpPValidSetList[1],
+                             selMGII);
+        }
+      })
+      .Case<ForkNode>([&](ForkNode *fork) {
+        // ForkNode NODE
+        //! Testing
+        if (debug)
+          llvm::dbgs() << "[Fork NODE] \n";
+        // Valid Signal
+        for (auto &selSuc : fork->sucs) {
+          // Get Suc Node Start
+          int sucNodeStart = mgGetNodeStartingPoint(switchInfo, selSuc, selMG);
+          // Number of switching
+          fork->calValidSwitching(
+              selSuc, tmpPValidList[0], tmpNReadySetDict, tmpNReadyDict,
+              static_cast<unsigned>(sucNodeStart), tmpNodeSSStart, selMGII);
+          // Active Range
+          fork->calValidSet(selSuc, tmpNodeSSStart, tmpPValidList[0],
+                            tmpNReadySetDict, selMGII);
 
-      // Ready Signals
-      for (const auto& selPre: shli->pres) {
-        // Get the node name of the other input port
-        std::vector<std::string> otherNodeNames;
-        for (const auto& tmpNode: shli->pres) {
-          if (tmpNode != selPre) otherNodeNames.push_back(tmpNode);
+          //! Testing
+          llvm::dbgs() << "Updating Value for Suc: " << selSuc << "\n";
         }
 
-        shli->calReadySwitching(selPre, tmpPValidDict[otherNodeNames[0]], tmpNReadyList[0]);
-        shli->calReadySet(selPre, tmpPValidSetDict[otherNodeNames[0]], tmpNReadySetList[0], tmpNodeSSStart, selMGII);
-      }
-    })
-    .Case<ShrsiNode>([&](ShrsiNode* shrsi) {
-      // ShrsiNode NODE
-      //! Testing
-      if (debug) llvm::dbgs() << "[Shrsi NODE] \n";
-      // Valid Signal
-      for (const auto& selSuc: shrsi->sucs) {
-        // Calculate the number of switching
-        shrsi->calValidSwitching(selSuc, tmpPValidList[0], tmpPValidList[1], selMGII);
-        // Calculate active range
-        shrsi->calValidSet(selSuc, tmpNodeSSStart, selMGII);
-      }
-
-      // Ready Signals
-      for (const auto& selPre: shrsi->pres) {
-        // Get the node name of the other input port
-        std::vector<std::string> otherNodeNames;
-        for (const auto& tmpNode: shrsi->pres) {
-          if (tmpNode != selPre) otherNodeNames.push_back(tmpNode);
+        // Ready Signal
+        for (const auto &selPre : fork->pres) {
+          // Number of switching
+          fork->calReadySwitching(selPre, tmpNReadyList);
+          fork->calReadySet(selPre, tmpNReadySetDict, selMGII);
+        }
+      })
+      // TODO: Add support for lazy fork Node
+      .Case<MuxNode>([&](MuxNode *mux) {
+        // MuxNode NODE
+        //! Testing
+        if (debug)
+          llvm::dbgs() << "[Mux NODE] \n";
+        // Get the cond input port name
+        std::string condPortName = "";
+        std::string dataInputPortName = "";
+        auto nameToPortIdxMap = mux->preNameToPortIdxMap;
+        for (auto &selPreName : mux->pres) {
+          if (nameToPortIdxMap[selPreName] == 0) {
+            condPortName = selPreName;
+          } else {
+            dataInputPortName = selPreName;
+          }
         }
 
-        shrsi->calReadySwitching(selPre, tmpPValidDict[otherNodeNames[0]], tmpNReadyList[0]);
-        shrsi->calReadySet(selPre, tmpPValidSetDict[otherNodeNames[0]], tmpNReadySetList[0], tmpNodeSSStart, selMGII);
-      }
-    })
-    .Case<ShruiNode>([&](ShruiNode* shrui) {
-      // ShruiNode NODE
-      //! Testing
-      if (debug) llvm::dbgs() << "[Shrui NODE] \n";
-      // Valid Signal
-      for (const auto& selSuc: shrui->sucs) {
-        // Calculate the number of switching
-        shrui->calValidSwitching(selSuc, tmpPValidList[0], tmpPValidList[1], selMGII);
-        // Calculate active range
-        shrui->calValidSet(selSuc, tmpNodeSSStart, selMGII);
-      }
+        // Get the cond value
+        // ! Check the following default value
+        // TODO: May need to change this value
+        int condValue = 1;
 
-      // Ready Signals
-      for (const auto& selPre: shrui->pres) {
-        // Get the node name of the other input port
-        std::vector<std::string> otherNodeNames;
-        for (const auto& tmpNode: shrui->pres) {
-          if (tmpNode != selPre) otherNodeNames.push_back(tmpNode);
+        // Get node starting time in steady state
+        int nodeStartTime = mgGetNodeStartingPoint(switchInfo, selNode, selMG);
+
+        // Valid Signal
+        for (auto &selSuc : mux->sucs) {
+          // Number of switching
+          mux->calValidSwitching(selSuc, selMGII);
+          // Active Range
+          mux->calValidSet(selSuc, static_cast<unsigned>(nodeStartTime),
+                           selMGII);
         }
 
-        shrui->calReadySwitching(selPre, tmpPValidDict[otherNodeNames[0]], tmpNReadyList[0]);
-        shrui->calReadySet(selPre, tmpPValidSetDict[otherNodeNames[0]], tmpNReadySetList[0], tmpNodeSSStart, selMGII);
-      }
-    })
-    .Case<SinkNode>([&](SinkNode* sink) {
-      // SinkNode NODE
-      //! Testing
-      if (debug) llvm::dbgs() << "[Sink NODE] \n";
-      // Ready Signal
-      for (auto& selPre: sink->pres) {
-        sink->calReadySwitching(selPre);
-        sink->calReadySet(selPre, selMGII);
-      }
-      
-    })
-    .Default([&](AdjNode* n) {
-      // Unknown node type.
-      llvm::errs() << "[ERROR] Unknown node type in nodeHandshakeUpdate: " << selNode << "\n";
-    });
+        // Ready Signal
+        for (auto &selPre : mux->pres) {
+          // Number of Switching
+          mux->calReadySwitching(selPre, static_cast<unsigned>(condValue),
+                                 tmpPValidDict[selPre],
+                                 tmpPValidSetDict[condPortName],
+                                 tmpPValidSetDict[dataInputPortName],
+                                 tmpNReadySetList[0], selMGII);
+          // Active Range
+          mux->calReadySet(selPre, tmpPValidSetDict[condPortName],
+                           tmpPValidSetDict[dataInputPortName],
+                           tmpNReadySetList[0], selMGII);
+        }
+      })
+      .Case<TrunciNode>([&](TrunciNode *trunci) {
+        // TrunciNode NODE
+        //! Testing
+        if (debug)
+          llvm::dbgs() << "[Trunci NODE] \n";
+        // Valid Signal
+        for (const auto &selSuc : trunci->sucs) {
+          trunci->calValidSwitching(selSuc, tmpPValidList[0]);
+          trunci->calValidSet(selSuc, tmpNodeSSStart, selMGII);
+        }
+
+        // Ready Signal
+        for (auto &selPre : trunci->pres) {
+          trunci->calReadySwitching(selPre, tmpNReadyList[0]);
+          trunci->calReadySet(selPre, tmpNReadySetList[0], tmpNodeSSStart,
+                              selMGII);
+        }
+      })
+      .Case<CMergeNode>([&](CMergeNode *cmerge) {
+        // CMergeNode NODE
+        //! Testing
+        if (debug)
+          llvm::dbgs() << "[CMerge NODE] \n";
+        // Get node starting time in steady state
+        int nodeStartTime = mgGetNodeStartingPoint(switchInfo, selNode, selMG);
+
+        // Valid Signal
+        for (auto &selSuc : cmerge->sucs) {
+          // Numebr of Switching
+          cmerge->calValidSwitching(selSuc, selMGII);
+          // Active Range
+          cmerge->calValidSet(selSuc, static_cast<unsigned>(nodeStartTime),
+                              selMGII);
+        }
+
+        // Ready Signal
+        for (const auto &selPre : cmerge->pres) {
+          // Number of Switching
+          cmerge->calReadySwitching(selPre);
+          // Active Range
+          cmerge->calReadySet(selPre, selMGII);
+        }
+      })
+      .Case<CBrNode>([&](CBrNode *cbr) {
+        // CBrNode NODE
+        //! Testing
+        if (debug)
+          llvm::dbgs() << "[CBr NODE] \n";
+        // Get the conditional value
+        std::string condPortName = cbr->condPreNodeName;
+
+        // Check the existence of the cond_port_name,
+        // sometime the cond_port_name is the same as the data_port_name
+        if (condPortName == "") {
+          condPortName = cbr->dataPreNodeName;
+        }
+
+        //! Testing
+        // TODO: Calibrate the cond value with the simulation
+        if (debug) {
+          llvm::dbgs() << "Node: " << selNode << "\n";
+          llvm::dbgs() << "\tCond_input Port: " << condPortName << "\n";
+        }
+
+        // Check whether the index exist or not
+        int condValue = 0;
+        if (switchInfo.staticinfo.dataflowGraph->nodes[condPortName]
+                ->dataOut[selNode]
+                .size() > switchInfo.data.firstExecutedIter[selMG]) {
+          condValue =
+              switchInfo.staticinfo.dataflowGraph->nodes[condPortName]
+                  ->dataOut[selNode][switchInfo.data.firstExecutedIter[selMG]];
+        } else {
+          condValue = switchInfo.staticinfo.dataflowGraph->nodes[condPortName]
+                          ->dataOut[selNode][0];
+        }
+
+        //! Testing
+        if (debug) {
+          llvm::dbgs() << "\tCond_value: " << condValue << "\n";
+        }
+
+        std::string selOutputPort = "";
+        auto selNameToPortIdxMap = cbr->outChannelNameToIndexMap;
+
+        for (auto &selSuc : cbr->sucs) {
+          if (selNameToPortIdxMap[selSuc] != static_cast<unsigned>(condValue)) {
+            selOutputPort = selSuc;
+          }
+        }
+
+        //! Testing
+        if (debug) {
+          llvm::dbgs() << "\tSelected Suc Node: " << selOutputPort << "\n";
+        }
+
+        // Sometime we just have one output for cond_br
+        if (selOutputPort == "") {
+          selOutputPort = cbr->sucs[0];
+          condValue = 1 - condValue;
+        }
+
+        // Check the number of input ports
+        unsigned numInputs = cbr->pres.size();
+
+        // Valid Signal
+        for (auto &selSuc : cbr->sucs) {
+          if (numInputs > 1) {
+            // Number of switching
+            cbr->calValidSwitching(selSuc, static_cast<unsigned>(condValue),
+                                   tmpPValidList[0], tmpPValidList[1]);
+            // Active Range
+            cbr->calValidSet(selSuc, tmpNodeSSStart,
+                             static_cast<unsigned>(condValue), selMGII);
+          } else {
+            // Number of switching
+            cbr->calValidSwitching(selSuc, static_cast<unsigned>(condValue),
+                                   tmpPValidList[0], tmpPValidList[0]);
+            // Active Range
+            cbr->calValidSet(selSuc, tmpNodeSSStart,
+                             static_cast<unsigned>(condValue), selMGII);
+          }
+        }
+
+        // Ready Signal
+        for (auto &selPre : cbr->pres) {
+          if (numInputs > 1) {
+            // Get the node_name of the other input port
+            std::vector<std::string> otherNodeNames;
+            for (const auto &tmpNode : cbr->pres) {
+              if (tmpNode != selPre)
+                otherNodeNames.push_back(tmpNode);
+            }
+
+            // Number of switching
+            cbr->calReadySwitching(selPre, tmpPValidDict[otherNodeNames[0]],
+                                   tmpNReadyDict[selOutputPort]);
+            // Active Range
+            cbr->calReadySet(selPre, tmpPValidSetDict[otherNodeNames[0]],
+                             tmpNReadySetDict[selOutputPort], selMGII);
+          } else {
+            // Number of switching
+            cbr->calReadySwitching(selPre, tmpPValidDict[selPre],
+                                   tmpNReadyDict[selOutputPort]);
+            // Active Range
+            cbr->calReadySet(selPre, tmpPValidSetDict[selPre],
+                             tmpNReadySetDict[selOutputPort], selMGII);
+          }
+        }
+      })
+      .Case<SourceNode>([&](SourceNode *source) {
+        // Source node: Normally no pre node
+        //! Testing
+        if (debug)
+          llvm::dbgs() << "[Source NODE] \n";
+        // Valid Signals
+        for (auto &selSuc : source->sucs) {
+          // Number of Switching
+          source->calValidSwitching(selSuc);
+          // Active Range
+          source->calValidSet(selSuc, selMGII);
+        }
+      })
+      .Case<ConstantNode>([&](ConstantNode *constant) {
+        // ConstantNode NODE
+        //! Testing
+        if (debug)
+          llvm::dbgs() << "[Constant NODE] \n";
+        // Valid Signal
+        for (const auto &selSuc : constant->sucs) {
+          constant->calValidSwitching(selSuc, tmpPValidList[0]);
+          constant->calValidSet(selSuc, tmpNodeSSStart, selMGII);
+        }
+
+        // Ready Signal
+        for (auto &selPre : constant->pres) {
+          constant->calReadySwitching(selPre, tmpNReadyList[0]);
+          constant->calReadySet(selPre, tmpNReadySetList[0], tmpNodeSSStart,
+                                selMGII);
+        }
+      })
+      .Case<ShliNode>([&](ShliNode *shli) {
+        // ShliNode NODE
+        //! Testing
+        if (debug)
+          llvm::dbgs() << "[Shli NODE] \n";
+        // Valid Signal
+        for (const auto &selSuc : shli->sucs) {
+          // Calculate the number of switching
+          shli->calValidSwitching(selSuc, tmpPValidList[0], tmpPValidList[1],
+                                  selMGII);
+          // Calculate active range
+          shli->calValidSet(selSuc, tmpNodeSSStart, selMGII);
+        }
+
+        // Ready Signals
+        for (const auto &selPre : shli->pres) {
+          // Get the node name of the other input port
+          std::vector<std::string> otherNodeNames;
+          for (const auto &tmpNode : shli->pres) {
+            if (tmpNode != selPre)
+              otherNodeNames.push_back(tmpNode);
+          }
+
+          shli->calReadySwitching(selPre, tmpPValidDict[otherNodeNames[0]],
+                                  tmpNReadyList[0]);
+          shli->calReadySet(selPre, tmpPValidSetDict[otherNodeNames[0]],
+                            tmpNReadySetList[0], tmpNodeSSStart, selMGII);
+        }
+      })
+      .Case<ShrsiNode>([&](ShrsiNode *shrsi) {
+        // ShrsiNode NODE
+        //! Testing
+        if (debug)
+          llvm::dbgs() << "[Shrsi NODE] \n";
+        // Valid Signal
+        for (const auto &selSuc : shrsi->sucs) {
+          // Calculate the number of switching
+          shrsi->calValidSwitching(selSuc, tmpPValidList[0], tmpPValidList[1],
+                                   selMGII);
+          // Calculate active range
+          shrsi->calValidSet(selSuc, tmpNodeSSStart, selMGII);
+        }
+
+        // Ready Signals
+        for (const auto &selPre : shrsi->pres) {
+          // Get the node name of the other input port
+          std::vector<std::string> otherNodeNames;
+          for (const auto &tmpNode : shrsi->pres) {
+            if (tmpNode != selPre)
+              otherNodeNames.push_back(tmpNode);
+          }
+
+          shrsi->calReadySwitching(selPre, tmpPValidDict[otherNodeNames[0]],
+                                   tmpNReadyList[0]);
+          shrsi->calReadySet(selPre, tmpPValidSetDict[otherNodeNames[0]],
+                             tmpNReadySetList[0], tmpNodeSSStart, selMGII);
+        }
+      })
+      .Case<ShruiNode>([&](ShruiNode *shrui) {
+        // ShruiNode NODE
+        //! Testing
+        if (debug)
+          llvm::dbgs() << "[Shrui NODE] \n";
+        // Valid Signal
+        for (const auto &selSuc : shrui->sucs) {
+          // Calculate the number of switching
+          shrui->calValidSwitching(selSuc, tmpPValidList[0], tmpPValidList[1],
+                                   selMGII);
+          // Calculate active range
+          shrui->calValidSet(selSuc, tmpNodeSSStart, selMGII);
+        }
+
+        // Ready Signals
+        for (const auto &selPre : shrui->pres) {
+          // Get the node name of the other input port
+          std::vector<std::string> otherNodeNames;
+          for (const auto &tmpNode : shrui->pres) {
+            if (tmpNode != selPre)
+              otherNodeNames.push_back(tmpNode);
+          }
+
+          shrui->calReadySwitching(selPre, tmpPValidDict[otherNodeNames[0]],
+                                   tmpNReadyList[0]);
+          shrui->calReadySet(selPre, tmpPValidSetDict[otherNodeNames[0]],
+                             tmpNReadySetList[0], tmpNodeSSStart, selMGII);
+        }
+      })
+      .Case<SinkNode>([&](SinkNode *sink) {
+        // SinkNode NODE
+        //! Testing
+        if (debug)
+          llvm::dbgs() << "[Sink NODE] \n";
+        // Ready Signal
+        for (auto &selPre : sink->pres) {
+          sink->calReadySwitching(selPre);
+          sink->calReadySet(selPre, selMGII);
+        }
+      })
+      .Default([&](AdjNode *n) {
+        // Unknown node type.
+        llvm::errs() << "[ERROR] Unknown node type in nodeHandshakeUpdate: "
+                     << selNode << "\n";
+      });
 
   // Print node status
   if (debug) {
@@ -1096,7 +1202,9 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode, std::s
   }
 }
 
-std::vector<std::string> getLoadsInfluencedByBuffers(SwitchingInfo &switchInfo, std::string selMG, std::vector<std::string> bufferList) {
+std::vector<std::string>
+getLoadsInfluencedByBuffers(SwitchingInfo &switchInfo, std::string selMG,
+                            std::vector<std::string> bufferList) {
   auto selAdjGraph = switchInfo.staticinfo.segToGraph[selMG];
 
   //
@@ -1194,11 +1302,15 @@ std::vector<std::string> getLoadsInfluencedByBuffers(SwitchingInfo &switchInfo, 
 
 //===---------------------------------------------------------------------------------===//
 //
-// Functions for DFS in the graph, should be merged with the other functions if possible
+// Functions for DFS in the graph, should be merged with the other functions if
+// possible
 //
 //===---------------------------------------------------------------------------------===//
 
-std::vector<std::string> breakHandshakeUpdateDeadlock(SwitchingInfo &switchInfo, const std::vector<std::string> &pendingNodeList, std::string selMG, unsigned selMGII) {
+std::vector<std::string>
+breakHandshakeUpdateDeadlock(SwitchingInfo &switchInfo,
+                             const std::vector<std::string> &pendingNodeList,
+                             std::string selMG, unsigned selMGII) {
   auto selAdjGraph = switchInfo.staticinfo.segToGraph[selMG];
 
   // Get all join type nodes in the pending list
@@ -1282,6 +1394,3 @@ int mgGetNodeStartingPoint(SwitchingInfo &switchInfo, std::string &selNode,
 
   return finStartPoint;
 }
-
-
-

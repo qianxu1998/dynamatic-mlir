@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file declares the Analyzer Class to analyze the functional 
+// This file declares the Analyzer Class to analyze the functional
 // profiling result.
 //
 //===----------------------------------------------------------------------===//
@@ -14,24 +14,23 @@
 #ifndef EXPERIMENTAL_ANALYSIS_SWITCHINGESTIMATION_PROFILINGANALYZER_H
 #define EXPERIMENTAL_ANALYSIS_SWITCHINGESTIMATION_PROFILINGANALYZER_H
 
-#include "experimental/Analysis/SwitchingEstimation/SwitchingSupport.h"
-#include "dynamatic/Support/LLVM.h"
+#include "dynamatic/Support/Attribute.h"
+#include "dynamatic/Support/Backedge.h"
 #include "dynamatic/Support/DynamaticPass.h"
 #include "dynamatic/Support/LLVM.h"
 #include "dynamatic/Support/Logging.h"
-#include "dynamatic/Support/Backedge.h"
-#include "dynamatic/Support/Attribute.h"
+#include "experimental/Analysis/SwitchingEstimation/SwitchingSupport.h"
 
 #include <algorithm>
 #include <cmath>
-#include <vector>
-#include <iostream>
+#include <filesystem>
 #include <fstream>
-#include <string>
+#include <iostream>
 #include <map>
 #include <set>
 #include <sstream>
-#include <filesystem>
+#include <string>
+#include <vector>
 
 using namespace llvm;
 using namespace mlir;
@@ -45,15 +44,13 @@ using namespace dynamatic::handshake;
 //===----------------------------------------------------------------------===//
 
 // Class used to analyze the scf-level software profiling
-// 
+//
 class SCFProfilingResult {
 public:
-
-  SCFProfilingResult(StringRef dataTrace,
-                     SwitchingInfo& switchInfo);
+  SCFProfilingResult(StringRef dataTrace, SwitchingInfo &switchInfo);
 
   // Parse the data trace file
-  void parseUnifiedLogFile(StringRef tracePath, SwitchingInfo& switchInfo);
+  void parseUnifiedLogFile(StringRef tracePath, SwitchingInfo &switchInfo);
 
   // This function insert new (value, iter index) pair to the value list
   void insertValuePair(int opValue, unsigned iterIndex, std::string opName);
@@ -64,17 +61,29 @@ public:
   //
   //  Global Storing Structure for analyzing the profiling results
   //
-  std::vector<unsigned> executedBBTrace;                      // Vector used to store the execution trace of BB labels
-  std::vector<unsigned> iterEndIndex;                         // Vector storing the ending edge index on the boundary of different segments
-  std::vector<std::string> executedSegTrace;                  // Vector used to store the execution trace consists of segment labels
-  std::map<unsigned, unsigned> bbToIterMap;                   // Map from the index of a BB in the executedBBTrace to the corresponding Iteration index
-  std::map<unsigned, std::pair<std::string, unsigned>> execPhaseToSegExecNumMap;     // Map from execution stage to (segLabel, numExec) pair
-  std::map<std::string, std::vector<std::pair<int, unsigned>>> opNameToValueListMap; // Map from Hndshake level opName to the list of value in the data profiling process, format: (value, iterIdx)
+  std::vector<unsigned>
+      executedBBTrace; // Vector used to store the execution trace of BB labels
+  std::vector<unsigned> iterEndIndex; // Vector storing the ending edge index on
+                                      // the boundary of different segments
+  std::vector<std::string>
+      executedSegTrace; // Vector used to store the execution trace consists of
+                        // segment labels
+  std::map<unsigned, unsigned>
+      bbToIterMap; // Map from the index of a BB in the executedBBTrace to the
+                   // corresponding Iteration index
+  std::map<unsigned, std::pair<std::string, unsigned>>
+      execPhaseToSegExecNumMap; // Map from execution stage to (segLabel,
+                                // numExec) pair
+  std::map<std::string, std::vector<std::pair<int, unsigned>>>
+      opNameToValueListMap; // Map from Hndshake level opName to the list of
+                            // value in the data profiling process, format:
+                            // (value, iterIdx)
 
   // Map from SCF level op name to Handshake level op name
   std::map<std::string, std::string> scfToHandshakeNameMap;
 
-  // Map from the segment label to the first iteration that the segment starts execution
+  // Map from the segment label to the first iteration that the segment starts
+  // execution
   std::map<std::string, unsigned> segToStartIterIndexMap;
 
   // Vector of arguments names
@@ -88,9 +97,11 @@ public:
 //===----------------------------------------------------------------------===//
 
 // This function split a given string into a vector based on the delimiter
-std::vector<std::string> customSplit(const std::string &s, const std::string& delimiter);
+std::vector<std::string> customSplit(const std::string &s,
+                                     const std::string &delimiter);
 
 // This function removes the starting and ending empty space
-std::string customStrip(const std::string &inputStr, const std::string &toRemove);
+std::string customStrip(const std::string &inputStr,
+                        const std::string &toRemove);
 
 #endif // EXPERIMENTAL_ANALYSIS_SWITCHINGESTIMATION_PROFILINGANALYZER_H

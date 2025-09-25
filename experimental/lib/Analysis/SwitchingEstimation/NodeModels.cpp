@@ -16,13 +16,16 @@
 //
 //===----------------------------------------------------------------------===//
 
-BufferNode::BufferNode(mlir::Operation *op, const std::vector<std::string> &predecessors,
-              const std::vector<std::string> &successors,
-              const std::map<std::string, unsigned> &sucDataWidthMap,
-              const unsigned &latency, const unsigned &bbIndex)
-    : AdjNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {}
+BufferNode::BufferNode(mlir::Operation *op,
+                       const std::vector<std::string> &predecessors,
+                       const std::vector<std::string> &successors,
+                       const std::map<std::string, unsigned> &sucDataWidthMap,
+                       const unsigned &latency, const unsigned &bbIndex)
+    : AdjNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {
+}
 
-void BufferNode::calValidSwitching(const std::string &sucNodeName, unsigned II) {
+void BufferNode::calValidSwitching(const std::string &sucNodeName,
+                                   unsigned II) {
   if (setV.find(sucNodeName) != setV.end()) {
     if (setV[sucNodeName].all()) {
       setValid(this, sucNodeName, 0);
@@ -30,11 +33,14 @@ void BufferNode::calValidSwitching(const std::string &sucNodeName, unsigned II) 
       setValid(this, sucNodeName, 2);
     }
   } else {
-    llvm::errs() << "Warning: BufferNode::calValidSwitching - No valid set found for successor node " << sucNodeName << "\n";
+    llvm::errs() << "Warning: BufferNode::calValidSwitching - No valid set "
+                    "found for successor node "
+                 << sucNodeName << "\n";
   }
 }
 
-void BufferNode::calReadySwitching(const std::string &preNodeName, unsigned II) {
+void BufferNode::calReadySwitching(const std::string &preNodeName,
+                                   unsigned II) {
   if (setR.find(preNodeName) != setR.end()) {
     if (setR[preNodeName].all()) {
       setReady(this, preNodeName, 0);
@@ -44,11 +50,13 @@ void BufferNode::calReadySwitching(const std::string &preNodeName, unsigned II) 
   }
 }
 
-void BufferNode::calValidSet(const std::string &sucNodeName, const IISet &inSetV) {
+void BufferNode::calValidSet(const std::string &sucNodeName,
+                             const IISet &inSetV) {
   setV[sucNodeName] = inSetV;
 }
 
-void BufferNode::calReadySet(const std::string &preNodeName, const IISet &inSetR) {
+void BufferNode::calReadySet(const std::string &preNodeName,
+                             const IISet &inSetR) {
   setR[preNodeName] = inSetR;
 }
 
@@ -56,11 +64,13 @@ void BufferNode::printNodeDetails() {
   // Call base class's printNodeDetails()
   AdjNode::printNodeDetails();
 
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tSTART: " << START <<";\n");
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tOccupancy: " << occupancy <<";\n");
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tNumSlots: " << numSlots <<";\n");
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\ttransparent: " << transparent <<";\n");
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tBufferType: " << static_cast<int>(buffType) <<";\n");
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tSTART: " << START << ";\n");
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tOccupancy: " << occupancy << ";\n");
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tNumSlots: " << numSlots << ";\n");
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\ttransparent: " << transparent
+                          << ";\n");
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tBufferType: "
+                          << static_cast<int>(buffType) << ";\n");
 }
 
 //===----------------------------------------------------------------------===//
@@ -68,10 +78,8 @@ void BufferNode::printNodeDetails() {
 // Join Node
 //
 //===----------------------------------------------------------------------===//
-void JoinNode::calValidSwitching(const std::string &sucNodeName,
-                                int &numValid0,
-                                int &numValid1,
-                                unsigned &II) {
+void JoinNode::calValidSwitching(const std::string &sucNodeName, int &numValid0,
+                                 int &numValid1, unsigned &II) {
   unsigned val = 0;
 
   if (numValid0 > 0 || numValid1 > 0) {
@@ -88,20 +96,18 @@ void JoinNode::calValidSwitching(const std::string &sucNodeName,
 }
 
 void JoinNode::calValidSet(const std::string &sucNodeName,
-                  unsigned &nodeStartTime,
-                  unsigned &II) {
+                           unsigned &nodeStartTime, unsigned &II) {
   // Check if validSignal contains sucNodeName.
   if (validSignal.find(sucNodeName) != validSignal.end()) {
     if (validSignal[sucNodeName] == 0 || II == 1) {
-    setVSet(this, sucNodeName, fullSet(II));
+      setVSet(this, sucNodeName, fullSet(II));
     } else {
       setVSet(this, sucNodeName, singleton(nodeStartTime, II));
     }
   }
 }
 
-void JoinNode::calReadySwitching(const std::string &preNodeName,
-                                 int &numValid,
+void JoinNode::calReadySwitching(const std::string &preNodeName, int &numValid,
                                  int &numReady) {
   // TODO: Verify the new update logic
   unsigned val = (numValid == 0 && numReady == 0) ? 0 : 2;
@@ -109,10 +115,8 @@ void JoinNode::calReadySwitching(const std::string &preNodeName,
 }
 
 void JoinNode::calReadySet(const std::string &preNodeName,
-                           const IISet *setValid,
-                           const IISet *setReady,
-                           unsigned &nodeStartTime,
-                           unsigned &II) {
+                           const IISet *setValid, const IISet *setReady,
+                           unsigned &nodeStartTime, unsigned &II) {
   if (setValid != nullptr && setReady != nullptr) {
     setRSet(this, preNodeName, intersection_(*setValid, *setReady));
   } else if (readySignal.find(preNodeName) != readySignal.end()) {
@@ -124,9 +128,10 @@ void JoinNode::calReadySet(const std::string &preNodeName,
   }
 }
 
-void JoinNode::setReadySet(const std::string &preNodeName){
-  // If setVMap is not empty, take the first available set and copy it to setRMap.
-  if (!setV.empty()) {    
+void JoinNode::setReadySet(const std::string &preNodeName) {
+  // If setVMap is not empty, take the first available set and copy it to
+  // setRMap.
+  if (!setV.empty()) {
     // setRMap.
     auto it = setV.begin();
     setR[preNodeName] = it->second;
@@ -139,7 +144,8 @@ void JoinNode::setReadySet(const std::string &preNodeName){
 //
 //===----------------------------------------------------------------------===//
 
-void PassNode::calValidSwitching(const std::string &sucNodeName, int &numValid){
+void PassNode::calValidSwitching(const std::string &sucNodeName,
+                                 int &numValid) {
   if (numValid == 0) {
     setValid(this, sucNodeName, 0);
   } else if (numValid > 0) {
@@ -151,16 +157,17 @@ void PassNode::calValidSet(const std::string &sucNodeName,
                            unsigned &nodeStartTime, unsigned &II) {
   if (validSignal.find(sucNodeName) != validSignal.end()) {
     if (validSignal[sucNodeName] == 0) {
-      setV[sucNodeName] = IISet(II,true);
+      setV[sucNodeName] = IISet(II, true);
     } else {
-      IISet tmp(II,false);
+      IISet tmp(II, false);
       tmp.set(nodeStartTime);
       setV[sucNodeName] = std::move(tmp);
     }
   }
 }
 
-void PassNode::calReadySwitching(const std::string &preNodeName, int &numReady){
+void PassNode::calReadySwitching(const std::string &preNodeName,
+                                 int &numReady) {
   if (numReady == 0) {
     setReady(this, preNodeName, 0);
   } else if (numReady > 0) {
@@ -169,15 +176,15 @@ void PassNode::calReadySwitching(const std::string &preNodeName, int &numReady){
 }
 
 void PassNode::calReadySet(const std::string &preNodeName,
-                           const IISet *setReady,
-                           unsigned &nodeStartTime, unsigned &II) {
+                           const IISet *setReady, unsigned &nodeStartTime,
+                           unsigned &II) {
   if (setReady != nullptr) {
     setR[preNodeName] = *setReady;
   } else if (readySignal.find(preNodeName) != readySignal.end()) {
     if (readySignal[preNodeName] == 0) {
-      setR[preNodeName] = IISet(II,true);
+      setR[preNodeName] = IISet(II, true);
     } else if (readySignal[preNodeName] > 0) {
-      IISet tmp(II,false);
+      IISet tmp(II, false);
       tmp.set(nodeStartTime);
       setR[preNodeName] = std::move(tmp);
     } else if (!setV.empty()) {
@@ -185,7 +192,7 @@ void PassNode::calReadySet(const std::string &preNodeName,
       // Fallback: copy the set from the first key in setVMap if it is not the
       // full set.
       auto it = setV.begin();
-      IISet fullSet(II,true);
+      IISet fullSet(II, true);
       if (it->second != fullSet)
         setR[preNodeName] = it->second;
     }
@@ -212,44 +219,47 @@ MuxNode::MuxNode(mlir::Operation *op,
                  const std::vector<std::string> &predecessors,
                  const std::vector<std::string> &successors,
                  const std::map<std::string, unsigned> &sucDataWidthMap,
-                 unsigned latency, const unsigned& bbIndex)
-    : AdjNode(op,
-              predecessors,
-              successors,
-              sucDataWidthMap,
-              latency,
-              bbIndex)
-{
+                 unsigned latency, const unsigned &bbIndex)
+    : AdjNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {
   // Get the operator
   auto muxOp = dyn_cast<handshake::MuxOp>(op);
   auto condPreValue = muxOp.getSelectOperand();
-  
-  conPreNodeName = condPreValue.getDefiningOp()->getAttrOfType<mlir::StringAttr>("handshake.name").getValue().str();
+
+  conPreNodeName = condPreValue.getDefiningOp()
+                       ->getAttrOfType<mlir::StringAttr>("handshake.name")
+                       .getValue()
+                       .str();
 
   // Construct the port map
   auto opOperands = muxOp.getOperands();
   for (unsigned i = 0; i < opOperands.size(); i++) {
     std::string nodeName = "inArgument";
     if (opOperands[i].getDefiningOp()) {
-      nodeName = opOperands[i].getDefiningOp()->getAttrOfType<mlir::StringAttr>("handshake.name").getValue().str();
-    } else if (auto blockArg = opOperands[i].dyn_cast<mlir::BlockArgument>()){
+      nodeName = opOperands[i]
+                     .getDefiningOp()
+                     ->getAttrOfType<mlir::StringAttr>("handshake.name")
+                     .getValue()
+                     .str();
+    } else if (auto blockArg = opOperands[i].dyn_cast<mlir::BlockArgument>()) {
       // This operand is a block argument
       unsigned argNumber = blockArg.getArgNumber();
 
       auto funcOp = blockArg.getOwner()->getParentOp();
       if (auto handshakeFunc = dyn_cast<handshake::FuncOp>(funcOp)) {
         // Check whether the argName attributes present
-        auto argNameAttr = handshakeFunc->getAttrOfType<mlir::ArrayAttr>("argNames");
+        auto argNameAttr =
+            handshakeFunc->getAttrOfType<mlir::ArrayAttr>("argNames");
         if (!argNameAttr) {
-          llvm::errs() << "ERROR: No argNames attributes found on the function!\n";
+          llvm::errs()
+              << "ERROR: No argNames attributes found on the function!\n";
         } else {
           if (argNumber < argNameAttr.size()) {
-            auto strAttr = dyn_cast<mlir::StringAttr>(argNameAttr.getValue()[argNumber]);
+            auto strAttr =
+                dyn_cast<mlir::StringAttr>(argNameAttr.getValue()[argNumber]);
             nodeName = strAttr.getValue().str();
           }
         }
       }
-
     }
     preNameToPortIdxMap[nodeName] = i;
   }
@@ -276,11 +286,9 @@ void MuxNode::calValidSet(const std::string &sucNodeName,
 
 void MuxNode::calReadySwitching(const std::string &preNodeName,
                                 unsigned condValue, int num_v,
-                                const IISet *setV0,
-                                const  IISet *setVSelect,
-                                const  IISet *setReady,
-                                unsigned II) {
-  IISet uSet = IISet(II,true);
+                                const IISet *setV0, const IISet *setVSelect,
+                                const IISet *setReady, unsigned II) {
+  IISet uSet = IISet(II, true);
   if (preNodeName == conPreNodeName) {
     // Case 1: this channel is used for the condition signal.
     if (setVSelect != nullptr && setReady != nullptr) {
@@ -303,8 +311,10 @@ void MuxNode::calReadySwitching(const std::string &preNodeName,
     // TODO: Check the port assignment methods
     unsigned prePort = preNameToPortIdxMap[preNodeName];
     if (condValue != (prePort - 1)) {
-      if (num_v == 0) readySignal[preNodeName] = 0;
-      else if (num_v > 0) readySignal[preNodeName] = 2;
+      if (num_v == 0)
+        readySignal[preNodeName] = 0;
+      else if (num_v > 0)
+        readySignal[preNodeName] = 2;
     } else {
       if (setV0 != nullptr && setReady != nullptr) {
         if (*setReady == uSet && *setV0 == uSet) {
@@ -324,11 +334,9 @@ void MuxNode::calReadySwitching(const std::string &preNodeName,
   }
 }
 
-void MuxNode::calReadySet(const std::string &preNodeName,
-                   const IISet *setCond,
-                   const IISet *setValid,
-                   const IISet *setReady,
-                   unsigned II) {
+void MuxNode::calReadySet(const std::string &preNodeName, const IISet *setCond,
+                          const IISet *setValid, const IISet *setReady,
+                          unsigned II) {
   if (readySignal.find(preNodeName) != readySignal.end()) {
     if (readySignal[preNodeName] == 0) {
       setR[preNodeName] = fullSet(II);
@@ -337,7 +345,7 @@ void MuxNode::calReadySet(const std::string &preNodeName,
         // Compute setCond ∩ setV.
         IISet inter = intersection_(*setCond, *setValid);
         IISet finalSet = intersection_(inter, *setReady);
-        
+
         setR[preNodeName] = std::move(finalSet);
       }
     }
@@ -347,14 +355,14 @@ void MuxNode::calReadySet(const std::string &preNodeName,
 void MuxNode::printNodeDetails() {
   AdjNode::printNodeDetails();
 
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tCon_pre_node_name: " << conPreNodeName << "\n");
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tCon_pre_node_name: " << conPreNodeName
+                          << "\n");
   LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tInput Port Mapping: \n");
   for (const auto &[selName, portIdx] : preNameToPortIdxMap) {
     LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\t\tNode Name: " << selName
-                 << "; Port Index: " << portIdx << ";\n");
+                            << "; Port Index: " << portIdx << ";\n");
   }
 }
-
 
 //===----------------------------------------------------------------------===//
 //
@@ -368,18 +376,16 @@ void MuxNode::printNodeDetails() {
 //
 //===----------------------------------------------------------------------===//
 
-void ForkNode::calValidSwitching(const std::string &sucNodeName,
-    int numValid,
+void ForkNode::calValidSwitching(
+    const std::string &sucNodeName, int numValid,
     std::unordered_map<std::string, IISet *> &setRDict,
     const std::unordered_map<std::string, int> &numReadyDict,
-    unsigned sucNodeStart,
-    unsigned nodeSteadyStart,
-    unsigned II) {
+    unsigned sucNodeStart, unsigned nodeSteadyStart, unsigned II) {
   // If any valid switching occurs at the input, the fork must toggle.
   if (numValid > 0) {
     validSignal[sucNodeName] = 2;
     return;
-  } 
+  }
 
   // Case 1: check if all ready counts are 0
   bool allReadyZero = true;
@@ -447,8 +453,8 @@ void ForkNode::calValidSwitching(const std::string &sucNodeName,
     if (existFlag) {
       // Case 3: Compute desired cycle time
       // TODO: Verify the following desired criteria
-      unsigned desiredCycleTime = 
-        (nodeSteadyStart != 0) ? (nodeSteadyStart - 1) : (II - 1);
+      unsigned desiredCycleTime =
+          (nodeSteadyStart != 0) ? (nodeSteadyStart - 1) : (II - 1);
       if (selStartPoint == 0) {
         validSignal[sucNodeName] = 0;
       } else {
@@ -459,29 +465,28 @@ void ForkNode::calValidSwitching(const std::string &sucNodeName,
 }
 
 void ForkNode::calValidSet(const std::string &sucNodeName,
-    unsigned nodeStartTime,
-    int numValid,
-    std::unordered_map<std::string, IISet *> &setRDict,
-    unsigned II) {
+                           unsigned nodeStartTime, int numValid,
+                           std::unordered_map<std::string, IISet *> &setRDict,
+                           unsigned II) {
   if (validSignal.find(sucNodeName) != validSignal.end()) {
     if (validSignal[sucNodeName] == 0) {
-      setV[sucNodeName] = IISet(II,true);
+      setV[sucNodeName] = IISet(II, true);
     } else {
       if (numValid > 0) {
-        IISet tmp(II,false);
+        IISet tmp(II, false);
         tmp.set(nodeStartTime);
         setV[sucNodeName] = std::move(tmp);
       } else {
         auto it = setRDict.find(sucNodeName);
         if (it != setRDict.end() && it->second)
-            setV[sucNodeName] = *(it->second);
+          setV[sucNodeName] = *(it->second);
       }
     }
   }
 }
 
 void ForkNode::calReadySwitching(const std::string &preNodeName,
-    const std::vector<int> &numReadyList) {
+                                 const std::vector<int> &numReadyList) {
   // If any value in numReadyList is greater than 0, set ready signal to 2 and
   // return.
   bool tmpFlag = true;
@@ -499,9 +504,9 @@ void ForkNode::calReadySwitching(const std::string &preNodeName,
     readySignal[preNodeName] = 0;
 }
 
-void ForkNode::calReadySet(const std::string &preNodeName,
-    const std::unordered_map<std::string, IISet *> &setRDict,
-    unsigned II) {
+void ForkNode::calReadySet(
+    const std::string &preNodeName,
+    const std::unordered_map<std::string, IISet *> &setRDict, unsigned II) {
   if (readySignal.find(preNodeName) != readySignal.end()) {
     if (readySignal[preNodeName] == 0) {
       setR[preNodeName] = fullSet(II);
@@ -519,26 +524,25 @@ void ForkNode::calReadySet(const std::string &preNodeName,
             unionSet.reset(); // intersection with an empty set remains empty
           } else {
             // Compute the union: unionSet = unionSet ∪ s.
-            unionSet |=  *s;
+            unionSet |= *s;
           }
         }
       }
       if (exist) {
-         IISet fullMask(II, true);
+        IISet fullMask(II, true);
 
-        if (unionSet == fullMask){
-          IISet tmp (II, false);
+        if (unionSet == fullMask) {
+          IISet tmp(II, false);
           tmp.set(0);
           setR[preNodeName] = std::move(tmp);
-        }
-        else {
+        } else {
           // Retrieve the last element of unionSet.
           unsigned last = 0;
-          for (unsigned bitidx : unionSet.set_bits()){
-          // if (!unionSet.empty())
+          for (unsigned bitidx : unionSet.set_bits()) {
+            // if (!unionSet.empty())
             last = bitidx;
           }
-          IISet tmp (II, false);
+          IISet tmp(II, false);
           tmp.set(last);
           setR[preNodeName] = std::move(tmp);
         }
@@ -554,13 +558,14 @@ void ForkNode::calReadySet(const std::string &preNodeName,
 //===----------------------------------------------------------------------===//
 
 CMergeNode::CMergeNode(mlir::Operation *op,
-    const std::vector<std::string> &predecessors,
-    const std::vector<std::string> &successors,
-    const std::map<std::string, unsigned> &sucDataWidthMap,
-    unsigned latency, const unsigned &bbIndex)
+                       const std::vector<std::string> &predecessors,
+                       const std::vector<std::string> &successors,
+                       const std::map<std::string, unsigned> &sucDataWidthMap,
+                       unsigned latency, const unsigned &bbIndex)
     : AdjNode(op, predecessors, successors, sucDataWidthMap, latency, bbIndex) {
   // Determine the control and data channel successor names.
-  // We assume that the mapping sucDataWidthMap associates each successor name with a port number.
+  // We assume that the mapping sucDataWidthMap associates each successor name
+  // with a port number.
   conSucNodeName = "";
   dataSucNodeName = "";
   for (const auto &pair : sucDataWidthMap) {
@@ -577,13 +582,16 @@ CMergeNode::CMergeNode(mlir::Operation *op,
   }
 }
 
-void CMergeNode::calValidSwitching(const std::string &sucNodeName, unsigned II) {
-  if (II == 1) validSignal[sucNodeName] = 0;
-  else validSignal[sucNodeName] = 2;
+void CMergeNode::calValidSwitching(const std::string &sucNodeName,
+                                   unsigned II) {
+  if (II == 1)
+    validSignal[sucNodeName] = 0;
+  else
+    validSignal[sucNodeName] = 2;
 }
 
-void CMergeNode::calValidSet(const std::string &sucNodeName, 
-  unsigned nodeStartTime, unsigned II) {
+void CMergeNode::calValidSet(const std::string &sucNodeName,
+                             unsigned nodeStartTime, unsigned II) {
   if (validSignal[sucNodeName] == 0) {
     setV[sucNodeName] = fullSet(II);
   } else {
@@ -598,19 +606,19 @@ void CMergeNode::calReadySwitching(const std::string &preNodeName) {
 }
 
 void CMergeNode::calReadySet(const std::string &preNodeName, unsigned II) {
-  setR[preNodeName] = fullSet(II); 
+  setR[preNodeName] = fullSet(II);
 }
 
 void CMergeNode::calDataout(int inputValue) {
   // Update the control channel:
   if (dataOut.find(conSucNodeName) == dataOut.end() ||
       dataOut[conSucNodeName].empty()) {
-    dataOut[conSucNodeName] = { inputValue };
+    dataOut[conSucNodeName] = {inputValue};
   } else {
     dataOut[conSucNodeName].push_back(inputValue);
   }
   // For the data channel, simply set its output to [-1]
-  dataOut[dataSucNodeName] = { -1 };
+  dataOut[dataSucNodeName] = {-1};
 }
 
 void CMergeNode::updateDataout(int inputData) {
@@ -636,14 +644,14 @@ void CMergeNode::updateDataout(int inputData) {
     } else {
       if (suc == conSucNodeName) {
         valueDiff = inputData;
-        dataOut[suc] = { inputData };
+        dataOut[suc] = {inputData};
         std::vector<unsigned> posList = getPositionList(valueDiff);
         for (unsigned pos : posList) {
           if (perChannelToggle[suc].find(pos) != perChannelToggle[suc].end())
             perChannelToggle[suc][pos]++;
         }
       } else {
-        dataOut[suc] = { -1 };
+        dataOut[suc] = {-1};
       }
     }
   }
@@ -652,8 +660,10 @@ void CMergeNode::updateDataout(int inputData) {
 void CMergeNode::printNodeDetails() {
   AdjNode::printNodeDetails();
 
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tCon_suc_node_name: " << conSucNodeName << "\n");
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tData_suc_node_name: " << dataSucNodeName << "\n");
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tCon_suc_node_name: " << conSucNodeName
+                          << "\n");
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tData_suc_node_name: "
+                          << dataSucNodeName << "\n");
 }
 
 //===----------------------------------------------------------------------===//
@@ -735,8 +745,7 @@ void CBrNode::calReadySwitching(const std::string &preNodeName, int numValid,
     readySignal[preNodeName] = 2;
 }
 
-void CBrNode::calReadySet(const std::string &preNodeName,
-                          const IISet *setValid,
+void CBrNode::calReadySet(const std::string &preNodeName, const IISet *setValid,
                           const IISet *setReady, unsigned II) {
   if (setReady != nullptr && setValid != nullptr) {
     IISet finalSet = intersection_(*setValid, *setReady);
@@ -775,7 +784,7 @@ void CBrNode::updateDataout(int inputData, unsigned condValue) {
       dataOut[suc].push_back(inputData);
     } else {
       diffValue = inputData;
-      dataOut[suc] = { inputData };
+      dataOut[suc] = {inputData};
     }
     std::vector<unsigned> posList = getPositionList(diffValue);
     for (unsigned pos : posList) {
@@ -792,15 +801,18 @@ void CBrNode::updateDataout(int inputData, unsigned condValue) {
 void CBrNode::printNodeDetails() {
   AdjNode::printNodeDetails();
 
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tCond_pre_node_name: " << condPreNodeName << "\n");
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tData_pre_node_name: " << dataPreNodeName << "\n");
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tTrue_suc_node_name: " << trueSucNodeName << "\n");
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tFalse_suc_node_name: " << falseSucNodeName
-               << "\n");
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tCond_pre_node_name: "
+                          << condPreNodeName << "\n");
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tData_pre_node_name: "
+                          << dataPreNodeName << "\n");
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tTrue_suc_node_name: "
+                          << trueSucNodeName << "\n");
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tFalse_suc_node_name: "
+                          << falseSucNodeName << "\n");
   LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tOut Channel Name to Index Map:\n");
   for (const auto &[outName, portIdx] : outChannelNameToIndexMap) {
     LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\t\tOutput Node: " << outName
-                 << "; Port Idx: " << portIdx << "\n");
+                            << "; Port Idx: " << portIdx << "\n");
   }
   LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tPer_channel_dataout:\n");
   for (const auto &entry : per_channel_dataout) {
@@ -837,14 +849,16 @@ DLoadNode::DLoadNode(mlir::Operation *op,
                           .str();
 }
 
-void DLoadNode::calValidSwitching(const std::string &sucNodeName, int &numValid) {
+void DLoadNode::calValidSwitching(const std::string &sucNodeName,
+                                  int &numValid) {
   if (numValid == 0)
     validSignal[sucNodeName] = 0;
   else if (numValid > 0)
     validSignal[sucNodeName] = 2;
 }
 
-void DLoadNode::calValidSet(const std::string &sucNodeName, const IISet *inSetV, unsigned &II) {
+void DLoadNode::calValidSet(const std::string &sucNodeName, const IISet *inSetV,
+                            unsigned &II) {
   if (validSignal.find(sucNodeName) != validSignal.end()) {
     if (validSignal[sucNodeName] == 0) {
       setV[sucNodeName] = fullSet(II);
@@ -858,15 +872,15 @@ void DLoadNode::calValidSet(const std::string &sucNodeName, const IISet *inSetV,
   }
 }
 
-void DLoadNode::calReadySwitching(const std::string &preNodeName, int &numReady) {
+void DLoadNode::calReadySwitching(const std::string &preNodeName,
+                                  int &numReady) {
   if (numReady == 0)
     readySignal[preNodeName] = 0;
   else if (numReady > 0)
     readySignal[preNodeName] = 2;
 }
 
-void DLoadNode::calReadySet(const std::string &preNodeName,
-                            const IISet *inSetR,
+void DLoadNode::calReadySet(const std::string &preNodeName, const IISet *inSetR,
                             unsigned &nodeStartTime, unsigned &II) {
   if (inSetR != nullptr) {
     setR[preNodeName] = *inSetR;
@@ -874,9 +888,9 @@ void DLoadNode::calReadySet(const std::string &preNodeName,
     if (readySignal[preNodeName] == 0) {
       setR[preNodeName] = fullSet(II);
     } else if (readySignal[preNodeName] > 0) {
-      IISet tmp(II,true);
+      IISet tmp(II, true);
       tmp.set(nodeStartTime);
-      setR[preNodeName] =std::move(tmp);
+      setR[preNodeName] = std::move(tmp);
     }
   }
 }
@@ -890,7 +904,7 @@ void DLoadNode::updateDataout(int &inputData, int addressValue) {
     dataOut[dataOutNodeName].push_back(inputData);
   } else {
     dataDiff = inputData;
-    dataOut[dataOutNodeName] = { inputData };
+    dataOut[dataOutNodeName] = {inputData};
   }
   // Update per-channel toggle counts (using getPositionList() from AdjNode)
   auto dataPositions = getPositionList(dataDiff);
@@ -910,7 +924,7 @@ void DLoadNode::updateDataout(int &inputData, int addressValue) {
     dataOut[addressOutNodeName].push_back(addressValue);
   } else {
     addressDiff = addressValue;
-    dataOut[addressOutNodeName] = { addressValue };
+    dataOut[addressOutNodeName] = {addressValue};
   }
   auto addrPositions = getPositionList(addressDiff);
   for (unsigned pos : addrPositions) {
@@ -924,9 +938,12 @@ void DLoadNode::printNodeDetails() {
   // Call base class's printNodeDetails()
   AdjNode::printNodeDetails();
 
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tAddress input node: " << addressInNodeName << ";\n");
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tAddress output node: " << addressOutNodeName << ";\n");
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tData output node: " << dataOutNodeName << ";\n");
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tAddress input node: "
+                          << addressInNodeName << ";\n");
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tAddress output node: "
+                          << addressOutNodeName << ";\n");
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tData output node: " << dataOutNodeName
+                          << ";\n");
 }
 
 //===----------------------------------------------------------------------===//
@@ -978,8 +995,8 @@ void DStoreNode::calValidSwitching(int numValid1, int numValid2) {
     validSignal["mem"] = 4;
 }
 
-void DStoreNode::calValidSet(const IISet *setV0,
-                             const IISet *setV1, unsigned II) {
+void DStoreNode::calValidSet(const IISet *setV0, const IISet *setV1,
+                             unsigned II) {
   // TODO: Need to differentiate between addrToMem and dataToMem handshake
   // channels
   if (setV0 != nullptr && setV1 != nullptr) {
@@ -994,8 +1011,10 @@ void DStoreNode::calValidSet(const IISet *setV0,
   }
 }
 
-void DStoreNode::calReadySwitching(const std::string &preNodeName, int numValid1, int numValid2) {
-  // TODO: May need to change the following modeling as the implementation changed
+void DStoreNode::calReadySwitching(const std::string &preNodeName,
+                                   int numValid1, int numValid2) {
+  // TODO: May need to change the following modeling as the implementation
+  // changed
   if (numValid1 > 0 || numValid2 > 0)
     readySignal[preNodeName] = 2;
   else if (numValid1 == 0 && numValid2 == 0)
@@ -1004,14 +1023,13 @@ void DStoreNode::calReadySwitching(const std::string &preNodeName, int numValid1
     readySignal[preNodeName] = 2;
 }
 
-void DStoreNode::calReadySet(const std::string &preNodeName,
-                             const IISet *setV0,
+void DStoreNode::calReadySet(const std::string &preNodeName, const IISet *setV0,
                              const IISet *setV1, unsigned II) {
   // TODO: Validate the following estimation based on new implementations
   if (setV0 != nullptr && setV1 != nullptr) {
-    IISet tmp = intersection_(*setV0,*setV1);
+    IISet tmp = intersection_(*setV0, *setV1);
     IISet finalSet(II, false);
-    for (unsigned i :tmp.set_bits())
+    for (unsigned i : tmp.set_bits())
       finalSet.set((i + nodeLatency) % II);
     // Here we store the result into setV for preNodeName.
     setV[preNodeName] = finalSet;
@@ -1055,15 +1073,19 @@ void DStoreNode::printNodeDetails() {
   // Call the base class printNodeDetails for common node info.
   AdjNode::printNodeDetails();
 
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tAddress input node: " << addressInNode << "\n");
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tSrc address input node: " << addressInSrcNode
-               << "\n");
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tData input node: " << dataInNode << "\n");
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tSrc data input node: " << dataInSrcNode << "\n");
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tAddress input node: " << addressInNode
+                          << "\n");
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tSrc address input node: "
+                          << addressInSrcNode << "\n");
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tData input node: " << dataInNode
+                          << "\n");
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tSrc data input node: "
+                          << dataInSrcNode << "\n");
 }
 
 bool DStoreNode::handshakeSwitchingChecking() {
-  // For example, if the number of ready channels equals the number of predecessors.
+  // For example, if the number of ready channels equals the number of
+  // predecessors.
   return (readySignal.size() == pres.size());
 }
 

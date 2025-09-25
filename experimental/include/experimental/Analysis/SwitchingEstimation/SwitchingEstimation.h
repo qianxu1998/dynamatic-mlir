@@ -22,7 +22,7 @@ namespace experimental {
 #define GEN_PASS_DECL_SWITCHINGESTIMATION
 #include "experimental/Analysis/Passes.h.inc"
 
-} // namespace dynamatic
 } // namespace experimental
+} // namespace dynamatic
 
 #endif // DYNAMATIC_EXPERIMENTAL_ANALYSIS_SWITCHINGESTIMATION_PASS_H
