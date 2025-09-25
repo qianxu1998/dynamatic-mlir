@@ -70,6 +70,8 @@ void generateModelsimScripts(const VerificationContext &ctx) {
   } else {
     os << "eval vsim tb\n";
   }
+  os << "vcd file trace.vcd\n";
+  os << "vcd add -r /tb/duv_inst/*\n";
   os << "log -r *\n";
   os << "run -all\n";
   os << "exit\n";
