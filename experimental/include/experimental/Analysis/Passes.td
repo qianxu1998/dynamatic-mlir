@@ -40,6 +40,8 @@ def SwitchingEstimation : Pass<"switching-estimation"> {
            "Path to the scf data profiling results.">,
     Option<"timingModels", "timing-models", "std::string", "",
            "Path to JSON-formatted file containing timing models for dataflow components.">,
+    Option<"dumpFile", "dump-file", "std::string", "",
+           "Path to the output file where the switching estimation results will be dumped.">,
     Option<"targetPeriod", "target-period", "double", "",
            "Target clock period to be used in the analysis.">,];
   

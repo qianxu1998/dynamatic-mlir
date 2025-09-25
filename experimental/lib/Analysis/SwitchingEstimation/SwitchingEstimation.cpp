@@ -158,7 +158,7 @@ void SwitchingEstimationPass::runOnOperation() {
   }
 
   //! Testing
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tInvalue Backedge list map:\n");
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tInvalid Backedge list map:\n");
   for (const auto& [segLabel, edgeList] : switchingInfo.segInvalidBackedgesMap) {
     LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tsegLabel: " << segLabel << " : ");
     for (const auto& selPair: edgeList) {
@@ -189,15 +189,16 @@ void SwitchingEstimationPass::runOnOperation() {
 
   // [STEP 6] Calculate Steady State Handshake channel switching
   LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 6] Calculating steady state handshake channel switching\n");
-  // computeSteadyStateHandshakeSwitching(topModule, profilingResults);
+  computeSteadyStateHandshakeSwitching(topModule, profilingResults);
 
   // [Step 7] Propagate handshake switching to the entire dataflow graph
   LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 7] Propagating handshake switching to the entire dataflow graph\n");
-  // computeTotalHandshakeSwitching(topModule, profilingResults);
+  computeTotalHandshakeSwitching(topModule, profilingResults);
 
   // [Step 8] Dump the switching estimation results
   LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 8] Dumping the switching estimation results\n");
-  // dumpSwitchingResults(switchingInfo, dumpFilePath);
+  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] Dump file path: " << dumpFile << "\n");
+  dumpSwitchingResults(switchingInfo, dumpFile);
 }
 
 //===----------------------------------------------------------------------===//

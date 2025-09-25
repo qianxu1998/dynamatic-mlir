@@ -371,7 +371,7 @@ void mgHandshakeSwitchingCounting(SwitchingInfo &switchInfo, std::string selMG, 
   if (debug) {
     llvm::dbgs() << "[DEBUG] [HANDSHAKE CHANNEL SWITCHING SUMMARY]\n";
     for (const auto& selNode: selAdjGraph->nodes) {
-      llvm::dbgs() << "[DEBUG] \t=================================\n";
+      llvm::dbgs() << "[DEBUG] \t=============================================================\n";
       llvm::dbgs() << "[DEBUG] \tNode Name: " << selNode.first() << "\n";
       selNode.second->printNodeDetails();
     }
