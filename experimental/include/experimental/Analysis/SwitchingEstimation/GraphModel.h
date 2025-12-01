@@ -312,6 +312,10 @@ public:
   std::string graphBacktrack(std::string srcNode,
                              std::unordered_set<std::string> &baseNodeSet);
 
+  // This function conducts backtracking in the MG from the specified node,
+  // the search will stop when there is no node left and return all buffer nodes.
+  std::vector<std::string> mgBacktrackBuffer(std::string srcNode);
+
   //===----------------------------------------------------------------------===//
   // Data Channel Switching Calculation Functions
   //===----------------------------------------------------------------------===//

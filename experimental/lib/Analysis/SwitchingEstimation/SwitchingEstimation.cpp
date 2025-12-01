@@ -182,16 +182,16 @@ void SwitchingEstimationPass::runOnOperation() {
   }
 
   //! Testing
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tInvalid Backedge list map:\n");
-  for (const auto &[segLabel, edgeList] :
-       switchingInfo.segInvalidBackedgesMap) {
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tsegLabel: " << segLabel << " : ");
-    for (const auto &selPair : edgeList) {
-      LLVM_DEBUG(llvm::dbgs()
-                 << "(" << selPair.first << ", " << selPair.second << "), ");
-    }
-    LLVM_DEBUG(llvm::dbgs() << "\n");
-  }
+  // LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tInvalid Backedge list map:\n");
+  // for (const auto &[segLabel, edgeList] :
+  //      switchingInfo.segInvalidBackedgesMap) {
+  //   LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tsegLabel: " << segLabel << " : ");
+  //   for (const auto &selPair : edgeList) {
+  //     LLVM_DEBUG(llvm::dbgs()
+  //                << "(" << selPair.first << ", " << selPair.second << "), ");
+  //   }
+  //   LLVM_DEBUG(llvm::dbgs() << "\n");
+  // }
 
   // [STEP 3.2] Create the storing structure for the entire dataflow graph
   for (handshake::FuncOp funcOp : topModule.getOps<handshake::FuncOp>()) {
@@ -210,6 +210,15 @@ void SwitchingEstimationPass::runOnOperation() {
 
     // [STEP 4.2] Determine the shifting for each start node in the cfdfc
     selCFDFC->computeStartNodeShifts();
+
+    //! Testing
+    llvm::dbgs() << "[DEBUG] [Step 4] CFDFC index: " << mgIndex << "\n";
+    llvm::dbgs() << "[DEBUG]    Base Node: " << selCFDFC->baseNode << "\n";
+    for (const auto &[selNode, selShift] :
+         selCFDFC->startBaseNodeShiftMap) {
+      llvm::dbgs() << "[DEBUG]    Start Node: " << selNode
+                   << " with shift: " << selShift << "; Cycle Time: " << selCFDFC->cycleTimeMap[selNode] << "\n";
+    }
   }
 
   // [STEP 5] Calculate Data channel switching
@@ -228,6 +237,7 @@ void SwitchingEstimationPass::runOnOperation() {
   computeTotalHandshakeSwitching(topModule, profilingResults);
 
   // [Step 8] Dump the switching estimation results
+  // TODO: Need to refine the dumping format, we are counting the output ports now, need to record the input ports switching of each node as well
   LLVM_DEBUG(llvm::dbgs()
              << "[DEBUG] [Step 8] Dumping the switching estimation results\n");
   LLVM_DEBUG(llvm::dbgs() << "[DEBUG] Dump file path: " << dumpFile << "\n");
@@ -463,12 +473,12 @@ void SwitchingEstimationPass::calDataChannelSwitching(
   // circuit
   LLVM_DEBUG(llvm::dbgs() << "[DEBUG] [Step 5.7] Update all glitching value "
                              "for data base nodes in the dataflow circuit\n");
-  dataBaseNodeGlitchUpdate(switchingInfo, profileResults, true);
+  dataBaseNodeGlitchUpdate(switchingInfo, profileResults, false);
 
   // [SS 8] Propagate all the data base value
   LLVM_DEBUG(
       llvm::dbgs() << "[DEBUG] [Step 5.8] Propagate all the data base value\n");
-  dfgDataChannelPropagate(switchingInfo, profileResults, true);
+  dfgDataChannelPropagate(switchingInfo, profileResults, false);
 
   // [SS 9] Calculate the data channel switching for each node in the dataflow
   // graph
@@ -482,13 +492,13 @@ void SwitchingEstimationPass::calDataChannelSwitching(
 
     auto *node = entry.second.get();
     node->totalDataSwitchingCounting(false);
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t[Node] " << nodeName << "\n");
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tData Switching: "
-                            << node->totalDataSwitching << "\n");
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tValid Switching: "
-                            << node->totalValidSwitching << "\n");
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tReady Switching: "
-                            << node->totalReadySwitching << "\n");
+    // LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t[Node] " << nodeName << "\n");
+    // LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tData Switching: "
+    //                         << node->totalDataSwitching << "\n");
+    // LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tValid Switching: "
+    //                         << node->totalValidSwitching << "\n");
+    // LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tReady Switching: "
+    //                         << node->totalReadySwitching << "\n");
   }
 }
 

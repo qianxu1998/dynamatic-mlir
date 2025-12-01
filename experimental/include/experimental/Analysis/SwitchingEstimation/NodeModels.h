@@ -137,7 +137,7 @@ public:
   unsigned START = 0;
   float_t occupancy;
   unsigned numSlots;
-  bool transparent;
+  bool transparent;  // This is indeed bypassDV
   BufferType buffType;
 };
 

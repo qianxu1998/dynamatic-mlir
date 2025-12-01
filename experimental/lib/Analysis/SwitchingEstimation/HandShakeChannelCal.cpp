@@ -37,10 +37,10 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
 
   //! Testing
   if (debug) {
-    llvm::dbgs() << "[MG " << selMG << "]\n";
-    llvm::dbgs() << "[MG INFO] Throughput: " << selMgThroughput << "\n";
-    llvm::dbgs() << "[MG INFO] II: " << selMGII << "\n";
-    llvm::dbgs() << "[MG INFO] Base Node: " << baseNode << "\n";
+    llvm::dbgs() << "[DEBUG] [MG " << selMG << "]\n";
+    llvm::dbgs() << "[DEBUG] [MG INFO] Throughput: " << selMgThroughput << "\n";
+    llvm::dbgs() << "[DEBUG] [MG INFO] II: " << selMGII << "\n";
+    llvm::dbgs() << "[DEBUG] [MG INFO] Base Node: " << baseNode << "\n";
   }
 
   // Create the "universe" set: set of all cycle indices from 0..selCfdfcII-1
@@ -49,7 +49,8 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
   for (const auto &selBuffName : selAdjGraph->orderedNodeName) {
     if (contains(selBuffName, "buffer")) {
       if (debug) {
-        llvm::dbgs() << "\t[" << selBuffName << "]\n";
+        llvm::dbgs() << "[DEBUG] 	=============================================================\n";
+        llvm::dbgs() << "[DEBUG] \t[" << selBuffName << "]\n";
       }
 
       // Get the buffer node
@@ -57,19 +58,22 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
           dyn_cast<BufferNode>(selAdjGraph->nodes[selBuffName].get());
 
       // Get the longest path
+      // TODO: May need to update the update mechanism for transparent node
+      // TODO: Is it possible to determine all properties for transparent buffer
+      // at the beginning?
       LongestPathResult tmpLongPath =
           selLongestPath(switchInfo, selBuffName, selMG);
 
       if (debug) {
-        llvm::dbgs() << "\t\tStarting node: " << tmpLongPath.selStartNode
+        llvm::dbgs() << "[DEBUG] \t\tStarting node: " << tmpLongPath.selStartNode
                      << "\n";
-        llvm::dbgs() << "\t\tPath Latency: " << tmpLongPath.maxLatency << "\n";
-        llvm::dbgs() << "\t\tPath Last second buffer: "
+        llvm::dbgs() << "[DEBUG] \t\tPath Latency: " << tmpLongPath.maxLatency << "\n";
+        llvm::dbgs() << "[DEBUG] \t\tPath Last second buffer: "
                      << tmpLongPath.lastSecondBuffer << "\n";
         llvm::dbgs()
-            << "\t\tStart Node Shift: "
+            << "[DEBUG] \t\tStart Node Shift: "
             << selAdjGraph->startBaseNodeShiftMap[tmpLongPath.selStartNode]
-            << "\n\n";
+            << "\n";
       }
 
       // [Step 1] Calculate D. Get the steady state buffer starting point
@@ -84,8 +88,8 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
           static_cast<unsigned>(selAdjGraph->startBaseNodeShiftMap[baseNode]);
 
       if (debug) {
-        llvm::dbgs() << "\t\tpathLatencyMod: " << pathLatencyMod << "\n";
-        llvm::dbgs() << "\t\tD : " << finStartPoint
+        llvm::dbgs() << "[DEBUG] \t\tpathLatencyMod: " << pathLatencyMod << "\n";
+        llvm::dbgs() << "[DEBUG] \t\tD : " << finStartPoint
                      << " regarding the start of " << baseNode << "\n";
       }
 
@@ -108,6 +112,19 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
           tmpPreBuffOcc = selLastSecondBuff->occupancy;
         }
 
+        // Check whether the second last buffer is directly preceding the current buffer
+        if (std::find(selBuffNode->pres.begin(), selBuffNode->pres.end(),
+                      tmpLongPath.lastSecondBuffer) != selBuffNode->pres.end()) {
+          tmpPreBuffOcc = 0;
+          
+          if (debug) {
+            llvm::dbgs() << "[DEBUG] \t\tThe last opaque buffer "
+                         << tmpLongPath.lastSecondBuffer
+                         << " is directly preceding the current buffer "
+                         << selBuffName << "\n";
+          }
+        }
+
         tmpNumCycles =
             ((tmpPreBuffOcc + selBuffOcc) / selMgThroughput) -
             selAdjGraph->startBaseNodeShiftMap[tmpLongPath.selStartNode];
@@ -126,9 +143,14 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
         tmpBufferValidSet.set(relativeActiveCycle);
       }
 
+      // If this is a transparent buffer with 1 slot and II = 1
+      if (selMGII == 1) {
+        tmpBufferValidSet.set(0);
+      }
+
       //! Testing
       if (debug) {
-        llvm::dbgs() << "\t\tSET_V: { ";
+        llvm::dbgs() << "[DEBUG] \t\tSET_V: { ";
         for (auto x : tmpBufferValidSet.set_bits())
           llvm::dbgs() << x << " ";
         llvm::dbgs() << "}\n";
@@ -136,28 +158,11 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
       selBuffNode->calValidSet(selBuffNode->sucs[0], tmpBufferValidSet);
 
       // [Step 3] Calculate SET_R
-      // TODO: Correct the ready channel upadte mechanism with different buffer
-      // types
       IISet tmpBufferReadySet(selMGII, false);
-      // Handle cascaded buffers (opaque buffer -> transparent buffer)
-      // TODO: Validate the following operations through simulation
-      if (selBuffTransparent) {
-        // Check the direct predecessor
-        std::string predName = selBuffNode->pres[0];
-        if (contains(predName, "buffer")) {
-          auto selPredBufferNode =
-              dyn_cast<BufferNode>(selAdjGraph->nodes[predName].get());
-          // The direct predecessor is an opaque buffer
-          if (!selPredBufferNode->transparent) {
-            selBuffNode->occupancy -= selPredBufferNode->occupancy;
-            selBuffOcc = selBuffNode->occupancy;
-          }
-        }
-      }
-
+      IISet offsetSet(selMGII, false);
+      
       if (selBuffTransparent && (selBufSlots == 1) && (selBuffOcc == 0.0)) {
-        // TODO: Check why it's different when the transparent just have one
-        // slot Special case for transparent buffer
+        // 1 slot with occ = 0, the corresponding buffer is always ready
         tmpBufferReadySet = IISet(selMGII, true);
       } else if (!selBuffTransparent &&
                  (selBufSlots - selBuffOcc >= (1 - selMgThroughput))) {
@@ -165,26 +170,49 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
         tmpBufferReadySet = IISet(selMGII, true);
       } else {
         // The corresponding buffer is not always ready
-        float_t tmpTransparentOffset = 0;
-        if (selBuffTransparent) {
-          // Transparent buffer
-          // Check the existence fo the last second buffer
+        // Calculate the missing cycles for different buffer types
+        if (selBuffNode->buffType == BufferType::ONE_SLOT_BREAK_DV ||
+            selBuffNode->buffType == BufferType::FIFO_BREAK_DV) {
+          //* Legacy Buffer Type: OEHB
+          if (debug) {
+            llvm::dbgs() << "[DEBUG] \t\tBuffer Type: OEHB Or elastic_fifo_inner\n";
+          }
+
+          int tmpMissingCycles = static_cast<int>(
+              ((1 - selMgThroughput) - (selBufSlots - selBuffOcc)) /
+              selMgThroughput);
+
+          if (tmpMissingCycles < 0) {
+            llvm::dbgs() << "[WARNING] Negative missing cycles for buffer "
+                         << selBuffName << ", set to 0\n";
+            tmpMissingCycles = 0;
+          }
+              
+          // Update the offset set
+          for (int i = 0; i < tmpMissingCycles; i++) {
+            unsigned relativeActiveCycle = (finStartPoint + i) % selMGII;
+            offsetSet.set(relativeActiveCycle);
+          }
+
+        } else if (selBuffNode->buffType == BufferType::FIFO_BREAK_NONE) {
+          //* Legacy Buffer Type: TEHB
+          if (debug) {
+            llvm::dbgs() << "[DEBUG] \t\tBuffer Type: TEHB\n";
+          }
+
+          float_t tmpTransparentOffset = 0;
           if (tmpLongPath.lastSecondBuffer != "") {
             auto selLastSecondBuff = dyn_cast<BufferNode>(
                 selAdjGraph->nodes[tmpLongPath.lastSecondBuffer].get());
             tmpTransparentOffset =
                 selLastSecondBuff->occupancy / selMgThroughput;
           } else {
-            // TODO: Validate the following assumption
             llvm::dbgs() << "[WARNING] Transparent Buffer " << selBuffName
                          << " has no preceding opaque buffer!\n";
             tmpTransparentOffset = 0;
           }
-        }
 
-        // TODO Changed here from unisgned to int
-        int tmpMissingCycles = 0;
-        if (selBuffTransparent) {
+          int tmpMissingCycles = 0;
           if (selBufSlots == 1) {
             tmpMissingCycles =
                 static_cast<int>(((1 - selMgThroughput) -
@@ -195,26 +223,32 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
                 ((1 - selMgThroughput) - (selBufSlots - selBuffOcc)) /
                 selMgThroughput);
           }
-        } else {
-          // Opaque buffer
-          tmpMissingCycles = static_cast<int>(
-              ((1 - selMgThroughput) - (selBufSlots - selBuffOcc)) /
-              selMgThroughput);
-        }
 
-        //
-        IISet offsetSet(selMGII, false);
-        llvm::dbgs() << "[DEBUG] Missed Cycles temp " << tmpMissingCycles
-                     << " \n";
-        if (tmpMissingCycles < 0)
-          tmpMissingCycles = 0;
-        for (int i = 0; i < tmpMissingCycles; i++) {
-          // TODO: Validate the following rounding
-          unsigned relativeActiveCycle =
-              (finStartPoint + i +
-               static_cast<unsigned>(tmpTransparentOffset)) %
-              selMGII;
-          offsetSet.set(relativeActiveCycle);
+          if (tmpMissingCycles < 0) {
+            llvm::dbgs() << "[WARNING] Negative missing cycles for buffer "
+                         << selBuffName << ", set to 0\n";
+            tmpMissingCycles = 0;
+          }
+
+          for (int i = 0; i < tmpMissingCycles; i++) {
+            unsigned relativeActiveCycle =
+                (finStartPoint + i +
+                static_cast<unsigned>(tmpTransparentOffset)) %
+                selMGII;
+            offsetSet.set(relativeActiveCycle);
+          }
+        } else if (selBuffNode->buffType == BufferType::ONE_SLOT_BREAK_R) {
+          //* Legacy Buffer Type: TEHB
+          if (debug) {
+            llvm::dbgs() << "[DEBUG] \t\tBuffer Type: TEHB\n";
+          }
+
+          // When the buffer is valid, it is not ready
+          offsetSet = tmpBufferValidSet;
+        } else {
+          // Unsupported buffer type, report error
+          llvm::errs() << "[ERROR] Unsupported buffer type for buffer "
+                       << selBuffName << "\n";
         }
 
         // Now the buffer is NOT ready in offsetSet, so we want
@@ -228,7 +262,7 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
 
       //! Testing
       if (debug) {
-        llvm::dbgs() << "\t\tSET_R: { ";
+        llvm::dbgs() << "[DEBUG] \t\tSET_R: { ";
         for (auto x : tmpBufferReadySet.set_bits())
           llvm::dbgs() << x << " ";
         llvm::dbgs() << "}\n";
@@ -237,9 +271,9 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
 
       // Store the other data
       if (debug) {
-        llvm::dbgs() << "\t\tOccupancy: " << selBuffOcc << "\n";
-        llvm::dbgs() << "\t\tNum Slots: " << selBufSlots << "\n";
-        llvm::dbgs() << "\t\tTransparent: " << selBuffTransparent << "\n";
+        llvm::dbgs() << "[DEBUG] \t\tOccupancy: " << selBuffOcc << "\n";
+        llvm::dbgs() << "[DEBUG] \t\tNum Slots: " << selBufSlots << "\n";
+        llvm::dbgs() << "[DEBUG] \t\tTransparent: " << selBuffTransparent << "\n";
       }
 
       // Calculate switching
@@ -314,7 +348,7 @@ void mgHandshakeSwitchingCounting(SwitchingInfo &switchInfo, std::string selMG,
         selAdjGraph->nodes[selNode]->totalHandshakeSwitchingCounting();
 
         if (debug) {
-          llvm::dbgs() << "Finished node: " << selNode << "\n";
+          llvm::dbgs() << "[DEBUG] 	Finished node: " << selNode << "\n";
           selAdjGraph->nodes[selNode]->printHandshakeSwitching();
         }
       }
@@ -468,17 +502,17 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
 
   //! Testing
   if (debug) {
-    llvm::dbgs() << "============================= \n";
-    llvm::dbgs() << "CURRENT NODE: " << selNode << "\n";
-    llvm::dbgs() << "\tpValid List: ";
+    llvm::dbgs() << "[DEBUG] 	============================================================= \n";
+    llvm::dbgs() << "[DEBUG] 	CURRENT NODE: " << selNode << "\n";
+    llvm::dbgs() << "[DEBUG] 	\tpValid List: ";
     for (int v : tmpPValidList)
       llvm::dbgs() << v << " ";
     llvm::dbgs() << "\n";
-    llvm::dbgs() << "\tpValid Dict: ";
+    llvm::dbgs() << "[DEBUG] 	\tpValid Dict: ";
     for (const auto &p : tmpPValidDict)
       llvm::dbgs() << "{" << p.first << ": " << p.second << "} ";
     llvm::dbgs() << "\n";
-    llvm::dbgs() << "\tpValid Set List: ";
+    llvm::dbgs() << "[DEBUG] 	\tpValid Set List: ";
     for (auto ptr : tmpPValidSetList) {
       if (ptr) {
         llvm::dbgs() << "{";
@@ -490,7 +524,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
       }
     }
     llvm::dbgs() << "\n";
-    llvm::dbgs() << "\tpValid Set Dict: ";
+    llvm::dbgs() << "[DEBUG] 	\tpValid Set Dict: ";
     for (const auto &p : tmpPValidSetDict) {
       llvm::dbgs() << "{" << p.first << ": ";
       if (p.second) {
@@ -504,15 +538,15 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
       llvm::dbgs() << "} ";
     }
     llvm::dbgs() << "\n";
-    llvm::dbgs() << "\tnReady List: ";
+    llvm::dbgs() << "[DEBUG] 	\tnReady List: ";
     for (int v : tmpNReadyList)
       llvm::dbgs() << v << " ";
     llvm::dbgs() << "\n";
-    llvm::dbgs() << "\tnReady Dict: ";
+    llvm::dbgs() << "[DEBUG] 	\tnReady Dict: ";
     for (const auto &p : tmpNReadyDict)
       llvm::dbgs() << "{" << p.first << ": " << p.second << "} ";
     llvm::dbgs() << "\n";
-    llvm::dbgs() << "\tnReady Set List: ";
+    llvm::dbgs() << "[DEBUG] 	\tnReady Set List: ";
     for (auto ptr : tmpNReadySetList) {
       if (ptr) {
         llvm::dbgs() << "{";
@@ -524,7 +558,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
       }
     }
     llvm::dbgs() << "\n";
-    llvm::dbgs() << "\tnReady Set Dict: ";
+    llvm::dbgs() << "[DEBUG] 	\tnReady Set Dict: ";
     for (const auto &p : tmpNReadySetDict) {
       llvm::dbgs() << "{" << p.first << ": ";
       if (p.second) {
@@ -538,10 +572,10 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
       llvm::dbgs() << "} ";
     }
     llvm::dbgs() << "\n";
-    llvm::dbgs() << "\tSteady State Start Cycle: " << tmpNodeSSStart << "\n";
+    llvm::dbgs() << "[DEBUG] 	Steady State Start Cycle: " << tmpNodeSSStart << "\n";
   }
 
-  // Early exisat for nodes without successors
+  // Early exit for nodes without successors
   // Setting it as always ready
   auto nodePtr = selNodeStoringDict[selNode];
   if (nodePtr->sucs.size() == 0) {
@@ -562,7 +596,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // CMPI Node
         //! Testing
         if (debug)
-          llvm::dbgs() << "[CMPI] NODE \n";
+          llvm::dbgs() << "[DEBUG] 	[CMPI] NODE \n";
         // Valid Signal
         for (const auto &selSuc : cmpi->sucs) {
           // Calculate the number of switching
@@ -590,7 +624,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
       .Case<AddiNode>([&](AddiNode *addi) {
         // ADDI NODE
         if (debug)
-          llvm::dbgs() << "[ADDI NODE] \n";
+          llvm::dbgs() << "[DEBUG] 	[ADDI NODE] \n";
         // Valid Signal
         for (const auto &selSuc : addi->sucs) {
           // Calculate the number of switching
@@ -617,7 +651,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
       .Case<OriNode>([&](OriNode *ori) {
         // ORI NODE
         if (debug)
-          llvm::dbgs() << "[ORI NODE] \n";
+          llvm::dbgs() << "[DEBUG] 	[ORI NODE] \n";
         // Valid Signal
         for (const auto &selSuc : ori->sucs) {
           // Calculate the number of switching
@@ -644,7 +678,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
       .Case<AndiNode>([&](AndiNode *andi) {
         // ANDI NODE
         if (debug)
-          llvm::dbgs() << "[ANDI NODE] \n";
+          llvm::dbgs() << "[DEBUG] 	[ANDI NODE] \n";
         // Valid Signal
         for (const auto &selSuc : andi->sucs) {
           // Calculate the number of switching
@@ -671,7 +705,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
       .Case<SubiNode>([&](SubiNode *subi) {
         // SUBI NODE
         if (debug)
-          llvm::dbgs() << "[SUBI NODE] \n";
+          llvm::dbgs() << "[DEBUG] 	[SUBI NODE] \n";
         // Valid Signal
         for (const auto &selSuc : subi->sucs) {
           // Calculate the number of switching
@@ -699,7 +733,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // MULI Node
         //! Testing
         if (debug)
-          llvm::dbgs() << "[MULI NODE] \n";
+          llvm::dbgs() << "[DEBUG] 	[MULI NODE] \n";
         // Valid Signal
         for (const auto &selSuc : muli->sucs) {
           // Calculate the number of switching
@@ -728,7 +762,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // EXTSI NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[EXTSI NODE] \n";
+          llvm::dbgs() << "[DEBUG] 	[EXTSI NODE] \n";
         // Valid Signal
         for (const auto &selSuc : ext->sucs) {
           // Number of switching
@@ -757,7 +791,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // EXTUI NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[EXTUI NODE] \n";
+          llvm::dbgs() << "[DEBUG] 	[EXTUI NODE] \n";
         // Valid Signal
         for (const auto &selSuc : ext->sucs) {
           // Number of switching
@@ -786,7 +820,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // connections to mem_con ignored
         //! Testing
         if (debug)
-          llvm::dbgs() << "[DLoad NODE] \n";
+          llvm::dbgs() << "[DEBUG] 	[DLoad NODE] \n";
         // Valid Signal
         for (const auto &selSuc : load->sucs) {
           // Number of switching
@@ -819,7 +853,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // DStoreNode NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[DStore NODE] \n";
+          llvm::dbgs() << "[DEBUG] 	[DStore NODE] \n";
         // Valid Signal: This node will not have any successors in the extracted
         // CFDFC, but we still model the switching of MC
         store->calValidSwitching(tmpPValidList[0], tmpPValidList[1]);
@@ -837,7 +871,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // ForkNode NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[Fork NODE] \n";
+          llvm::dbgs() << "[DEBUG] 	[Fork NODE] \n";
         // Valid Signal
         for (auto &selSuc : fork->sucs) {
           // Get Suc Node Start
@@ -851,7 +885,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
                             tmpNReadySetDict, selMGII);
 
           //! Testing
-          llvm::dbgs() << "Updating Value for Suc: " << selSuc << "\n";
+          llvm::dbgs() << "[DEBUG] 	Updating Value for Suc: " << selSuc << "\n";
         }
 
         // Ready Signal
@@ -866,7 +900,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // MuxNode NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[Mux NODE] \n";
+          llvm::dbgs() << "[DEBUG] 	[Mux NODE] \n";
         // Get the cond input port name
         std::string condPortName = "";
         std::string dataInputPortName = "";
@@ -914,7 +948,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // TrunciNode NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[Trunci NODE] \n";
+          llvm::dbgs() << "[DEBUG] 	[Trunci NODE] \n";
         // Valid Signal
         for (const auto &selSuc : trunci->sucs) {
           trunci->calValidSwitching(selSuc, tmpPValidList[0]);
@@ -932,7 +966,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // CMergeNode NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[CMerge NODE] \n";
+          llvm::dbgs() << "[DEBUG] 	[CMerge NODE] \n";
         // Get node starting time in steady state
         int nodeStartTime = mgGetNodeStartingPoint(switchInfo, selNode, selMG);
 
@@ -957,7 +991,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // CBrNode NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[CBr NODE] \n";
+          llvm::dbgs() << "[DEBUG] 	[CBr NODE] \n";
         // Get the conditional value
         std::string condPortName = cbr->condPreNodeName;
 
@@ -970,8 +1004,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         //! Testing
         // TODO: Calibrate the cond value with the simulation
         if (debug) {
-          llvm::dbgs() << "Node: " << selNode << "\n";
-          llvm::dbgs() << "\tCond_input Port: " << condPortName << "\n";
+          llvm::dbgs() << "[DEBUG] 	Node: " << selNode << "\n";
+          llvm::dbgs() << "[DEBUG] 	\tCond_input Port: " << condPortName << "\n";
         }
 
         // Check whether the index exist or not
@@ -989,7 +1023,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
 
         //! Testing
         if (debug) {
-          llvm::dbgs() << "\tCond_value: " << condValue << "\n";
+          llvm::dbgs() << "[DEBUG] 	\tCond_value: " << condValue << "\n";
         }
 
         std::string selOutputPort = "";
@@ -1003,7 +1037,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
 
         //! Testing
         if (debug) {
-          llvm::dbgs() << "\tSelected Suc Node: " << selOutputPort << "\n";
+          llvm::dbgs() << "[DEBUG] 	\tSelected Suc Node: " << selOutputPort << "\n";
         }
 
         // Sometime we just have one output for cond_br
@@ -1064,7 +1098,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // Source node: Normally no pre node
         //! Testing
         if (debug)
-          llvm::dbgs() << "[Source NODE] \n";
+          llvm::dbgs() << "[DEBUG] 	[Source NODE] \n";
         // Valid Signals
         for (auto &selSuc : source->sucs) {
           // Number of Switching
@@ -1077,7 +1111,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // ConstantNode NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[Constant NODE] \n";
+          llvm::dbgs() << "[DEBUG] 	[Constant NODE] \n";
         // Valid Signal
         for (const auto &selSuc : constant->sucs) {
           constant->calValidSwitching(selSuc, tmpPValidList[0]);
@@ -1095,7 +1129,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // ShliNode NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[Shli NODE] \n";
+          llvm::dbgs() << "[DEBUG] 	[Shli NODE] \n";
         // Valid Signal
         for (const auto &selSuc : shli->sucs) {
           // Calculate the number of switching
@@ -1124,7 +1158,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // ShrsiNode NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[Shrsi NODE] \n";
+          llvm::dbgs() << "[DEBUG] 	[Shrsi NODE] \n";
         // Valid Signal
         for (const auto &selSuc : shrsi->sucs) {
           // Calculate the number of switching
@@ -1153,7 +1187,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // ShruiNode NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[Shrui NODE] \n";
+          llvm::dbgs() << "[DEBUG] 	[Shrui NODE] \n";
         // Valid Signal
         for (const auto &selSuc : shrui->sucs) {
           // Calculate the number of switching
@@ -1182,7 +1216,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // SinkNode NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[Sink NODE] \n";
+          llvm::dbgs() << "[DEBUG] 	[Sink NODE] \n";
         // Ready Signal
         for (auto &selPre : sink->pres) {
           sink->calReadySwitching(selPre);

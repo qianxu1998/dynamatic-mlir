@@ -413,15 +413,15 @@ AdjGraph::AdjGraph(CFDFC *cfdfc, const TimingDatabase &timingDB,
     }
 
     //! Testing
-    LLVM_DEBUG(
-        llvm::dbgs()
-        << "[DEBUG] "
-           "\t=============================================================\n");
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n");
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tNode Latency From DataBase: "
-                            << nodeLatency << "\n");
-    LLVM_DEBUG(llvm::dbgs()
-               << "[DEBUG] \tNode BB Index: " << nodeBBIndex << "\n");
+    // LLVM_DEBUG(
+    //     llvm::dbgs()
+    //     << "[DEBUG] "
+    //        "\t=============================================================\n");
+    // LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n");
+    // LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tNode Latency From DataBase: "
+    //                         << nodeLatency << "\n");
+    // LLVM_DEBUG(llvm::dbgs()
+    //            << "[DEBUG] \tNode BB Index: " << nodeBBIndex << "\n");
 
     // Step 2.1: Construct the node storing structure
     auto newNode = createNodeFromOperation(selNode, nodeToPresMap[unitName],
@@ -432,7 +432,7 @@ AdjGraph::AdjGraph(CFDFC *cfdfc, const TimingDatabase &timingDB,
       continue;
 
     //! Testing
-    newNode->printNodeDetails();
+    // newNode->printNodeDetails();
 
     // Store the new node
     nodes[unitName] = newNode;
@@ -461,11 +461,11 @@ AdjGraph::AdjGraph(
     orderedNodeName.push_back(unitName);
 
     //! Testing
-    LLVM_DEBUG(
-        llvm::dbgs()
-        << "[DEBUG] "
-           "\t=============================================================\n");
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n");
+    // LLVM_DEBUG(
+    //     llvm::dbgs()
+    //     << "[DEBUG] "
+    //        "\t=============================================================\n");
+    // LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n");
 
     std::vector<std::string> pres;
     std::vector<std::string> sucs;
@@ -520,7 +520,7 @@ AdjGraph::AdjGraph(
       continue;
 
     //! Testing
-    newNode->printNodeDetails();
+    // newNode->printNodeDetails();
 
     // Store the new node
     nodes[unitName] = newNode;
@@ -1004,6 +1004,10 @@ AdjGraph::graphBacktrack(std::string srcNode,
   return "";
 }
 
+// std::vector<std::string> mgBacktrackBuffer(std::string srcNode) {
+
+// }
+
 void AdjGraph::computeStartNodeShifts() {
   // Find the largest value in the global order map
   unsigned tmpMaxValue = 0;
@@ -1060,7 +1064,7 @@ void AdjGraph::obtainNodeGlobalOrder() {
 
         auto [tmpPathLat, _skip] =
             getMaxLatency(selStartNode, name, true, false);
-        if (tmpPathLat > maxLatency) {
+        if (tmpPathLat >= maxLatency) {
           maxLatency = tmpPathLat;
           finalStartNode = selStartNode;
         }
@@ -1069,8 +1073,8 @@ void AdjGraph::obtainNodeGlobalOrder() {
       graphGlobalOrder[name] = std::make_pair(finalStartNode, maxLatency);
 
       //! Testing
-      llvm::dbgs() << "[DEBUG] \tNode: " << name << "; Global Order: ("
-                   << finalStartNode << ", " << maxLatency << ");\n";
+      // llvm::dbgs() << "[DEBUG] \tNode: " << name << "; Global Order: ("
+      //              << finalStartNode << ", " << maxLatency << ");\n";
     }
   }
 }

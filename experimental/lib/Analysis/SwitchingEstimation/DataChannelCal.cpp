@@ -259,8 +259,6 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
     auto itCM = switchInfo.data.bbPairToCtrlMerge.find(key_pair);
     if (itCM != switchInfo.data.bbPairToCtrlMerge.end()) {
       // Iterate over all (CMNode, output value) pairs
-      // TODO: [Urgent] Check whether the value stored match the simulation or
-      // not, 22/09/2025
       for (auto selValuePair : itCM->second) {
         auto nodeName = selValuePair.first;
         int outValue = selValuePair.second;
@@ -268,9 +266,8 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
 
         //! Testing
         // llvm::dbgs() << "[DEBUG] \t\tCtrlMerge Node: " << nodeName << "\n";
-        // llvm::dbgs() << "[DEBUG] \t\t\tCon output Value: " << outValue <<
-        // "\n"; llvm::dbgs() << "[DEBUG] \t\t\tIter Index: " << iterIndex <<
-        // "\n";
+        // llvm::dbgs() << "[DEBUG] \t\t\tCon output Value: " << outValue << "\n";
+        // llvm::dbgs() << "[DEBUG] \t\t\tIter Index: " << iterIndex << "\n";
 
         // Update the value
         auto selCtrlMergeNode = dyn_cast<CMergeData>(
@@ -305,8 +302,8 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
           int tmpMuxOutput = 0;
 
           //! Testing
-          // llvm::dbgs() << "[DEBUG] \t\t\t\tMux Node: " << selMuxNode << ";
-          // Sel Data Src Node: " << selMuxDataSrcNode << "\n";
+          // llvm::dbgs() << "[DEBUG] \t\t\t\tMux Node: " << selMuxNode << "\n";
+          // llvm::dbgs() << "[DEBUG] \t\t\t\tSel Data Src Node: " << selMuxDataSrcNode << "\n";
 
           if (contains(selMuxDataSrcNode, "constant") ||
               contains(selMuxDataSrcNode, "source")) {
@@ -387,22 +384,13 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
 
           // Update the storing structure and the tmp dict
           //! Testing
-          // llvm::dbgs() << "[DEBUG] \t\t\t\t[OutValue] " << tmpMuxOutput <<
-          // "\n";
+          // llvm::dbgs() << "[DEBUG] \t\t\t\t[OutValue] " << tmpMuxOutput << "\n";
 
           ValueIter tmpMuxValuePair = {tmpMuxOutput, iterIndex};
           switchInfo.data.dfgBaseNodeValue[selMuxNode]
               ->originalDataOut[iterIndex] = tmpMuxValuePair;
           tmpMuxOutputMap[selMuxNode] = tmpMuxOutput;
         }
-
-        //! Testing
-        // llvm::dbgs() << "[DEBUG] \t\t\tRemaining Mux Nodes:\n";
-        // llvm::dbgs() << "[DEBUG] \t\t\t\tTmp Mux Output Map\n";
-        // for (const auto& [key, value] : tmpMuxOutputMap) {
-        //   llvm::dbgs() << "[DEBUG] \t\t\t\t\tNode: " << key << ", Value: " <<
-        //   value << "\n";
-        // }
 
         // Update all remaining mux nodes
         // TODO: This maybe useless, check it out
@@ -459,6 +447,12 @@ void buildSegmentSuccNodesList(SwitchingInfo &switchInfo,
       std::string dataSucNode = selCMNode->dataSucNodeName;
       std::string conSucNode = selCMNode->conSucNodeName;
 
+      //! Testing
+      llvm::dbgs() << "[DEBUG] \tControl Merge Node: " << selBaseNode
+                   << "\n";
+      llvm::dbgs() << "[DEBUG] \t\tData Suc Node: " << dataSucNode << "\n";
+      llvm::dbgs() << "[DEBUG] \t\tControl Suc Node: " << conSucNode << "\n";
+
       for (const auto &[label, bblist] : switchInfo.staticinfo.segToBBs) {
         MgNodeInfo tmpMGInfo;
         std::vector<std::string> controlExcludVec = {dataSucNode};
@@ -470,7 +464,7 @@ void buildSegmentSuccNodesList(SwitchingInfo &switchInfo,
         tmpMGInfo.glitch = segCtrlMergeGlitchSuccSearch(
             switchInfo, selBaseNode, controlExcludVec, label);
 
-        // Update the stroing structure
+        // Update the storing structure
         switchInfo.data.dfgBaseNodeValue[selBaseNode]
             ->segSucNodeMap[label.str()] = tmpMGInfo;
       }
@@ -1247,55 +1241,6 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
             switchInfo.data.dfgBaseNodeValue[selMuxNode]->skipControlCal = true;
             nexValue = preValue;
           }
-          // TODO: Check the following CondValue condition, it maybe 0 now
-        } else if (nodePreValidSeg != "" && condValue == 1) {
-          //! Con_Merge's control output automatically go back to 0 need to
-          //! check why!!!!!!!
-          if (!contains(executedSeg, "E")) {
-            // Cond value will be the same for the last segment
-            int preCondValue = 1 - condValue;
-            std::string preDataSrc =
-                switchInfo.staticinfo.dataflowGraph
-                    ->muxToSrcNodeMap[selMuxNode][std::to_string(preCondValue)];
-            [[maybe_unused]] unsigned newIterIdx = i;
-
-            // If we have the same sources for both cond_value
-            if (preDataSrc == selDataSrcNode) {
-              // Change the iterindex
-              if (contains(switchInfo.segToBackedgePairMap, executedSeg)) {
-                auto mgIndexList =
-                    switchInfo.staticinfo.backEdgeToCFDFC
-                        [switchInfo.segToBackedgePairMap[executedSeg]];
-                if (mgIndexList.size() > 1) {
-                  // Get the first one
-                  for (const auto &selMG : mgIndexList) {
-                    if (std::to_string(selMG) != executedSeg) {
-                      newIterIdx = lastSegIterMap[std::to_string(selMG)];
-                      break;
-                    }
-                  }
-                }
-              } else {
-                newIterIdx = i;
-              }
-            } else {
-              newIterIdx = i;
-            }
-
-            // Check whether the value exist or not
-            if (contains(preDataSrc, "constant")) {
-              preValue.push_back(switchInfo.data.dfgBaseNodeValue[preDataSrc]
-                                     ->originalDataOut[0]
-                                     .value);
-            } else if (switchInfo.data.dfgBaseNodeValue[preDataSrc]
-                           ->originalDataOut.find(i) !=
-                       switchInfo.data.dfgBaseNodeValue[preDataSrc]
-                           ->originalDataOut.end()) {
-              preValue.push_back(switchInfo.data.dfgBaseNodeValue[preDataSrc]
-                                     ->originalDataOut[i]
-                                     .value);
-            }
-          }
         }
 
         //! Testing
@@ -1323,6 +1268,20 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
         finalMuxOutputList.push_back(selValue);
       for (const auto &selValue : nexValue)
         finalMuxOutputList.push_back(selValue);
+
+      //! Testing
+      if (debug) {
+        LLVM_DEBUG(llvm::dbgs() << "\t\t[FINAL MUX OUTPUT] ");
+        for (auto v : finalMuxOutputList)
+          LLVM_DEBUG(llvm::dbgs() << v << " ");
+        LLVM_DEBUG(llvm::dbgs() << "\n");
+      }
+
+      // Update the storing structure
+      switchInfo.data.dfgBaseNodeValue[selMuxNode]->oriGlitchDataOut[i] = finalMuxOutputList;
+      switchInfo.data.dfgBaseNodeValue[selMuxNode]->lastValidSeg =
+          executedSeg;
+      switchInfo.data.dfgBaseNodeValue[selMuxNode]->lastUpdateIndex = i; 
     }
 
     // Step 3: Relay memory load node's data
@@ -1585,27 +1544,29 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
           switchInfo.staticinfo.dataflowGraph->nodes[selNode]
               ->updateDataoutChannel(selValue);
 
-          if (selValue == 1) {
-            switchInfo.staticinfo.dataflowGraph->nodes[selNode]
-                ->updateDataoutChannel(0);
-          }
+          // Special case: If the cm_value = 1, then the value will
+          // automatically go to 0 in previous implementations
+          // if (selValue == 1) {
+          //   switchInfo.staticinfo.dataflowGraph->nodes[selNode]
+          //       ->updateDataoutChannel(0);
+          // }
 
           // Step 2: Update all nodes in the control succeeding node list
           //! Testing
           if (debug)
             llvm::dbgs() << "[DEBUG] \t[Control Output]\n";
 
-          // Defensive check for mgSucNodeDict access
-          if (!contains(selCMNode->mgSucNodeDict, executedSeg)) {
+          // Defensive check for segSucNodeMap access
+          if (!contains(selCMNode->segSucNodeMap, executedSeg)) {
             llvm::errs()
                 << "[ERROR] Segment " << executedSeg
-                << " not found in mgSucNodeDict for control merge node "
+                << " not found in segSucNodeMap for control merge node "
                 << selNode << "\n";
             continue;
           }
 
           for (const auto &selSucNode :
-               selCMNode->mgSucNodeDict[executedSeg].control) {
+               selCMNode->segSucNodeMap[executedSeg].control) {
             //! Testing
             if (debug)
               llvm::dbgs() << "[DEBUG] \t\tSuc Node: " << selSucNode << "\n";
