@@ -63,6 +63,22 @@ static cl::opt<std::string>
                      cl::desc("The top-level function to execute"),
                      cl::init("main"), cl::cat(mainCategory));
 
+
+// Optional logs for data traces
+static cl::opt<std::string>
+    traceLogFile("trace-log-file", cl::Optional,
+                 cl::desc("Where to store the data trace log"),
+                 cl::init(""), cl::cat(mainCategory));
+
+// Unified profiler modes
+enum class ProfilerMode {Frequency, Both};
+static cl::opt<ProfilerMode>
+    mode("mode", cl::desc("Select profiler mode"),
+         cl::values(clEnumValN(ProfilerMode::Frequency, "frequency",
+                               "Run frequency profiling only"),
+                    clEnumValN(ProfilerMode::Both, "both", "Run both frequency and data profiling")),
+         cl::init(ProfilerMode::Frequency), cl::cat(mainCategory));
+
 /// Reads argument from a file instead of from the command line.
 static SmallVector<std::string> fetchArgsFromFile() {
   SmallVector<std::string> args;
@@ -132,13 +148,25 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  // Add logger for data traces
+  std::error_code trace_ec;
+  Logger *traceLoggerPtr = nullptr;
+
   // Run the std-level simulator
   dynamatic::experimental::StdProfiler prof(funcOp);
+
+  if (mode == ProfilerMode::Both) {
+    if (!traceLogFile.empty())
+    traceLoggerPtr = new Logger(traceLogFile, trace_ec);
+  }
+
   bool simFailed = false;
   if (fileArgs.empty())
-    simFailed = failed(simulate(funcOp, clArgs, prof));
+    simFailed = failed(simulate(funcOp, clArgs, prof, traceLoggerPtr));
   else
-    simFailed = failed(simulate(funcOp, fetchArgsFromFile(), prof));
+    simFailed = failed(simulate(funcOp, fetchArgsFromFile(), prof, traceLoggerPtr));
+
+  delete traceLoggerPtr;
 
   // Print statistics to stdout and return
   if (!simFailed)

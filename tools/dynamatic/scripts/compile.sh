@@ -56,6 +56,7 @@ F_HANDSHAKE_EXPORT="$COMP_DIR/handshake_export.mlir"
 F_HANDSHAKE_RIGIDIFIED="$COMP_DIR/handshake_rigidified.mlir"
 F_HW="$COMP_DIR/hw.mlir"
 F_FREQUENCIES="$COMP_DIR/frequencies.csv"
+F_DATALOG="$COMP_DIR/data_trace.log"
 
 # ============================================================================ #
 # Helper funtions
@@ -290,6 +291,7 @@ else
   # cf-level profiler
   "$DYNAMATIC_PROFILER_BIN" "$F_CF_DYN_TRANSFORMED_MEM_DEP_MARKED" \
     --top-level-function="$KERNEL_NAME" --input-args-file="$F_PROFILER_INPUTS" \
+    --trace-log-file="$F_DATALOG" --mode=frequency \
     > $F_FREQUENCIES
   exit_on_fail "Failed to profile cf-level" "Profiled cf-level"
 

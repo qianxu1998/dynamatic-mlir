@@ -1,3 +1,4 @@
+#include "dynamatic/Support/Logging.h"
 #include "experimental/Support/StdProfiler.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
@@ -21,7 +22,8 @@ public:
               llvm::DenseMap<mlir::Value, double> &timeMap,
               std::vector<Any> &results, std::vector<double> &resultTimes,
               std::vector<std::vector<Any>> &store,
-              std::vector<double> &storeTimes, StdProfiler &prof);
+              std::vector<double> &storeTimes, StdProfiler &prof,
+              Logger *traceLogger);
 
   LogicalResult succeeded() const {
     return successFlag ? success() : failure();
@@ -127,13 +129,15 @@ private:
   LogicalResult execute(memref::GetGlobalOp, std::vector<Any> &,
                         std::vector<Any> &);
   LogicalResult execute(mlir::cf::BranchOp, std::vector<Any> &,
-                        std::vector<Any> &);
+                        std::vector<Any> &, DominanceInfo &,
+                        Logger *);
   LogicalResult execute(mlir::cf::CondBranchOp, std::vector<Any> &,
-                        std::vector<Any> &);
+                        std::vector<Any> &, DominanceInfo &,
+                        Logger *);
   LogicalResult execute(func::ReturnOp, std::vector<Any> &, std::vector<Any> &);
   LogicalResult execute(mlir::CallOpInterface, std::vector<Any> &,
-                        std::vector<Any> &);
-
+                        std::vector<Any> &, DominanceInfo &,
+                        Logger *);
 private:
   /// Execution context variables.
   llvm::DenseMap<mlir::Value, Any> &valueMap;
@@ -147,13 +151,22 @@ private:
   /// Profiler to gather statistics.
   StdProfiler &prof;
 
+  /// Optional data trace loggers.
+  Logger *traceLogger;
+
   /// Flag indicating whether execution was successful.
   bool successFlag = true;
 
   /// An iterator which walks over the instructions.
   mlir::Block::iterator instIter;
+
+  // Block index map
+  mlir::DenseMap<Block *, unsigned> BlocktoIDs;
+  
+  // Define edge status
+  int num_edges = 0;
 };
 
 mlir::LogicalResult simulate(mlir::func::FuncOp funcOp,
                              llvm::ArrayRef<std::string> inputArgs,
-                             StdProfiler &prof);
+                             StdProfiler &prof, Logger *traceLogger);
