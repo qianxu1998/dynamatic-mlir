@@ -24,6 +24,8 @@
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/Support/Path.h"
 
+#define DEBUG_TYPE "buffer-milp"
+
 using namespace mlir;
 using namespace dynamatic;
 using namespace dynamatic::buffer;
@@ -244,6 +246,16 @@ void BufferPlacementMILP::addUnitTimingConstraints(Operation *unit,
     double delay;
     if (failed(timingDB.getTotalDelay(unit, signalType, delay)))
       delay = 0.0;
+
+    if (auto shiftOp = dyn_cast<ShiftLikeArithOpInterface>(unit)) {
+      // Check if the operation is a shift operation with a constant shift value
+      // If yes, the operation has a zero delay.
+      if (signalType == SignalType::DATA && shiftOp.isShiftByConstant()) {
+        LLVM_DEBUG(llvm::errs() << "Shift" << getUniqueName(unit)
+                                << " has a constant delay\n");
+        delay = 0.0;
+      }
+    }
 
     // The delay of the unit must be positive.
     delay = std::max(delay, 0.001);
@@ -757,7 +769,7 @@ void BufferPlacementMILP::addDelayAndCutConflictConstraints(
     // If a node has single fanin, then it is not mapped to LUT. The
     // delay of the node is simply equal to the delay of the fanin.
     CPVar &faninVar = (*fanIns.begin())->subjectGraphVars->tOut;
-    model->addConstr(nodeVar == faninVar, "single_fanin_delay");
+    model->addConstr(nodeVar >= faninVar, "single_fanin_delay");
     return;
   }
 
@@ -828,20 +840,26 @@ std::vector<Value> BufferPlacementMILP::findMinimumFeedbackArcSet() {
   funcInfo.funcOp.walk([&](Operation *op) {
     // Add the constraint that forces topological ordering among adjacent
     // operations
-    for (Operation *user : op->getUsers()) {
-      CPVar currentOpVar = opToGRB[op];
-      CPVar userOpVar = opToGRB[user];
-      CPVar edge = modelFeedback->addVar(
-          (getUniqueName(op) + "_" + getUniqueName(user)).str(), CPVar::BOOLEAN,
-          0, 1);
-      edgeToOps[std::make_pair(op, user)] = edge;
-      // This constraint enforces topological order, by forcing successor
-      // operations to have a bigger larger index in the topological order than
-      // their predecessors. If such an order cannot be satisfied with the given
-      // set of nodes, "edge" variable is set to 1, which means the edge needs
-      // to be cut to have an acyclic graph.
-      modelFeedback->addConstr(userOpVar - currentOpVar + 100 * edge >= 1,
-                               "operation_order");
+    for (unsigned idxResult = 0; idxResult < op->getNumResults(); idxResult++) {
+      for (auto &use : op->getResult(idxResult).getUses()) {
+        Operation *user = use.getOwner();
+        unsigned idxOperand = use.getOperandNumber();
+        CPVar currentOpVar = opToGRB[op];
+        CPVar userOpVar = opToGRB[user];
+        const std::string edgeName =
+            (getUniqueName(op) + "_out_" + std::to_string(idxResult) + "_" +
+             getUniqueName(user) + "_in_" + std::to_string(idxOperand))
+                .str();
+        CPVar edge = modelFeedback->addVar(edgeName, CPVar::BOOLEAN, 0, 1);
+        edgeToOps[std::make_pair(op, user)] = edge;
+        // This constraint enforces topological order, by forcing successor
+        // operations to have a bigger larger index in the topological order
+        // than their predecessors. If such an order cannot be satisfied with
+        // the given set of nodes, "edge" variable is set to 1, which means the
+        // edge needs to be cut to have an acyclic graph.
+        modelFeedback->addConstr(userOpVar - currentOpVar + 100 * edge >= 1,
+                                 "operation_order");
+      }
     }
   });
 
