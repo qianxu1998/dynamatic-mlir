@@ -12,3 +12,4 @@ add_dynamatic_library(DynamaticExperimentalAnalysis
 )
 
 add_subdirectory(FormalPropertyAnnotation)
+add_subdirectory(SwitchingEstimation)

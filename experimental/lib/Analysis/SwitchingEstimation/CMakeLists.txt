@@ -1,0 +1,23 @@
+add_dynamatic_library(DynamaticSwitchingEstimation
+  SwitchingEstimation.cpp
+  GraphModel.cpp
+  SwitchingSupport.cpp
+  ProfilingAnalyzer.cpp
+  NodeModels.cpp
+  DataChannelCal.cpp
+  HandShakeChannelCal.cpp
+
+  DEPENDS
+  DynamaticExperimentalAnalysisPassIncGen
+
+  LINK_LIBS PUBLIC
+  MLIRIR
+  MLIRMemRefDialect
+  MLIRFuncDialect
+  MLIRSupport
+  MLIRTransformUtils
+  DynamaticHandshake
+  DynamaticSupport
+  DynamaticExperimentalSupport
+  )
+

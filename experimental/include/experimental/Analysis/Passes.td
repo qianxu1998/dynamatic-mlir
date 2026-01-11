@@ -28,4 +28,24 @@ def HandshakeAnnotateProperties : DynamaticPass< "handshake-annotate-properties"
     "Path to JSON-formatted file where the properties' information is stored.">];
 }
 
+def SwitchingEstimation : Pass<"switching-estimation"> {
+  let summary = "Estimate the number of switches of different components in the generated dataflow circuit";
+  let description = [{
+    This pass estimates the switching/transition number of PIs and POs of all
+    dataflow units during the circuit execution. 
+  }];
+
+  let options = [
+    Option<"dataTrace", "data-trace", "std::string", "",
+           "Path to the scf data profiling results.">,
+    Option<"timingModels", "timing-models", "std::string", "",
+           "Path to JSON-formatted file containing timing models for dataflow components.">,
+    Option<"dumpFile", "dump-file", "std::string", "",
+           "Path to the output file where the switching estimation results will be dumped.">,
+    Option<"targetPeriod", "target-period", "double", "",
+           "Target clock period to be used in the analysis.">,];
+  
+  let dependentDialects = ["handshake::HandshakeDialect"];
+}
+
 #endif // EXPERIMENTAL_ANALYSIS_PASSES_TD
