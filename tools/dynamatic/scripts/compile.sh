@@ -160,7 +160,7 @@ sed -i "s/^target triple = .*$//g" "$F_CLANG"
 # ------------------------------------------------------------------------------
 
 $LLVM_BINS/opt -S \
-  -passes="inline,mem2reg,consthoist,instcombine,function(loop-mssa(licm<no-allowspeculation>)),function(loop(loop-idiom,indvars,loop-deletion)),simplifycfg,loop-rotate,simplifycfg,sink,lowerswitch,simplifycfg,dce" \
+  -passes="inline,mem2reg,consthoist,instcombine<max-iterations=1000;no-use-loop-info>,function(loop-mssa(licm<no-allowspeculation>)),function(loop(loop-idiom,indvars,loop-deletion)),simplifycfg,loop-rotate,simplifycfg,sink,lowerswitch,simplifycfg,dce" \
   "$F_CLANG" \
   > "$F_CLANG_OPTIMIZED"
 exit_on_fail "Failed to apply optimization to LLVM IR" \
@@ -269,7 +269,7 @@ if [[ $STRAIGHT_TO_QUEUE -ne 0 ]]; then
   # handshake transformations
   "$DYNAMATIC_OPT_BIN" "$F_HANDSHAKE" \
     --handshake-minimize-cst-width --handshake-optimize-bitwidths \
-    --handshake-materialize --handshake-infer-basic-blocks \
+    --handshake-materialize="replicate-constant=true" --handshake-infer-basic-blocks \
     > "$F_HANDSHAKE_TRANSFORMED"
   exit_on_fail "Failed to apply transformations to handshake" \
     "Applied transformations to handshake"

@@ -980,6 +980,7 @@ LogicalResult VerilogWriter::write(hw::HWModuleOp modOp,
   if (failed(createInternalSignals(data)))
     return failure();
 
+  os << "`timescale 1ns / 1ps\n\n";
   os << "module " << modOp.getSymName() << "(\n";
 
   os.indent();
@@ -1267,6 +1268,23 @@ LogicalResult SMVWriter::createProperties(WriteModData &data) const {
               .str();
       // e.g. count(fork0.sent_0, fork0.sent_1) < 2
       // for operation "fork0" with 2 eager outputs
+      data.properties[p->getId()] = {propertyString, propertyTag};
+    } else if (auto *p = llvm::dyn_cast<CopiedSlotsOfActiveForkAreFull>(
+                   property.get())) {
+      unsigned numOut = p->getNumEagerForkOutputs();
+      std::string forkName = p->getForkOp();
+      std::string bufferName = p->getBufferOp();
+      int bufferSlot = p->getBufferSlot();
+      std::vector<std::string> forkOutNames{numOut};
+      for (unsigned i = 0; i < numOut; ++i) {
+        forkOutNames[i] = llvm::formatv("{0}.sent_{1}", forkName, i).str();
+      }
+      std::string bufferFull =
+          llvm::formatv("{0}.full_{1}", bufferName, bufferSlot).str();
+      std::string propertyString =
+          llvm::formatv("({0}) -> {1}", llvm::join(forkOutNames, " | "),
+                        bufferFull)
+              .str();
       data.properties[p->getId()] = {propertyString, propertyTag};
     } else {
       llvm::errs() << "Formal property Type not known\n";
