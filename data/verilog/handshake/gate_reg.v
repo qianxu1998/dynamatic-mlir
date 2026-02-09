@@ -1,5 +1,5 @@
 `timescale 1ns/1ps
-module gatei_reg #(
+module gate_reg #(
   parameter DATA_TYPE = 32
 ) (
   // inputs
