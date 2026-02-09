@@ -77,6 +77,15 @@ def HandshakePlaceBuffersCustom : DynamaticPass<"handshake-placebuffers-custom">
   ];
 }
 
+def HandshakeInsertGates : DynamaticPass<"handshake-insert-gates"> {
+  let summary = "Insert handshake.gate after arithmetic operations.";
+  let description = [{
+    Inserts a handshake.gate operation on each channel produced by arithmetic
+    operations, except when a gate already directly consumes that channel.
+  }];
+  let constructor = "dynamatic::experimental::gating::createHandshakeInsertGates()";
+}
+
 def CreditBasedSharing : Pass<"credit-based-sharing"> {
   let summary = "Credit-based sharing of functional units.";
   let description = [{ Share functional units for better resource utilization.

@@ -172,11 +172,11 @@
     "hdl": "verilog"
   },
   {
-    "name": "handshake.gatei",
+    "name": "handshake.gate",
     "parameters": [
       { "name": "DATA_TYPE", "type": "dataflow", "data-lb": 1, "extra-eq": 0 }
     ],
-    "generic": "$DYNAMATIC/data/verilog/arith/gatei.v",
+    "generic": "$DYNAMATIC/data/verilog/handshake/gatei.v",
     "hdl": "verilog"
   },
   {
