@@ -272,11 +272,17 @@ else
       exit_on_fail "Failed to download the prebuilt llvm-project!"
   fi
 
-  # untar the file 
-  mkdir -p "$SCRIPT_CWD/build/llvm-project/"
-  echo "Unzipping the prebuilt llvm-project!"
-  tar -xf "$PREBUILT_LLVM_TARBALL" -C "$SCRIPT_CWD/build/llvm-project/"
-  exit_on_fail "Failed to untar the prebuilt llvm-project!"
+  # Untar only if the prebuilt LLVM does not already look extracted.
+  PREBUILT_LLVM_ROOT="$SCRIPT_CWD/build/llvm-project"
+  PREBUILT_LLVM_CMAKE_CONFIG="$PREBUILT_LLVM_ROOT/lib/cmake/llvm/LLVMConfig.cmake"
+  mkdir -p "$PREBUILT_LLVM_ROOT"
+  if [ -f "$PREBUILT_LLVM_CMAKE_CONFIG" ]; then
+      echo "Prebuilt llvm-project already extracted at $PREBUILT_LLVM_ROOT, skipping untar."
+  else
+      echo "Unzipping the prebuilt llvm-project!"
+      tar -xf "$PREBUILT_LLVM_TARBALL" -C "$PREBUILT_LLVM_ROOT"
+      exit_on_fail "Failed to untar the prebuilt llvm-project!"
+  fi
 
 fi
 
