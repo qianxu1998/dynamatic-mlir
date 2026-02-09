@@ -20,6 +20,7 @@ DISABLE_LSQ=${10}
 FAST_TOKEN_DELIVERY=${11}
 MILP_SOLVER=${12}
 STRAIGHT_TO_QUEUE=${13}
+USE_GATING=${14:-0}
 
 LLVM=$DYNAMATIC_DIR/llvm-project
 LLVM_BINS=$DYNAMATIC_DIR/bin
@@ -52,6 +53,7 @@ F_PROFILER_INPUTS="$COMP_DIR/profiler-inputs.txt"
 F_HANDSHAKE="$COMP_DIR/handshake.mlir"
 F_HANDSHAKE_TRANSFORMED="$COMP_DIR/handshake_transformed.mlir"
 F_HANDSHAKE_BUFFERED="$COMP_DIR/handshake_buffered.mlir"
+F_HANDSHAKE_GATED="$COMP_DIR/handshake_gated.mlir"
 F_HANDSHAKE_EXPORT="$COMP_DIR/handshake_export.mlir"
 F_HANDSHAKE_RIGIDIFIED="$COMP_DIR/handshake_rigidified.mlir"
 F_HANDSHAKE_SQ="$COMP_DIR/handshake_sq.mlir"
@@ -337,8 +339,18 @@ else
   cd - > /dev/null
 fi
 
+F_HANDSHAKE_FOR_CANONICALIZE="$F_HANDSHAKE_BUFFERED"
+if [[ $USE_GATING -ne 0 ]]; then
+  "$DYNAMATIC_OPT_BIN" "$F_HANDSHAKE_BUFFERED" \
+    --handshake-insert-gates \
+    > "$F_HANDSHAKE_GATED"
+  exit_on_fail "Failed to insert gating operations" \
+    "Inserted gating operations"
+  F_HANDSHAKE_FOR_CANONICALIZE="$F_HANDSHAKE_GATED"
+fi
+
 # handshake canonicalization
-"$DYNAMATIC_OPT_BIN" "$F_HANDSHAKE_BUFFERED" \
+"$DYNAMATIC_OPT_BIN" "$F_HANDSHAKE_FOR_CANONICALIZE" \
   --handshake-canonicalize \
   --handshake-hoist-ext-instances \
   > "$F_HANDSHAKE_EXPORT"

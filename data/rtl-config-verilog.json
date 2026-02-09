@@ -172,6 +172,23 @@
     "hdl": "verilog"
   },
   {
+    "name": "handshake.gate",
+    "parameters": [
+      { "name": "GATE_IMPL", "type": "string", "eq": "REG", "generic": false },
+      { "name": "DATA_TYPE", "type": "dataflow", "data-lb": 1, "extra-eq": 0 }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/handshake/gate_reg.v",
+    "hdl": "verilog"
+  },
+  {
+    "name": "handshake.gate",
+    "parameters": [
+      { "name": "DATA_TYPE", "type": "dataflow", "data-lb": 1, "extra-eq": 0 }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/handshake/gate.v",
+    "hdl": "verilog"
+  },
+  {
     "name": "handshake.maximumf",
     "parameters": [
       { "name": "DATA_TYPE", "type": "dataflow", "data-lb": 1, "extra-eq": 0 }
