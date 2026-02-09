@@ -191,9 +191,11 @@ public:
     if (ctx->useVivadoFPU()) {
       os << "eval vsim tb work.glbl\n";
     } else {
-      os << "eval vsim tb\n";
+      os << "eval vsim -voptargs=+acc -debugdb tb\n";
     }
     os << "log -r *\n";
+    os << "vcd file trace.vcd\n";
+    os << "vcd add -r /tb/duv_inst/*\n";
     os << "run -all\n";
     os << "exit\n";
 
