@@ -657,6 +657,24 @@ def NotOp : Handshake_Op<"not", [Pure, SameOperandsAndResultType]> {
   let assemblyFormat = "$operand attr-dict `:` type($result)";
 }
 
+def GateOp : Handshake_Op<"gate", [Pure, SameOperandsAndResultType]> {
+  let summary = "Remove spurious switching activity by gating a channel with the valid signal.";
+  let description = [{
+    The gate operation represents a channel gating operation. It gates the input
+    channel with the valid signal, which can help reduce spurious switching
+    activity on the channel.
+
+    Example:
+
+    ```mlir
+    %gated = gate %value : !handshake.channel<i32>
+    ```
+  }];
+  let arguments = (ins ChannelType:$operand);
+  let results = (outs ChannelType:$result);
+  let assemblyFormat = "$operand attr-dict `:` type($result)";
+}
+
 //===----------------------------------------------------------------------===//
 // Memory interfaces
 //===----------------------------------------------------------------------===//
