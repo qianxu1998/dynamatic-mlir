@@ -45,10 +45,24 @@ using namespace dynamatic::buffer;
 // This function generates a full IISet with all bits set to 1
 inline IISet fullSet(unsigned II) { return IISet(II, true); }
 
+// Normalize a cycle index into [0, II) even when intermediate arithmetic
+// produces negative values in start-time calculations.
+inline unsigned normalizeCycleIndex(int cycle, unsigned II) {
+  if (II == 0)
+    return 0;
+  int idx = cycle % static_cast<int>(II);
+  if (idx < 0)
+    LLVM_DEBUG(llvm::dbgs()
+               << "[ERROR]: Negative cycle index before normalization: " << idx
+               << "\n");
+  idx += static_cast<int>(II);
+  return static_cast<unsigned>(idx);
+}
+
 // This function generates a singleton IISet with only the given bit set to 1
 inline IISet singleton(unsigned bit, unsigned II) {
   IISet s(II, false);
-  s.set(bit);
+  s.set(normalizeCycleIndex(static_cast<int>(bit), II));
   return s;
 }
 
@@ -137,7 +151,7 @@ public:
   unsigned START = 0;
   float_t occupancy;
   unsigned numSlots;
-  bool transparent;  // This is indeed bypassDV
+  bool transparent; // This is indeed bypassDV
   BufferType buffType;
 };
 

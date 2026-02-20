@@ -128,6 +128,11 @@ struct DataInfo {
   StringMap<std::vector<std::string>> segToOrderedDataBaseNodes;
   // Mux Nodes topologically ordered
   std::vector<std::string> orderedMuxNodes;
+  // Full execution segment trace from profiling (indexed by global iteration).
+  std::vector<std::string> executedSegTrace;
+  // Map from segment label to the list of global iteration indices where the
+  // segment executes in the profiling trace.
+  StringMap<std::vector<unsigned>> segExecutionIndices;
 };
 
 struct SwitchingInfo {

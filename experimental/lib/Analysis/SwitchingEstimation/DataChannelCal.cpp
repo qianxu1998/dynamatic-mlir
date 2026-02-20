@@ -6,6 +6,7 @@
 
 #include "experimental/Analysis/SwitchingEstimation/DataChannelCal.h"
 #include "experimental/Analysis/SwitchingEstimation/DFSKernel.h"
+#include "experimental/Analysis/SwitchingEstimation/SwitchingSupport.h"
 #include "experimental/Analysis/SwitchingEstimation/utils.h"
 
 #include "dynamatic/Dialect/Handshake/HandshakeAttributes.h"
@@ -25,6 +26,35 @@
 #include "llvm/Support/Path.h"
 
 #include <cassert>
+#include <memory>
+
+namespace {
+// Safely read a node's profiled output value at `iter`, falling back to the
+// latest known value not newer than `iter` (or `fallback` if unavailable).
+int getDataOutValueAtOrBefore(const std::shared_ptr<DataBase> &nodeData,
+                              unsigned iter, int fallback = 0) {
+  if (!nodeData) {
+    LLVM_DEBUG(llvm::dbgs() << "[WARNING] Node data is null, return fallback "
+                            << fallback << "\n");
+    return fallback;
+  }
+
+  const auto &outMap = nodeData->originalDataOut;
+  if (outMap.empty())
+    return fallback;
+
+  auto exactIt = outMap.find(iter);
+  if (exactIt != outMap.end())
+    return exactIt->second.value;
+
+  auto upper = outMap.upper_bound(iter);
+  if (upper == outMap.begin())
+    return upper->second.value;
+
+  --upper;
+  return upper->second.value;
+}
+} // namespace
 
 void mapBBPairToControlMerge(SwitchingInfo &switchInfo) {
   // *Some control merge nodes with only 1 input is also included in the map
@@ -244,6 +274,24 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
 
   // Define temporary storing structure
   std::map<std::string, int> tmpMuxOutputMap;
+  auto getLatestKnownValue = [](const std::map<unsigned, ValueIter> &omap,
+                                unsigned iterIndex, int &valueOut) -> bool {
+    if (omap.empty())
+      return false;
+    auto it = omap.upper_bound(iterIndex);
+    if (it == omap.begin())
+      return false;
+    --it;
+    valueOut = it->second.value;
+    return true;
+  };
+  auto getNodeDataBase =
+      [&](const std::string &nodeName) -> std::shared_ptr<DataBase> {
+    auto it = switchInfo.data.dfgBaseNodeValue.find(nodeName);
+    if (it == switchInfo.data.dfgBaseNodeValue.end() || !it->second)
+      return nullptr;
+    return it->second;
+  };
 
   // [STEP 3] Traverse the executed BB trace
   // Skip the first BB, as it will always be BB 0
@@ -262,24 +310,40 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
       for (auto selValuePair : itCM->second) {
         auto nodeName = selValuePair.first;
         int outValue = selValuePair.second;
-        unsigned iterIndex = getExecutionIter(i, curBB, profileResults);
+        // `executedBBTrace[i]` corresponds to edge-index `(i - 1)` in the
+        // profiler log. Align the query index with `bbToIterMap` keys.
+        unsigned iterIndex = getExecutionIter(i - 1, curBB, profileResults);
 
         //! Testing
         // llvm::dbgs() << "[DEBUG] \t\tCtrlMerge Node: " << nodeName << "\n";
-        // llvm::dbgs() << "[DEBUG] \t\t\tCon output Value: " << outValue << "\n";
-        // llvm::dbgs() << "[DEBUG] \t\t\tIter Index: " << iterIndex << "\n";
+        // llvm::dbgs() << "[DEBUG] \t\t\tCon output Value: " << outValue <<
+        // "\n"; llvm::dbgs() << "[DEBUG] \t\t\tIter Index: " << iterIndex <<
+        // "\n";
 
         // Update the value
-        auto selCtrlMergeNode = dyn_cast<CMergeData>(
-            switchInfo.data.dfgBaseNodeValue[nodeName].get());
+        auto cmDb = getNodeDataBase(nodeName);
+        auto selCtrlMergeNode =
+            cmDb ? dyn_cast<CMergeData>(cmDb.get()) : nullptr;
+        if (!selCtrlMergeNode) {
+          llvm::errs() << "[ERROR] Control-merge data node " << nodeName
+                       << " is missing in dfgBaseNodeValue\n";
+          continue;
+        }
 
-        // Data output for the control merge node, we assign -1 to it
-        ValueIter tmpDataValuePair = {-1, iterIndex};
-        selCtrlMergeNode->originalDataOut[iterIndex] = tmpDataValuePair;
+        // Data output for the control merge node, we assign -1 to it.
+        // Keep the first event mapped to this iteration to avoid clobbering
+        // control values when multiple BB edges are observed in the same
+        // iteration bucket.
+        if (!contains(selCtrlMergeNode->originalDataOut, iterIndex)) {
+          ValueIter tmpDataValuePair = {-1, iterIndex};
+          selCtrlMergeNode->originalDataOut[iterIndex] = tmpDataValuePair;
+        }
 
         // Control output
-        ValueIter tmpConValuePair = {outValue, iterIndex};
-        selCtrlMergeNode->controlDataOut[iterIndex] = tmpConValuePair;
+        if (!contains(selCtrlMergeNode->controlDataOut, iterIndex)) {
+          ValueIter tmpConValuePair = {outValue, iterIndex};
+          selCtrlMergeNode->controlDataOut[iterIndex] = tmpConValuePair;
+        }
 
         // Define the Vector for unupdated mux
         std::vector<std::string> tmpUnUpdatedMux;
@@ -295,22 +359,42 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
           // Only update muxes this control-merge actually influences
           if (!containsValue(selMuxVec, selMuxNode))
             continue;
-          auto selMuxSrcMap =
-              switchInfo.staticinfo.dataflowGraph->muxToSrcNodeMap[selMuxNode];
-          std::string selMuxDataSrcNode =
-              selMuxSrcMap[std::to_string(outValue)];
+          std::string selMuxDataSrcNode;
+          if (auto muxIt =
+                  switchInfo.staticinfo.dataflowGraph->muxToSrcNodeMap.find(
+                      selMuxNode);
+              muxIt !=
+              switchInfo.staticinfo.dataflowGraph->muxToSrcNodeMap.end()) {
+            auto srcIt = muxIt->second.find(std::to_string(outValue));
+            if (srcIt != muxIt->second.end())
+              selMuxDataSrcNode = srcIt->second;
+          }
           int tmpMuxOutput = 0;
 
           //! Testing
           // llvm::dbgs() << "[DEBUG] \t\t\t\tMux Node: " << selMuxNode << "\n";
-          // llvm::dbgs() << "[DEBUG] \t\t\t\tSel Data Src Node: " << selMuxDataSrcNode << "\n";
+          // llvm::dbgs() << "[DEBUG] \t\t\t\tSel Data Src Node: " <<
+          // selMuxDataSrcNode << "\n";
 
           if (contains(selMuxDataSrcNode, "constant") ||
               contains(selMuxDataSrcNode, "source")) {
-            tmpMuxOutput = switchInfo.data.dfgBaseNodeValue[selMuxDataSrcNode]
-                               ->originalDataOut[0]
-                               .value;
+            auto srcDb = getNodeDataBase(selMuxDataSrcNode);
+            if (srcDb && !srcDb->originalDataOut.empty())
+              tmpMuxOutput = getDataOutValueAtOrBefore(srcDb, 0, 0);
+            else
+              tmpMuxOutput = 0;
           } else {
+            auto srcDb = getNodeDataBase(selMuxDataSrcNode);
+            if (!srcDb) {
+              llvm::errs() << "[ERROR] Data source node " << selMuxDataSrcNode
+                           << " not found for mux node " << selMuxNode << "\n";
+              tmpMuxOutput = 0;
+              ValueIter tmpMuxValuePair = {tmpMuxOutput, iterIndex};
+              if (auto muxDb = getNodeDataBase(selMuxNode))
+                muxDb->originalDataOut[iterIndex] = tmpMuxValuePair;
+              tmpMuxOutputMap[selMuxNode] = tmpMuxOutput;
+              continue;
+            }
             // If the src node is a mux node
             // TODO: Check the following update logic
             if (contains(selMuxDataSrcNode, "mux")) {
@@ -322,20 +406,14 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
                 if (contains(tmpMuxOutputMap, selMuxDataSrcNode)) {
                   tmpMuxOutput = tmpMuxOutputMap[selMuxDataSrcNode];
                 } else {
-                  llvm::errs() << "[ERROR] Data src(" << selMuxDataSrcNode
-                               << ") of Mux Node: " << selMuxDataSrcNode
-                               << ", not found.\n";
+                  llvm::errs()
+                      << "[ERROR] Data src(" << selMuxDataSrcNode
+                      << ") of Mux Node: " << selMuxNode << ", not found.\n";
                 }
-              } else if (contains(switchInfo.data
-                                      .dfgBaseNodeValue[selMuxDataSrcNode]
-                                      ->originalDataOut,
-                                  iterIndex)) {
+              } else if (contains(srcDb->originalDataOut, iterIndex)) {
                 //! Testing
                 // llvm::dbgs() << "[DEBUG] \t\t\t(CASE2)\n";
-                tmpMuxOutput =
-                    switchInfo.data.dfgBaseNodeValue[selMuxDataSrcNode]
-                        ->originalDataOut[iterIndex]
-                        .value;
+                tmpMuxOutput = srcDb->originalDataOut[iterIndex].value;
               } else if (contains(tmpMuxOutputMap, selMuxDataSrcNode)) {
                 //! Testing
                 // llvm::dbgs() << "[DEBUG] \t\t\t(CASE3)\n";
@@ -344,9 +422,9 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
                 //! Testing
                 // llvm::dbgs() << "[DEBUG] \t\t\t(CASE4)\n";
                 // TODO: Check the following update logic
-                ValueIter tmpInnerMuxValuePair = {tmpMuxOutput, iterIndex - 1};
-                switchInfo.data.dfgBaseNodeValue[selMuxDataSrcNode]
-                    ->originalDataOut[iterIndex - 1] = tmpInnerMuxValuePair;
+                unsigned fallbackIter = (iterIndex == 0) ? 0 : iterIndex - 1;
+                ValueIter tmpInnerMuxValuePair = {tmpMuxOutput, fallbackIter};
+                srcDb->originalDataOut[fallbackIter] = tmpInnerMuxValuePair;
                 tmpUnUpdatedMux.push_back(selMuxNode);
                 continue;
               }
@@ -358,20 +436,16 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
                 // Unconnected , use default vlue
                 tmpMuxOutput = 0;
               } else {
-                auto &omap =
-                    switchInfo.data.dfgBaseNodeValue[selMuxDataSrcNode]
-                        ->originalDataOut;
+                auto &omap = srcDb->originalDataOut;
                 if (omap.find(iterIndex) != omap.end()) {
                   tmpMuxOutput = omap[iterIndex].value;
-                } else if (iterIndex > 0 &&
-                           omap.find(iterIndex - 1) != omap.end()) {
-                  // Fallback to previous
+                } else if (contains(tmpMuxOutputMap, selMuxDataSrcNode)) {
+                  tmpMuxOutput = tmpMuxOutputMap[selMuxDataSrcNode];
+                } else if (getLatestKnownValue(omap, iterIndex, tmpMuxOutput)) {
                   llvm::dbgs()
                       << "[WARNING] The value for node " << selMuxDataSrcNode
                       << " at iteration " << iterIndex
-                      << " not found, fallback to previous\n";
-                  tmpMuxOutput =
-                      omap[iterIndex - 1].value; // fallback to previous
+                      << " not found, fallback to latest known value\n";
                 } else {
                   llvm::errs()
                       << "[ERROR] Data src(" << selMuxDataSrcNode
@@ -384,21 +458,32 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
 
           // Update the storing structure and the tmp dict
           //! Testing
-          // llvm::dbgs() << "[DEBUG] \t\t\t\t[OutValue] " << tmpMuxOutput << "\n";
+          // llvm::dbgs() << "[DEBUG] \t\t\t\t[OutValue] " << tmpMuxOutput <<
+          // "\n";
 
           ValueIter tmpMuxValuePair = {tmpMuxOutput, iterIndex};
-          switchInfo.data.dfgBaseNodeValue[selMuxNode]
-              ->originalDataOut[iterIndex] = tmpMuxValuePair;
+          if (auto muxDb = getNodeDataBase(selMuxNode))
+            if (!contains(muxDb->originalDataOut, iterIndex))
+              muxDb->originalDataOut[iterIndex] = tmpMuxValuePair;
           tmpMuxOutputMap[selMuxNode] = tmpMuxOutput;
         }
 
         // Update all remaining mux nodes
         // TODO: This maybe useless, check it out
         for (const auto &leftMuxNode : tmpUnUpdatedMux) {
-          auto selMuxSrcMap =
-              switchInfo.staticinfo.dataflowGraph->muxToSrcNodeMap[leftMuxNode];
-          std::string selMuxDataSrcNode =
-              selMuxSrcMap[std::to_string(outValue)];
+          std::string selMuxDataSrcNode;
+          if (auto muxIt =
+                  switchInfo.staticinfo.dataflowGraph->muxToSrcNodeMap.find(
+                      leftMuxNode);
+              muxIt !=
+              switchInfo.staticinfo.dataflowGraph->muxToSrcNodeMap.end()) {
+            auto srcIt = muxIt->second.find(std::to_string(outValue));
+            if (srcIt != muxIt->second.end())
+              selMuxDataSrcNode = srcIt->second;
+          } else {
+            llvm::errs() << "[ERROR] Mux node " << leftMuxNode
+                         << " not found in muxToSrcNodeMap\n";
+          }
           int tmpMuxOutput = 0;
 
           if (contains(tmpMuxOutputMap, selMuxDataSrcNode)) {
@@ -410,8 +495,9 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
           }
 
           ValueIter tmpMuxValuePair = {tmpMuxOutput, iterIndex};
-          switchInfo.data.dfgBaseNodeValue[leftMuxNode]
-              ->originalDataOut[iterIndex] = tmpMuxValuePair;
+          if (auto leftDb = getNodeDataBase(leftMuxNode))
+            if (!contains(leftDb->originalDataOut, iterIndex))
+              leftDb->originalDataOut[iterIndex] = tmpMuxValuePair;
         }
       }
     }
@@ -448,8 +534,7 @@ void buildSegmentSuccNodesList(SwitchingInfo &switchInfo,
       std::string conSucNode = selCMNode->conSucNodeName;
 
       //! Testing
-      llvm::dbgs() << "[DEBUG] \tControl Merge Node: " << selBaseNode
-                   << "\n";
+      llvm::dbgs() << "[DEBUG] \tControl Merge Node: " << selBaseNode << "\n";
       llvm::dbgs() << "[DEBUG] \t\tData Suc Node: " << dataSucNode << "\n";
       llvm::dbgs() << "[DEBUG] \t\tControl Suc Node: " << conSucNode << "\n";
 
@@ -491,6 +576,12 @@ void dataGlitchNodeSearch(SwitchingInfo &switchInfo,
     auto selAdjGraph = switchInfo.staticinfo.segToGraph[label];
     std::string mgBaseNode = selAdjGraph->baseNode;
     auto mgII = switchInfo.staticinfo.cfdfcIIs[std::stoul(std::string(label))];
+    if (mgII == 0) {
+      llvm::errs() << "[ERROR] The II for CFDFC " << label
+                   << " is 0, which is invalid. Skip the glitch node search for"
+                   << " this segment.\n";
+      continue;
+    }
 
     auto orderedNodes = selAdjGraph->orderedNodeName;
     auto &orderedALUs = switchInfo.data.segToOrderedALUNodes[label];
@@ -509,7 +600,11 @@ void dataGlitchNodeSearch(SwitchingInfo &switchInfo,
     for (const auto &selNode : orderedALUs) {
       LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tALU Node: " << selNode << "\n");
 
-      // ALU will only have two inputs
+      const std::string nodeType = getNodeType(selNode);
+      if (GLITCH_NODE.find(nodeType) == GLITCH_NODE.end())
+        continue;
+
+      // Glitch model is defined only for binary integer ALU-like nodes.
       auto preNodeLists = selAdjGraph->nodes[selNode]->pres;
       if (preNodeLists.size() != 2) {
         llvm::errs() << "[ERROR] The ALU node " << selNode
@@ -557,18 +652,26 @@ void dataGlitchNodeSearch(SwitchingInfo &switchInfo,
       bool preSrc1Buffered = false;
       bool preSrc2Buffered = false;
 
-      for (const auto &selOriNode : switchInfo.data.dfgBaseNodeValue[srcNode1]
-                                        ->segSucNodeMap[label.str()]
-                                        .original) {
-        if (preNode1 == selOriNode)
-          preSrc1Buffered = true;
+      auto src1It = switchInfo.data.dfgBaseNodeValue.find(srcNode1);
+      if (src1It != switchInfo.data.dfgBaseNodeValue.end()) {
+        auto seg1It = src1It->second->segSucNodeMap.find(label.str());
+        if (seg1It != src1It->second->segSucNodeMap.end()) {
+          for (const auto &selOriNode : seg1It->second.original) {
+            if (preNode1 == selOriNode)
+              preSrc1Buffered = true;
+          }
+        }
       }
 
-      for (const auto &selOriNode : switchInfo.data.dfgBaseNodeValue[srcNode2]
-                                        ->segSucNodeMap[label.str()]
-                                        .original) {
-        if (preNode2 == selOriNode)
-          preSrc2Buffered = true;
+      auto src2It = switchInfo.data.dfgBaseNodeValue.find(srcNode2);
+      if (src2It != switchInfo.data.dfgBaseNodeValue.end()) {
+        auto seg2It = src2It->second->segSucNodeMap.find(label.str());
+        if (seg2It != src2It->second->segSucNodeMap.end()) {
+          for (const auto &selOriNode : seg2It->second.original) {
+            if (preNode2 == selOriNode)
+              preSrc2Buffered = true;
+          }
+        }
       }
 
       // Assign the faster one with value 0 and slower one with value 1
@@ -806,9 +909,8 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
             }
 
             switchInfo.data.dfgBaseNodeValue[selNode]->oriGlitchDataOut[i] = {
-                switchInfo.data.dfgBaseNodeValue[selNode]
-                    ->originalDataOut[i]
-                    .value};
+                getDataOutValueAtOrBefore(
+                    switchInfo.data.dfgBaseNodeValue[selNode], i, 0)};
             switchInfo.data.dfgBaseNodeValue[selNode]->lastUpdateIndex = i;
             continue;
           }
@@ -927,9 +1029,8 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
                             ->originalDataOut[op1PreIndex]
                             .value;
               } else {
-                op1 = switchInfo.data.dfgBaseNodeValue[fasterNode]
-                          ->originalDataOut[i]
-                          .value;
+                op1 = getDataOutValueAtOrBefore(
+                    switchInfo.data.dfgBaseNodeValue[fasterNode], i, 0);
               }
             } else if (contains(switchInfo.data.glitches[executedSeg],
                                 fasterNode)) {
@@ -937,9 +1038,8 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
               // buffered or not
               if (srcBufferedDict[fasterNode]) {
                 // Buffered
-                op1 = switchInfo.data.dfgBaseNodeValue[fasterNode]
-                          ->originalDataOut[i]
-                          .value;
+                op1 = getDataOutValueAtOrBefore(
+                    switchInfo.data.dfgBaseNodeValue[fasterNode], i, 0);
               } else {
                 // unsigned tmpSize =
                 // switchInfo.data.dfgBaseNodeValue[fasterNode]->oriGlitchDataOut[i].size();
@@ -955,24 +1055,26 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
                   op1 = glitchvec.back();
                 } else { // only one glitch value – use it
                   llvm::errs() << "[ERROR] Use original dataout\n";
-                  op1 = switchInfo.data.dfgBaseNodeValue[fasterNode]
-                            ->originalDataOut[i]
-                            .value; // no glitches recorded
+                  op1 = getDataOutValueAtOrBefore(
+                      switchInfo.data.dfgBaseNodeValue[fasterNode], i,
+                      0); // no glitches recorded
                 }
               }
             } else {
-              op1 = switchInfo.data.dfgBaseNodeValue[fasterNode]
-                        ->originalDataOut[i]
-                        .value;
+              op1 = getDataOutValueAtOrBefore(
+                  switchInfo.data.dfgBaseNodeValue[fasterNode], i, 0);
             }
 
             // Get the value of op2
-            if (!contains(switchInfo.data.dfgBaseNodeValue[slowerNode]
-                              ->originalDataOut,
-                          op2PreIndex)) {
+            if (contains(switchInfo.data.dfgBaseNodeValue[slowerNode]
+                             ->originalDataOut,
+                         op2PreIndex)) {
               op2 = switchInfo.data.dfgBaseNodeValue[slowerNode]
                         ->originalDataOut[op2PreIndex]
                         .value;
+            } else {
+              op2 = getDataOutValueAtOrBefore(
+                  switchInfo.data.dfgBaseNodeValue[slowerNode], i, 0);
             }
 
             tmpValue.push_back(calGlitchValue(op1, op2, selNode));
@@ -1012,21 +1114,18 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
                             .value;
                 }
               } else {
-                op1 = switchInfo.data.dfgBaseNodeValue[fasterNode]
-                          ->originalDataOut[i]
-                          .value;
+                getDataOutValueAtOrBefore(
+                    switchInfo.data.dfgBaseNodeValue[fasterNode], i, 0);
               }
             } else {
-              op1 = switchInfo.data.dfgBaseNodeValue[fasterNode]
-                        ->originalDataOut[i]
-                        .value;
+              op1 = getDataOutValueAtOrBefore(
+                  switchInfo.data.dfgBaseNodeValue[fasterNode], i, 0);
             }
 
             // Check whether the slower node is a mux node
             // TODO: Check the condition below
-            op2 = switchInfo.data.dfgBaseNodeValue[slowerNode]
-                      ->originalDataOut[i]
-                      .value;
+            op2 = getDataOutValueAtOrBefore(
+                switchInfo.data.dfgBaseNodeValue[slowerNode], i, 0);
 
             tmpValue.push_back(calGlitchValue(op1, op2, selNode));
 
@@ -1041,15 +1140,13 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
             }
           }
         } else {
-          tmpValue.push_back(switchInfo.data.dfgBaseNodeValue[selNode]
-                                 ->originalDataOut[i]
-                                 .value);
+          tmpValue.push_back(getDataOutValueAtOrBefore(
+              switchInfo.data.dfgBaseNodeValue[selNode], i, 0));
         }
       } else {
         // No neeed for glitch value calculation, we directly copy the ori data
-        tmpValue.push_back(switchInfo.data.dfgBaseNodeValue[selNode]
-                               ->originalDataOut[i]
-                               .value);
+        tmpValue.push_back(getDataOutValueAtOrBefore(
+            switchInfo.data.dfgBaseNodeValue[selNode], i, 0));
       }
 
       // Update the storing structure
@@ -1065,17 +1162,31 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
     // TODO: Pre store the information like mux etc.
     for (const auto &selMuxNode :
          switchInfo.data.controlNodes[executedSeg].muxNodeList) {
-      std::string selCondInputNode =
-          switchInfo.staticinfo.dataflowGraph
-              ->muxToSrcNodeMap[selMuxNode]["control"];
+      auto muxSrcIt =
+          switchInfo.staticinfo.dataflowGraph->muxToSrcNodeMap.find(selMuxNode);
+      if (muxSrcIt ==
+          switchInfo.staticinfo.dataflowGraph->muxToSrcNodeMap.end())
+        continue;
 
-      // We need to check the existence of the control value output
-      auto selCMBaseNode = dyn_cast<CMergeData>(
-          switchInfo.data.dfgBaseNodeValue[selCondInputNode].get());
-      int condValue = selCMBaseNode->getControlOutput(i);
-      std::string selDataSrcNode =
-          switchInfo.staticinfo.dataflowGraph
-              ->muxToSrcNodeMap[selMuxNode][std::to_string(condValue)];
+      std::string selCondInputNode = "";
+      auto controlIt = muxSrcIt->second.find("control");
+      if (controlIt != muxSrcIt->second.end())
+        selCondInputNode = controlIt->second;
+
+      int condValue = 0;
+      if (!selCondInputNode.empty() &&
+          contains(switchInfo.data.dfgBaseNodeValue, selCondInputNode) &&
+          switchInfo.data.dfgBaseNodeValue[selCondInputNode]) {
+        if (auto *selCMBaseNode = dyn_cast<CMergeData>(
+                switchInfo.data.dfgBaseNodeValue[selCondInputNode].get())) {
+          condValue = selCMBaseNode->getControlOutput(i);
+        }
+      }
+
+      std::string selDataSrcNode = "";
+      auto dataSrcIt = muxSrcIt->second.find(std::to_string(condValue));
+      if (dataSrcIt != muxSrcIt->second.end())
+        selDataSrcNode = dataSrcIt->second;
 
       // Temp Value vector definition
       std::vector<int> preValue, curValue, nexValue;
@@ -1092,9 +1203,19 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
 
       // TODO: Validate the following indexing mechanism
       // Check whether we have glitches from the srcs or not
-      if (contains(selDataSrcNode, "constant") ||
-          contains(selDataSrcNode, "source") ||
-          contains(selDataSrcNode, "start")) {
+      bool validDataSrcNode =
+          !selDataSrcNode.empty() &&
+          contains(switchInfo.data.dfgBaseNodeValue, selDataSrcNode) &&
+          switchInfo.data.dfgBaseNodeValue[selDataSrcNode];
+
+      if (!validDataSrcNode) {
+        llvm::errs() << "[WARNING] Invalid data source \"" << selDataSrcNode
+                     << "\" for mux node " << selMuxNode << " at iter " << i
+                     << ", using 0\n";
+        curValue.push_back(0);
+      } else if (contains(selDataSrcNode, "constant") ||
+                 contains(selDataSrcNode, "source") ||
+                 contains(selDataSrcNode, "start")) {
         curValue.push_back(switchInfo.data.dfgBaseNodeValue[selDataSrcNode]
                                ->originalDataOut[0]
                                .value);
@@ -1124,17 +1245,18 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
         for (const auto &[nodeName, portIdx] :
              selMuxNodeStructure->preNameToPortIdxMap) {
           //* Here we need to do cond + 1, as the port map of muxnode assigns 0
-          //to its control input.
+          // to its control input.
           const unsigned int cond_add1 = condValue + 1;
           if (portIdx == (cond_add1))
             preNode = nodeName;
         }
 
         bool bufferedFlag = false;
-        if (containsValue(switchInfo.data.dfgBaseNodeValue[selDataSrcNode]
-                              ->segSucNodeMap[executedSeg]
-                              .original,
-                          preNode))
+        auto segSucIt = switchInfo.data.dfgBaseNodeValue[selDataSrcNode]
+                            ->segSucNodeMap.find(executedSeg);
+        if (segSucIt != switchInfo.data.dfgBaseNodeValue[selDataSrcNode]
+                            ->segSucNodeMap.end() &&
+            containsValue(segSucIt->second.original, preNode))
           bufferedFlag = true;
 
         //! Testing
@@ -1145,28 +1267,16 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
 
         if (bufferedFlag) {
           // Src glitching but buffered
-          curValue.push_back(switchInfo.data.dfgBaseNodeValue[selDataSrcNode]
-                                 ->originalDataOut[i]
-                                 .value);
+          curValue.push_back(getDataOutValueAtOrBefore(
+              switchInfo.data.dfgBaseNodeValue[selDataSrcNode], i, 0));
         } else {
           curValue = switchInfo.data.dfgBaseNodeValue[selDataSrcNode]
                          ->oriGlitchDataOut[i];
         }
       } else {
         // Handling special case for cascaded Muxes
-        if (contains(selDataSrcNode, "mux") &&
-            (switchInfo.data.dfgBaseNodeValue[selDataSrcNode]
-                 ->originalDataOut.find(i) ==
-             switchInfo.data.dfgBaseNodeValue[selDataSrcNode]
-                 ->originalDataOut.end())) {
-          curValue.push_back(switchInfo.data.dfgBaseNodeValue[selDataSrcNode]
-                                 ->originalDataOut[i - 1]
-                                 .value);
-        } else {
-          curValue.push_back(switchInfo.data.dfgBaseNodeValue[selDataSrcNode]
-                                 ->originalDataOut[i]
-                                 .value);
-        }
+        curValue.push_back(getDataOutValueAtOrBefore(
+            switchInfo.data.dfgBaseNodeValue[selDataSrcNode], i, 0));
       }
 
       //! Testing
@@ -1217,22 +1327,27 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
           if (!contains(executedSeg, "E")) {
             // Cond value will be the same for the last segment
             int preCondValue = 1 - condValue;
-            std::string preDataSrc =
-                switchInfo.staticinfo.dataflowGraph
-                    ->muxToSrcNodeMap[selMuxNode][std::to_string(preCondValue)];
+            auto muxIt =
+                switchInfo.staticinfo.dataflowGraph->muxToSrcNodeMap.find(
+                    selMuxNode);
+            if (muxIt ==
+                switchInfo.staticinfo.dataflowGraph->muxToSrcNodeMap.end())
+              continue;
+            auto preSrcIt = muxIt->second.find(std::to_string(preCondValue));
+            if (preSrcIt == muxIt->second.end())
+              continue;
+            std::string preDataSrc = preSrcIt->second;
+
+            auto dbIt = switchInfo.data.dfgBaseNodeValue.find(preDataSrc);
+            if (dbIt == switchInfo.data.dfgBaseNodeValue.end() || !dbIt->second)
+              continue;
 
             // Check whether the value exist or not
             if (contains(preDataSrc, "constant")) {
-              preValue.push_back(switchInfo.data.dfgBaseNodeValue[preDataSrc]
-                                     ->originalDataOut[0]
-                                     .value);
-            } else if (switchInfo.data.dfgBaseNodeValue[preDataSrc]
-                           ->originalDataOut.find(i) ==
-                       switchInfo.data.dfgBaseNodeValue[preDataSrc]
-                           ->originalDataOut.end()) {
-              preValue.push_back(switchInfo.data.dfgBaseNodeValue[preDataSrc]
-                                     ->originalDataOut[i]
-                                     .value);
+              preValue.push_back(
+                  getDataOutValueAtOrBefore(dbIt->second, /*iter=*/0, 0));
+            } else {
+              preValue.push_back(getDataOutValueAtOrBefore(dbIt->second, i, 0));
             }
           }
 
@@ -1278,10 +1393,10 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
       }
 
       // Update the storing structure
-      switchInfo.data.dfgBaseNodeValue[selMuxNode]->oriGlitchDataOut[i] = finalMuxOutputList;
-      switchInfo.data.dfgBaseNodeValue[selMuxNode]->lastValidSeg =
-          executedSeg;
-      switchInfo.data.dfgBaseNodeValue[selMuxNode]->lastUpdateIndex = i; 
+      switchInfo.data.dfgBaseNodeValue[selMuxNode]->oriGlitchDataOut[i] =
+          finalMuxOutputList;
+      switchInfo.data.dfgBaseNodeValue[selMuxNode]->lastValidSeg = executedSeg;
+      switchInfo.data.dfgBaseNodeValue[selMuxNode]->lastUpdateIndex = i;
     }
 
     // Step 3: Relay memory load node's data
@@ -1320,7 +1435,7 @@ int getCondBrNodeCondValue(SwitchingInfo &switchInfo, unsigned iterIndex,
                 nodeName)) {
     llvm::errs() << "[ERROR] Warning: cond_br node " << nodeName
                  << " not found in condBrToConSrcMap\n";
-    return 1; // Default value
+    return 0; // Default value
   }
 
   std::string condSrcNode =
@@ -1331,19 +1446,12 @@ int getCondBrNodeCondValue(SwitchingInfo &switchInfo, unsigned iterIndex,
   if (!contains(switchInfo.data.dfgBaseNodeValue, condSrcNode)) {
     llvm::errs() << "[ERROR] Warning: condSrcNode " << condSrcNode
                  << " not found in dfgBaseNodeValue\n";
-    return 1; // Default value
+    return 0; // Default value
   }
 
-  if (contains(switchInfo.data.dfgBaseNodeValue[condSrcNode]->originalDataOut,
-               iterIndex)) {
-    condValue = switchInfo.data.dfgBaseNodeValue[condSrcNode]
-                    ->originalDataOut[iterIndex]
-                    .value;
-  } else {
-    condValue = 1;
-  }
-
-  return condValue;
+  const int rawCond = getDataOutValueAtOrBefore(
+      switchInfo.data.dfgBaseNodeValue[condSrcNode], iterIndex, 0);
+  return rawCond != 0 ? 1 : 0;
 }
 
 void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
@@ -1358,6 +1466,34 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
 
     // List storing nodes that need special treatment
     std::vector<std::string> pendingMemList;
+    auto resolveOutWidth = [&](const std::string &srcNode,
+                               const std::string &dstNode,
+                               unsigned fallback = 1U) -> unsigned {
+      unsigned width = fallback;
+
+      auto baseNodeIt = switchInfo.data.dfgBaseNodeValue.find(srcNode);
+      if (baseNodeIt != switchInfo.data.dfgBaseNodeValue.end() &&
+          baseNodeIt->second &&
+          contains(baseNodeIt->second->segSucNodeMap, executedSeg)) {
+        auto &dwMap =
+            baseNodeIt->second->segSucNodeMap[executedSeg].dataWidthMap;
+        auto it = dwMap.find(dstNode);
+        if (it != dwMap.end() && it->second > 0)
+          width = std::max(width, it->second);
+      }
+
+      auto graphNodeIt =
+          switchInfo.staticinfo.dataflowGraph->nodes.find(srcNode);
+      if (graphNodeIt != switchInfo.staticinfo.dataflowGraph->nodes.end() &&
+          graphNodeIt->second != nullptr) {
+        auto edgeIt = graphNodeIt->second->sucsDataWidthMap.find(dstNode);
+        if (edgeIt != graphNodeIt->second->sucsDataWidthMap.end() &&
+            edgeIt->second > 0)
+          width = std::max(width, edgeIt->second);
+      }
+
+      return width;
+    };
 
     //! Testing
     if (debug)
@@ -1417,9 +1553,7 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
               llvm::dbgs() << "[DEBUG] \t\tSucNode: " << selSucNode << "\n";
 
             // Get the node bitwidth
-            unsigned tmpNodeWidth = switchInfo.data.dfgBaseNodeValue[selNode]
-                                        ->segSucNodeMap[executedSeg]
-                                        .dataWidthMap[selSucNode];
+            unsigned tmpNodeWidth = resolveOutWidth(selNode, selSucNode);
 
             //! Testing
             if (debug)
@@ -1463,9 +1597,7 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
                                           ->segSucNodeMap[executedSeg]
                                           .original) {
           // Get Node Bitwidth
-          unsigned tmpNodeWidth = switchInfo.data.dfgBaseNodeValue[selNode]
-                                      ->segSucNodeMap[executedSeg]
-                                      .dataWidthMap[selSucNode];
+          unsigned tmpNodeWidth = resolveOutWidth(selNode, selSucNode);
 
           //! Testing
           if (debug)
@@ -1477,9 +1609,8 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
             auto selStoreNode = dyn_cast<DStoreNode>(
                 switchInfo.staticinfo.dataflowGraph->nodes[selSucNode].get());
             selStoreNode->updateDataout(
-                reduceBits(switchInfo.data.dfgBaseNodeValue[selNode]
-                               ->originalDataOut[i]
-                               .value,
+                reduceBits(getDataOutValueAtOrBefore(
+                               switchInfo.data.dfgBaseNodeValue[selNode], i, 0),
                            tmpNodeWidth),
                 selNode);
           } else if (contains(selSucNode, "cond_br")) {
@@ -1492,18 +1623,16 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
                 getCondBrNodeCondValue(switchInfo, i, selSucNode);
 
             selCondStoreNode->updateDataout(
-                reduceBits(switchInfo.data.dfgBaseNodeValue[selNode]
-                               ->originalDataOut[i]
-                               .value,
+                reduceBits(getDataOutValueAtOrBefore(
+                               switchInfo.data.dfgBaseNodeValue[selNode], i, 0),
                            tmpNodeWidth),
                 tmpCondValue);
           } else {
             switchInfo.staticinfo.dataflowGraph->nodes[selSucNode]
-                ->updateDataoutChannel(
-                    reduceBits(switchInfo.data.dfgBaseNodeValue[selNode]
-                                   ->originalDataOut[i]
-                                   .value,
-                               tmpNodeWidth));
+                ->updateDataoutChannel(reduceBits(
+                    getDataOutValueAtOrBefore(
+                        switchInfo.data.dfgBaseNodeValue[selNode], i, 0),
+                    tmpNodeWidth));
           }
         }
         //! Testing
@@ -1669,9 +1798,7 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
                 llvm::dbgs() << "[DEBUG] \t\tSuc Node: " << selSucNode << "\n";
 
               // Get the node output bitwidth
-              unsigned tmpNodeWidth = switchInfo.data.dfgBaseNodeValue[selNode]
-                                          ->segSucNodeMap[executedSeg]
-                                          .dataWidthMap[selSucNode];
+              unsigned tmpNodeWidth = resolveOutWidth(selNode, selSucNode);
 
               if (contains(selSucNode, "cond_br")) {
                 // Get the node
@@ -1706,9 +1833,7 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
             if (debug)
               llvm::dbgs() << "[DEBUG] \t\tSuc Node: " << selSucNode << "\n";
             // Get bitwidth
-            unsigned tmpNodeWidth = switchInfo.data.dfgBaseNodeValue[selNode]
-                                        ->segSucNodeMap[executedSeg]
-                                        .dataWidthMap[selSucNode];
+            unsigned tmpNodeWidth = resolveOutWidth(selNode, selSucNode);
 
             //
             if (contains(
@@ -1885,9 +2010,8 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
         }
       }
 
-      int selValue =
-          switchInfo.data.dfgBaseNodeValue[selNode]->originalDataOut[i].value;
-
+      int selValue = getDataOutValueAtOrBefore(
+          switchInfo.data.dfgBaseNodeValue[selNode], i, 0);
       // Step 1: Update the node itself
       selMemNode->updateDataout(selValue, addrValue);
 
@@ -1908,9 +2032,7 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
         if ((!contains(selSucNode, "mem_controller")) &&
             ((!contains(selSucNode, "end")))) {
           // Get node bitwidth
-          unsigned tmpNodeWidth = switchInfo.data.dfgBaseNodeValue[selNode]
-                                      ->segSucNodeMap[executedSeg]
-                                      .dataWidthMap[selSucNode];
+          unsigned tmpNodeWidth = resolveOutWidth(selNode, selSucNode);
 
           if (contains(selSucNode, "cond_br")) {
             // Get the node
@@ -1933,9 +2055,7 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
                                         ->segSucNodeMap[executedSeg]
                                         .original) {
         // Get bitwidth
-        unsigned tmpNodeWidth = switchInfo.data.dfgBaseNodeValue[selNode]
-                                    ->segSucNodeMap[executedSeg]
-                                    .dataWidthMap[selSucNode];
+        unsigned tmpNodeWidth = resolveOutWidth(selNode, selSucNode);
 
         //
         if (contains(selSucNode, "cond_br")) {
@@ -2122,33 +2242,25 @@ MgNodeInfo segGeneralSuccSearch(SwitchingInfo &switchInfo,
 
 unsigned getExecutionIter(unsigned bbIndex, unsigned curBB,
                           SCFProfilingResult &profileResults) {
-  if (!contains(profileResults.bbToIterMap, bbIndex)) {
-    llvm::errs() << "[ERROR] Cannot find the execution iteration for BB "
-                 << curBB << " at index " << bbIndex << "\n";
-    return 0;
+  auto it = profileResults.bbToIterMap.find(bbIndex);
+  if (it != profileResults.bbToIterMap.end())
+    return it->second;
+
+  // Deterministic fallback: use the closest previous mapped BB index.
+  // This avoids off-by-one oscillation and spurious iteration drift when the
+  // trace index does not have an exact map entry.
+  auto ub = profileResults.bbToIterMap.upper_bound(bbIndex);
+  if (ub != profileResults.bbToIterMap.begin()) {
+    --ub;
+    llvm::errs() << "[WARNING] Missing bbToIterMap entry for bbIndex "
+                 << bbIndex << ", falling back to nearest mapped index "
+                 << ub->first << " (iter " << ub->second << ")\n";
+    return ub->second;
   }
 
-  // Get the execution iteration
-  unsigned iterIndex = profileResults.bbToIterMap[bbIndex];
-
-  if (iterIndex == 0) {
-    llvm::errs() << "[ERROR] The execution iteration for BB " << curBB
-                 << " at index " << bbIndex << " is 0\n";
-    return 0;
-  }
-
-  if (iterIndex - 1 >= profileResults.executedBBTrace.size()) {
-    llvm::dbgs() << "[ERROR] iterIndex-1 (" << (iterIndex - 1)
-                 << ") out of bounds for executedBBTrace (size: "
-                 << profileResults.executedBBTrace.size() << ")\n";
-    return iterIndex; // Return iterIndex instead of underflowing
-  }
-
-  if (curBB == profileResults.executedBBTrace[iterIndex - 1] ||
-      (bbIndex == 1)) {
-    return iterIndex - 1;
-  }
-  return iterIndex;
+  llvm::errs() << "[ERROR] Cannot find the execution iteration mapping for "
+               << "bbIndex " << bbIndex << "\n";
+  return 0;
 }
 
 std::string segNodeDataSrcSearch(SwitchingInfo &switchInfo,
@@ -2387,11 +2499,10 @@ findSrcInSegment(const SwitchingInfo &si, const std::string &nodeName,
 
     // 5) Search in successor lists
     for (auto cat : cats) {
-      auto const &lst =
-          (cat == "control"
-               ? mSuc.control
-               : cat == "data" ? mSuc.data
-                               : cat == "glitch" ? mSuc.glitch : mSuc.original);
+      auto const &lst = (cat == "control"  ? mSuc.control
+                         : cat == "data"   ? mSuc.data
+                         : cat == "glitch" ? mSuc.glitch
+                                           : mSuc.original);
       if (std::any_of(lst.begin(), lst.end(), [&](auto const &s) {
             return s.find(nodeName) != std::string::npos;
           }))
@@ -2549,9 +2660,19 @@ void CMergeData::printDetail() {
 }
 
 int CMergeData::getControlOutput(unsigned selIter) {
-  if (contains(controlDataOut, selIter)) {
+  if (contains(controlDataOut, selIter))
     return controlDataOut[selIter].value;
-  } else {
+
+  auto it = controlDataOut.upper_bound(selIter);
+  if (it != controlDataOut.begin()) {
+    --it;
+    return it->second.value;
+  }
+
+  if (!controlDataOut.empty())
+    return controlDataOut.begin()->second.value;
+
+  else {
     return 0;
   }
 }
