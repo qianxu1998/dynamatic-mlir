@@ -62,10 +62,15 @@ AdjNode::AdjNode(Operation *selOp, const std::vector<std::string> &predecessors,
 // updating is finished or not for the node itself and all its predecessors
 // NOTE: Relaxed conditions
 bool AdjNode::handshakeUpdateFinished() {
-  if (validSignal.size() == sucs.size()) {
-    if (readySignal.size() == pres.size()) {
-      if (setR.size() == pres.size()) {
-        if (setV.size() == sucs.size()) {
+  if (isa<DStoreNode>(this)) {
+    return !validSignal.empty() && readySignal.size() >= pres.size() &&
+           !setV.empty() && setR.size() >= pres.size();
+  }
+
+  if (validSignal.size() >= sucs.size()) {
+    if (readySignal.size() >= pres.size()) {
+      if (setR.size() >= pres.size()) {
+        if (setV.size() >= sucs.size()) {
           return true;
         }
       }
@@ -76,8 +81,11 @@ bool AdjNode::handshakeUpdateFinished() {
 }
 
 bool AdjNode::handshakeSwitchingChecking() {
-  if (validSignal.size() == sucs.size()) {
-    if (readySignal.size() == pres.size()) {
+  if (isa<DStoreNode>(this))
+    return !validSignal.empty() && readySignal.size() >= pres.size();
+
+  if (validSignal.size() >= sucs.size()) {
+    if (readySignal.size() >= pres.size()) {
       return true;
     }
   }
@@ -86,6 +94,12 @@ bool AdjNode::handshakeSwitchingChecking() {
 }
 
 void AdjNode::totalHandshakeSwitchingCounting() {
+  // Recompute from the current per-channel maps. This function can be called
+  // multiple times during fixed-point solving, so totals must be reset to
+  // avoid artificial accumulation across iterations.
+  totalValidSwitching = 0;
+  totalReadySwitching = 0;
+
   for (const auto &[s, selValue] : validSignal) {
     totalValidSwitching += selValue;
   }
@@ -126,12 +140,12 @@ std::vector<unsigned> AdjNode::getPositionList(int number) {
   std::vector<unsigned> posList;
 
   unsigned idx = 0;
-  int tmp = number;
+  unsigned tmp = static_cast<unsigned>(number);
   while (tmp) {
-    if (tmp & 1) {
+    if (tmp & 1U) {
       posList.push_back(idx);
     }
-    tmp = tmp >> 1;
+    tmp >>= 1U;
     idx++;
   }
   return posList;
@@ -161,13 +175,13 @@ void AdjNode::totalDataSwitchingCounting(bool mapped) {
     // Check the validity of the data channel value
     for (unsigned i = 0; i < valueVec.size(); i++) {
       int curVal = (valueVec[i] == -1) ? 1 : valueVec[i];
-      int diff = lastInput ^ curVal;
+      unsigned diff = static_cast<unsigned>(lastInput ^ curVal);
 
       // Count bits
       unsigned bitCount = 0;
       while (diff) {
-        bitCount += (diff & 1);
-        diff >>= 1;
+        bitCount += (diff & 1U);
+        diff >>= 1U;
       }
       numSwitches += bitCount;
       lastInput = curVal;
@@ -484,6 +498,32 @@ AdjGraph::AdjGraph(
     }
 
     // Construct pres
+    auto getBlockArgName = [&](BlockArgument blockArg) -> std::string {
+      auto *ownerBlock = blockArg.getOwner();
+      if (!ownerBlock)
+        return "";
+      auto *funcOp = ownerBlock->getParentOp();
+      auto handshakeFunc = dyn_cast_or_null<handshake::FuncOp>(funcOp);
+      if (!handshakeFunc)
+        return "";
+
+      auto argNamesAttr =
+          handshakeFunc->getAttrOfType<mlir::ArrayAttr>("argNames");
+      if (!argNamesAttr)
+        return "";
+
+      unsigned argIdx = blockArg.getArgNumber();
+      if (argIdx >= argNamesAttr.size())
+        return "";
+
+      auto strAttr =
+          dyn_cast<mlir::StringAttr>(argNamesAttr.getValue()[argIdx]);
+      if (!strAttr)
+        return "";
+
+      return strAttr.getValue().str();
+    };
+
     for (auto operand : op.getOperands()) {
       // TODO: Need to check do we need to include the block argument in the
       // graph or not
@@ -494,6 +534,10 @@ AdjGraph::AdjGraph(
                                   .str();
         if ((!contains(preName, "lsq")) &&
             (!contains(preName, "mem_controller")))
+          pres.push_back(preName);
+      } else if (auto blockArg = operand.dyn_cast<mlir::BlockArgument>()) {
+        std::string preName = getBlockArgName(blockArg);
+        if (!preName.empty())
           pres.push_back(preName);
       }
     }
@@ -784,21 +828,19 @@ AdjGraph::createNodeFromOperation(Operation *op, std::vector<std::string> &pres,
       // handshake::BranchOp operator
       // In case the pass is called before the canonicalization pass
       .Case<handshake::BranchOp>([&](auto selNode) {
-        // Check the number of pres, if only 1, we instantiate it as a pass node
-        if (pres.size() == 1) {
-          auto node = std::make_shared<PassNode>(
-              op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
-          return node;
-        }
+        // Canonicalized branch is single-input pass-through on handshake
+        // channels. We model it as PassNode to reuse ready/valid equations.
+        auto node = std::make_shared<PassNode>(
+            op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
+        return node;
       })
       // handshake::MergeOp operator
       .Case<handshake::MergeOp>([&](auto selNode) {
-        // Check the number of pres, if only 1, we instantiate it as a pass node
-        if (pres.size() == 1) {
-          auto node = std::make_shared<PassNode>(
-              op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
-          return node;
-        }
+        // Non-control merge is also propagated as a pass-through node in the
+        // current handshake model.
+        auto node = std::make_shared<PassNode>(
+            op, pres, sucs, nodeSucsDataWidthMap, nodeLatency, bbIndex);
+        return node;
       })
       // Default case: unknown operation
       .Default([](auto selNode) {
@@ -934,8 +976,20 @@ std::vector<Path> AdjGraph::findPaths(const std::string &srcNode,
 std::string
 AdjGraph::graphBacktrack(std::string srcNode,
                          std::unordered_set<std::string> &baseNodeSet) {
+  if (srcNode.empty())
+    return "";
+
   // If srcNode is in baseNodes => return it
   if (contains(baseNodeSet, srcNode)) {
+    return srcNode;
+  }
+
+  // Non-graph names (e.g., function arguments) may still be valid data-base
+  // anchors; if they are not tracked in this graph we fall back to the raw
+  // name.
+  if (!contains(nodes, srcNode) || !nodes[srcNode]) {
+    llvm::errs() << "[WARNING] graphBacktrack source node " << srcNode
+                 << " is not tracked in graph nodes; fallback to raw name\n";
     return srcNode;
   }
 
@@ -970,6 +1024,10 @@ AdjGraph::graphBacktrack(std::string srcNode,
       if (contains(baseNodeSet, curNode)) {
         return curNode;
       } else {
+        if (!contains(nodes, curNode) || !nodes[curNode]) {
+          mainStack.push_back(curNode);
+          continue;
+        }
         mainStack.push_back(curNode);
 
         if (contains(curNode, "cond_br")) {
@@ -1000,8 +1058,25 @@ AdjGraph::graphBacktrack(std::string srcNode,
     }
   }
 
-  llvm::dbgs() << "[ERROR] Could not find base node for " << srcNode << "\n";
-  return "";
+  llvm::errs() << "[WARNING] Could not find base node for " << srcNode
+               << ", trying direct predecessor fallback\n";
+
+  // Try one-hop predecessor fallback before returning the original source.
+  for (const auto &pre : nodes[srcNode]->pres) {
+    if (pre.empty())
+      continue;
+    if (pre == srcNode)
+      continue;
+    if (contains(baseNodeSet, pre))
+      return pre;
+    if (contains(nodes, pre) && nodes[pre]) {
+      std::string src = graphBacktrack(pre, baseNodeSet);
+      if (!src.empty())
+        return src;
+    }
+  }
+
+  return srcNode;
 }
 
 // std::vector<std::string> mgBacktrackBuffer(std::string srcNode) {
@@ -1102,20 +1177,54 @@ void AdjGraph::buildSrcMaps() {
                        << selNode << '\n';
       };
 
-      // Get the source node for all three ports
-      std::string ctrlSrc = graphBacktrack(ctrlPreNodeName, allDataBaseNode);
-      std::string dataSrc0 = graphBacktrack(
-          dataPre0NodeName.empty() ? ctrlPreNodeName : dataPre0NodeName,
-          allDataBaseNode);
+      auto resolveSrc = [&](const std::string &preNode) -> std::string {
+        if (preNode.empty())
+          return "";
+        std::string src = graphBacktrack(preNode, allDataBaseNode);
+        return src.empty() ? preNode : src;
+      };
 
-      std::string dataSrc1 = graphBacktrack(dataPre1NodeName, allDataBaseNode);
+      // Get the source node for all three ports
+      // TODO: Need to check the following logic for backnode tracking
+      std::string ctrlSrc = resolveSrc(ctrlPreNodeName);
+      std::string dataSrc0 = resolveSrc(
+          dataPre0NodeName.empty() ? ctrlPreNodeName : dataPre0NodeName);
+
+      std::string dataSrc1 = resolveSrc(
+          dataPre1NodeName.empty() ? dataPre0NodeName : dataPre1NodeName);
       fail(ctrlSrc);
       fail(dataSrc0);
       fail(dataSrc1);
+
+      if (ctrlSrc.empty()) {
+        llvm::errs() << "[WARNING] Mux node " << selNode
+                     << " has empty control source; fallback to data source 0 ("
+                     << dataSrc0 << ")\n";
+        ctrlSrc = dataSrc0;
+      }
+      if (dataSrc0.empty()) {
+        llvm::errs() << "[WARNING] Mux node " << selNode
+                     << " has empty data source 0; fallback to control source ("
+                     << ctrlSrc << ")\n";
+        dataSrc0 = ctrlSrc;
+      }
+      if (dataSrc1.empty()) {
+        llvm::errs() << "[WARNING] Mux node " << selNode
+                     << " has empty data source 1; fallback to data source 0 ("
+                     << dataSrc0 << ")\n";
+        dataSrc1 = dataSrc0;
+      }
+      if (ctrlSrc.empty() || dataSrc0.empty() || dataSrc1.empty()) {
+        llvm::errs() << "[WARNING] Mux node " << selNode
+                     << " still has unresolved sources after fallback: control="
+                     << ctrlSrc << ", data0=" << dataSrc0
+                     << ", data1=" << dataSrc1 << "\n";
+      }
+
       // Update the control_merge to mux map
-      if (contains(cmToMuxMap, ctrlSrc)) {
+      if (!ctrlSrc.empty() && contains(cmToMuxMap, ctrlSrc)) {
         cmToMuxMap[ctrlSrc].push_back(selNode);
-      } else {
+      } else if (!ctrlSrc.empty()) {
         cmToMuxMap[ctrlSrc] = {selNode};
       }
 
@@ -1128,15 +1237,15 @@ void AdjGraph::buildSrcMaps() {
       muxToSrcNodeMap[selNode] = tmpMuxPortMap;
 
       // Update the src to mux map
-      if (contains(srcNodeToMuxMap, dataSrc0)) {
+      if (!dataSrc0.empty() && contains(srcNodeToMuxMap, dataSrc0)) {
         srcNodeToMuxMap[dataSrc0].push_back(std::make_pair(selNode, 0));
-      } else {
+      } else if (!dataSrc0.empty()) {
         srcNodeToMuxMap[dataSrc0] = {std::make_pair(selNode, 0)};
       }
 
-      if (contains(srcNodeToMuxMap, dataSrc1)) {
+      if (!dataSrc1.empty() && contains(srcNodeToMuxMap, dataSrc1)) {
         srcNodeToMuxMap[dataSrc1].push_back(std::make_pair(selNode, 1));
-      } else {
+      } else if (!dataSrc1.empty()) {
         srcNodeToMuxMap[dataSrc1] = {std::make_pair(selNode, 1)};
       }
 
@@ -1148,6 +1257,8 @@ void AdjGraph::buildSrcMaps() {
 
       std::string controlSrcNode =
           graphBacktrack(selCBrNode->condPreNodeName, allDataBaseNode);
+      if (controlSrcNode.empty())
+        controlSrcNode = selCBrNode->condPreNodeName;
       condBrToConSrcMap[selNode] = controlSrcNode;
 
       // Updated the connected buffers as well
@@ -1176,6 +1287,10 @@ void AdjGraph::buildSrcMaps() {
           graphBacktrack(addrPreNode, allDataBaseNode);
       selStoreNode->dataInSrcNode =
           graphBacktrack(dataPreNode, allDataBaseNode);
+      if (selStoreNode->addressInSrcNode.empty())
+        selStoreNode->addressInSrcNode = addrPreNode;
+      if (selStoreNode->dataInSrcNode.empty())
+        selStoreNode->dataInSrcNode = dataPreNode;
       break;
     }
     }

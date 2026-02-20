@@ -10,6 +10,14 @@
 
 #include "experimental/Analysis/SwitchingEstimation/NodeModels.h"
 
+namespace {
+inline unsigned switchingFromSet(const IISet &set) {
+  if (set.none() || set.all())
+    return 0U;
+  return 2U;
+}
+} // namespace
+
 //===----------------------------------------------------------------------===//
 //
 // Buffer Node
@@ -27,11 +35,11 @@ BufferNode::BufferNode(mlir::Operation *op,
 void BufferNode::calValidSwitching(const std::string &sucNodeName,
                                    unsigned II) {
   if (setV.find(sucNodeName) != setV.end()) {
-    if (setV[sucNodeName].all()) {
-      setValid(this, sucNodeName, 0);
-    } else {
-      setValid(this, sucNodeName, 2);
-    }
+    const IISet &set = setV[sucNodeName];
+    // Buffer sets are explicitly constructed by the buffer model. An empty set
+    // means "always low" in steady state and should not generate edge toggles.
+    const unsigned sw = (set.none() || set.all()) ? 0U : 2U;
+    setValid(this, sucNodeName, sw);
   } else {
     llvm::errs() << "Warning: BufferNode::calValidSwitching - No valid set "
                     "found for successor node "
@@ -42,11 +50,9 @@ void BufferNode::calValidSwitching(const std::string &sucNodeName,
 void BufferNode::calReadySwitching(const std::string &preNodeName,
                                    unsigned II) {
   if (setR.find(preNodeName) != setR.end()) {
-    if (setR[preNodeName].all()) {
-      setReady(this, preNodeName, 0);
-    } else {
-      setReady(this, preNodeName, 2);
-    }
+    const IISet &set = setR[preNodeName];
+    const unsigned sw = (set.none() || set.all()) ? 0U : 2U;
+    setReady(this, preNodeName, sw);
   }
 }
 
@@ -99,7 +105,7 @@ void JoinNode::calValidSet(const std::string &sucNodeName,
                            unsigned &nodeStartTime, unsigned &II) {
   // Check if validSignal contains sucNodeName.
   if (validSignal.find(sucNodeName) != validSignal.end()) {
-    if (validSignal[sucNodeName] == 0 || II == 1) {
+    if (validSignal[sucNodeName] == 0) {
       setVSet(this, sucNodeName, fullSet(II));
     } else {
       setVSet(this, sucNodeName, singleton(nodeStartTime, II));
@@ -109,8 +115,10 @@ void JoinNode::calValidSet(const std::string &sucNodeName,
 
 void JoinNode::calReadySwitching(const std::string &preNodeName, int &numValid,
                                  int &numReady) {
-  // TODO: Verify the new update logic
-  unsigned val = (numValid == 0 && numReady == 0) ? 0 : 2;
+  // RTL `join_type`: each input ready is gated by both the other input-valid
+  // and the output ready. If either side is classed as inactive in steady
+  // state, input ready stays level-stable.
+  unsigned val = (numValid > 0 && numReady > 0) ? 2 : 0;
   setReady(this, preNodeName, val);
 }
 
@@ -136,6 +144,10 @@ void JoinNode::setReadySet(const std::string &preNodeName) {
     auto it = setV.begin();
     setR[preNodeName] = it->second;
   }
+
+  auto it = setR.find(preNodeName);
+  if (it != setR.end())
+    setReady(this, preNodeName, switchingFromSet(it->second));
 }
 
 //===----------------------------------------------------------------------===//
@@ -146,11 +158,9 @@ void JoinNode::setReadySet(const std::string &preNodeName) {
 
 void PassNode::calValidSwitching(const std::string &sucNodeName,
                                  int &numValid) {
-  if (numValid == 0) {
-    setValid(this, sucNodeName, 0);
-  } else if (numValid > 0) {
-    setValid(this, sucNodeName, 2);
-  }
+  // Treat unresolved predecessor activity as active to keep fixed-point
+  // propagation moving in cyclic MGs.
+  setValid(this, sucNodeName, numValid == 0 ? 0U : 2U);
 }
 
 void PassNode::calValidSet(const std::string &sucNodeName,
@@ -160,7 +170,7 @@ void PassNode::calValidSet(const std::string &sucNodeName,
       setV[sucNodeName] = IISet(II, true);
     } else {
       IISet tmp(II, false);
-      tmp.set(nodeStartTime);
+      tmp.set(normalizeCycleIndex(static_cast<int>(nodeStartTime), II));
       setV[sucNodeName] = std::move(tmp);
     }
   }

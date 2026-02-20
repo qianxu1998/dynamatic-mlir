@@ -22,6 +22,10 @@
 #include "dynamatic/Support/TimingModels.h"
 #include "llvm/ADT/DenseMap.h"
 
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+
 void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
                              bool debug) {
   // Get the corresponding graph
@@ -30,8 +34,6 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
   // Get needed information
   double_t selMgThroughput =
       switchInfo.staticinfo.cfdfcThroughput[std::stoi(selMG)];
-  // TODO: Validate the following rounding
-  float rawII = 1.0f / selMgThroughput;
   unsigned selMGII = selAdjGraph->cfdfcII;
   std::string baseNode = selAdjGraph->baseNode;
 
@@ -49,7 +51,9 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
   for (const auto &selBuffName : selAdjGraph->orderedNodeName) {
     if (contains(selBuffName, "buffer")) {
       if (debug) {
-        llvm::dbgs() << "[DEBUG] 	=============================================================\n";
+        llvm::dbgs() << "[DEBUG] 	"
+                        "======================================================"
+                        "=======\n";
         llvm::dbgs() << "[DEBUG] \t[" << selBuffName << "]\n";
       }
 
@@ -65,9 +69,10 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
           selLongestPath(switchInfo, selBuffName, selMG);
 
       if (debug) {
-        llvm::dbgs() << "[DEBUG] \t\tStarting node: " << tmpLongPath.selStartNode
+        llvm::dbgs() << "[DEBUG] \t\tStarting node: "
+                     << tmpLongPath.selStartNode << "\n";
+        llvm::dbgs() << "[DEBUG] \t\tPath Latency: " << tmpLongPath.maxLatency
                      << "\n";
-        llvm::dbgs() << "[DEBUG] \t\tPath Latency: " << tmpLongPath.maxLatency << "\n";
         llvm::dbgs() << "[DEBUG] \t\tPath Last second buffer: "
                      << tmpLongPath.lastSecondBuffer << "\n";
         llvm::dbgs()
@@ -80,31 +85,33 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
       // fin_start_point = (path_latency % sel_cfdfc_II)
       //                 + cfdfc_tim_start_nodes[cfdfcIndex][pathStartNode]
       //                 + cfdfc_tim_start_nodes[cfdfcIndex][baseNode]
-      unsigned pathLatencyMod = tmpLongPath.maxLatency % selMGII;
-      unsigned finStartPoint =
+      int pathLatencyMod = static_cast<int>(tmpLongPath.maxLatency % selMGII);
+      int finStartPoint =
           pathLatencyMod +
-          static_cast<unsigned>(
-              selAdjGraph->startBaseNodeShiftMap[tmpLongPath.selStartNode]) +
-          static_cast<unsigned>(selAdjGraph->startBaseNodeShiftMap[baseNode]);
+          selAdjGraph->startBaseNodeShiftMap[tmpLongPath.selStartNode] +
+          selAdjGraph->startBaseNodeShiftMap[baseNode];
+      unsigned finStartPointNorm = normalizeCycleIndex(finStartPoint, selMGII);
 
       if (debug) {
-        llvm::dbgs() << "[DEBUG] \t\tpathLatencyMod: " << pathLatencyMod << "\n";
-        llvm::dbgs() << "[DEBUG] \t\tD : " << finStartPoint
+        llvm::dbgs() << "[DEBUG] \t\tpathLatencyMod: " << pathLatencyMod
+                     << "\n";
+        llvm::dbgs() << "[DEBUG] \t\tD : " << finStartPointNorm
                      << " regarding the start of " << baseNode << "\n";
       }
 
-      selBuffNode->START = finStartPoint;
+      selBuffNode->START = finStartPointNorm;
 
       // [Step 2] Calculate SET_V
       float_t selBuffOcc = selBuffNode->occupancy;
       unsigned selBufSlots = selBuffNode->numSlots;
       bool selBuffTransparent = selBuffNode->transparent;
+      const auto buffType = selBuffNode->buffType;
 
       // Store occupancy of direct preceding buffer, if exist
       float_t tmpPreBuffOcc = 0;
       float_t tmpNumCycles = 0;
 
-      // Handle Transparent buffers
+      // Handle transparent (bypass-DV) buffers.
       if (selBuffTransparent) {
         if (tmpLongPath.lastSecondBuffer != "") {
           auto selLastSecondBuff = dyn_cast<BufferNode>(
@@ -112,11 +119,13 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
           tmpPreBuffOcc = selLastSecondBuff->occupancy;
         }
 
-        // Check whether the second last buffer is directly preceding the current buffer
+        // Check whether the second last buffer is directly preceding the
+        // current buffer
         if (std::find(selBuffNode->pres.begin(), selBuffNode->pres.end(),
-                      tmpLongPath.lastSecondBuffer) != selBuffNode->pres.end()) {
+                      tmpLongPath.lastSecondBuffer) !=
+            selBuffNode->pres.end()) {
           tmpPreBuffOcc = 0;
-          
+
           if (debug) {
             llvm::dbgs() << "[DEBUG] \t\tThe last opaque buffer "
                          << tmpLongPath.lastSecondBuffer
@@ -135,8 +144,11 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
       }
 
       IISet tmpBufferValidSet(selMGII, false);
+      const bool oneSlotBuffer = selBufSlots == 1;
       if (tmpNumCycles < 0.0f)
         tmpNumCycles = 0.0f;
+
+      // TODO: Need to add support for different types of buffers
       for (unsigned i = 0; i < getUnsigned(tmpNumCycles); ++i) {
         unsigned relativeActiveCycle =
             static_cast<unsigned>(finStartPoint + i) % selMGII;
@@ -160,7 +172,7 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
       // [Step 3] Calculate SET_R
       IISet tmpBufferReadySet(selMGII, false);
       IISet offsetSet(selMGII, false);
-      
+
       if (selBuffTransparent && (selBufSlots == 1) && (selBuffOcc == 0.0)) {
         // 1 slot with occ = 0, the corresponding buffer is always ready
         tmpBufferReadySet = IISet(selMGII, true);
@@ -175,7 +187,8 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
             selBuffNode->buffType == BufferType::FIFO_BREAK_DV) {
           //* Legacy Buffer Type: OEHB
           if (debug) {
-            llvm::dbgs() << "[DEBUG] \t\tBuffer Type: OEHB Or elastic_fifo_inner\n";
+            llvm::dbgs()
+                << "[DEBUG] \t\tBuffer Type: OEHB Or elastic_fifo_inner\n";
           }
 
           int tmpMissingCycles = static_cast<int>(
@@ -187,7 +200,7 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
                          << selBuffName << ", set to 0\n";
             tmpMissingCycles = 0;
           }
-              
+
           // Update the offset set
           for (int i = 0; i < tmpMissingCycles; i++) {
             unsigned relativeActiveCycle = (finStartPoint + i) % selMGII;
@@ -233,7 +246,7 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
           for (int i = 0; i < tmpMissingCycles; i++) {
             unsigned relativeActiveCycle =
                 (finStartPoint + i +
-                static_cast<unsigned>(tmpTransparentOffset)) %
+                 static_cast<unsigned>(tmpTransparentOffset)) %
                 selMGII;
             offsetSet.set(relativeActiveCycle);
           }
@@ -273,7 +286,8 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
       if (debug) {
         llvm::dbgs() << "[DEBUG] \t\tOccupancy: " << selBuffOcc << "\n";
         llvm::dbgs() << "[DEBUG] \t\tNum Slots: " << selBufSlots << "\n";
-        llvm::dbgs() << "[DEBUG] \t\tTransparent: " << selBuffTransparent << "\n";
+        llvm::dbgs() << "[DEBUG] \t\tTransparent: " << selBuffTransparent
+                     << "\n";
       }
 
       // Calculate switching
@@ -502,7 +516,9 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
 
   //! Testing
   if (debug) {
-    llvm::dbgs() << "[DEBUG] 	============================================================= \n";
+    llvm::dbgs()
+        << "[DEBUG] 	"
+           "============================================================= \n";
     llvm::dbgs() << "[DEBUG] 	CURRENT NODE: " << selNode << "\n";
     llvm::dbgs() << "[DEBUG] 	\tpValid List: ";
     for (int v : tmpPValidList)
@@ -572,7 +588,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
       llvm::dbgs() << "} ";
     }
     llvm::dbgs() << "\n";
-    llvm::dbgs() << "[DEBUG] 	Steady State Start Cycle: " << tmpNodeSSStart << "\n";
+    llvm::dbgs() << "[DEBUG] 	Steady State Start Cycle: " << tmpNodeSSStart
+                 << "\n";
   }
 
   // Early exit for nodes without successors
@@ -885,7 +902,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
                             tmpNReadySetDict, selMGII);
 
           //! Testing
-          llvm::dbgs() << "[DEBUG] 	Updating Value for Suc: " << selSuc << "\n";
+          llvm::dbgs() << "[DEBUG] 	Updating Value for Suc: " << selSuc
+                       << "\n";
         }
 
         // Ready Signal
@@ -1005,7 +1023,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // TODO: Calibrate the cond value with the simulation
         if (debug) {
           llvm::dbgs() << "[DEBUG] 	Node: " << selNode << "\n";
-          llvm::dbgs() << "[DEBUG] 	\tCond_input Port: " << condPortName << "\n";
+          llvm::dbgs() << "[DEBUG] 	\tCond_input Port: " << condPortName
+                       << "\n";
         }
 
         // Check whether the index exist or not
@@ -1037,7 +1056,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
 
         //! Testing
         if (debug) {
-          llvm::dbgs() << "[DEBUG] 	\tSelected Suc Node: " << selOutputPort << "\n";
+          llvm::dbgs() << "[DEBUG] 	\tSelected Suc Node: " << selOutputPort
+                       << "\n";
         }
 
         // Sometime we just have one output for cond_br
