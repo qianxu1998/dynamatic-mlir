@@ -120,7 +120,7 @@ segCtrlMergeGlitchSuccSearch(SwitchingInfo &switchInfo, std::string startNode,
                              StringRef segLabel);
 
 // This function builds the succlist for general nodes
-MgNodeInfo segGeneralSuccSearch(SwitchingInfo &switchInfo,
+SegmentSuccessorInfo segGeneralSuccSearch(SwitchingInfo &switchInfo,
                                 std::string startNode, StringRef segLabel);
 
 // This function finds the actual source of the specified start_node in the
@@ -151,10 +151,10 @@ std::string memAddrSrcSearch(SwitchingInfo &si, SCFProfilingResult &profile,
 
 //===----------------------------------------------------------------------===//
 //
-// Helper function for debuging
+// Helper functions for debug logging
 //
 //===----------------------------------------------------------------------===//
-void printDataBaseNodesTriple(DataBaseNodesTriple dbnt);
+void printSegmentDataSourceNodes(const SegmentDataSourceNodes &segmentNodes);
 
 // 1) Print the muxToSrcNodeMap
 // Format: {"mux_node_name" : {"control" : ctrlSrcName, "0" : srcName0, "1" :

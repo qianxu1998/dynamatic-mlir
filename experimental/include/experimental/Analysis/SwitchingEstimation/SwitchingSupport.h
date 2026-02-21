@@ -46,20 +46,21 @@ class AdjGraph;
 class Path;
 class DataBase;
 
-// Struct used to store all the data source nodes in differernt segments in the
-// dfg We have this kind of definiton as we obtain the profiling results from
-// scf level If we have handshake level simulator one day, we can get rid of the
-// entire data channel estimation process.
-struct DataBaseNodesTriple {
+// Per-segment partition of source nodes used by data-channel propagation.
+// Example:
+//   all     = {"addi_0", "mux_1", "control_merge_0"}
+//   control = {"mux_1", "control_merge_0"}
+//   data    = {"addi_0"}
+struct SegmentDataSourceNodes {
   std::vector<std::string> all;
   std::vector<std::string> control;
   std::vector<std::string> data;
 };
 
 // Struct storing the list of mux and control merge nodes in each seg
-struct muxCMNodesList {
-  std::vector<std::string> muxNodeList;
-  std::vector<std::string> cmNodeList;
+struct SegmentControlNodes {
+  std::vector<std::string> muxNodes;
+  std::vector<std::string> controlMergeNodes;
 };
 
 struct NodeGlitchInfo {
@@ -105,40 +106,39 @@ struct StaticInfo {
   llvm::DenseMap<unsigned, double_t> cfdfcThroughput;
 };
 
-// helper struct to store relevant info for data channel pass
+// Runtime storage for the data-channel estimation pipeline.
 struct DataInfo {
-  // Map from segment index to dataBaseNode struct
-  StringMap<DataBaseNodesTriple> segToDataBaseVec;
+  // Segment label -> data/control source-node buckets.
+  StringMap<SegmentDataSourceNodes> segmentToDataSourceNodes;
 
+  // Segment label -> node name -> glitch descriptors.
   StringMap<std::map<std::string, std::vector<NodeGlitchInfo>>> glitches;
-  // Map from seg label to ordered ALU nodes
-  StringMap<std::vector<std::string>> segToOrderedALUNodes;
-  // Map from seg label to ordered mux and control merge node list
-  StringMap<muxCMNodesList> controlNodes;
-  // Map stroing the first iteration index that the seg is executed
-  StringMap<unsigned> firstExecutedIter;
-  // Map from node name to DataBase class
-  StringMap<std::shared_ptr<DataBase>> dfgBaseNodeValue;
-  // Map from pair of BB sequence to the corresponding control_merge output
-  // Format: {(preBB, curBB) : [(control_merge_node, output_value)]}
+  // Segment label -> topologically ordered ALU nodes.
+  StringMap<std::vector<std::string>> segmentToOrderedAluNodes;
+  // Segment label -> mux/control_merge node lists.
+  StringMap<SegmentControlNodes> segmentControlNodes;
+  // Segment label -> first execution index in the profiling trace.
+  StringMap<unsigned> segmentToFirstExecutionIter;
+  // Node name -> persistent propagation state.
+  StringMap<std::shared_ptr<DataBase>> nodeToDataState;
+  // (preBB, curBB) -> [(control_merge_node, selected_input_port)].
   std::map<std::pair<unsigned, unsigned>,
            std::vector<std::pair<std::string, int>>>
-      bbPairToCtrlMerge;
-  // Map from seg label to ordered Data base nodes
-  StringMap<std::vector<std::string>> segToOrderedDataBaseNodes;
-  // Mux Nodes topologically ordered
+      bbPairToControlMergeOutputs;
+  // Segment label -> topologically ordered data-source nodes.
+  StringMap<std::vector<std::string>> segmentToOrderedDataSourceNodes;
+  // Global topological order over mux nodes.
   std::vector<std::string> orderedMuxNodes;
-  // Full execution segment trace from profiling (indexed by global iteration).
-  std::vector<std::string> executedSegTrace;
-  // Map from segment label to the list of global iteration indices where the
-  // segment executes in the profiling trace.
-  StringMap<std::vector<unsigned>> segExecutionIndices;
+  // Full execution-segment trace indexed by global iteration.
+  std::vector<std::string> executedSegmentTrace;
+  // Segment label -> all global iteration indices where that segment executes.
+  StringMap<std::vector<unsigned>> segmentToExecutionIndices;
 };
 
 struct SwitchingInfo {
   //  Variables for static information about the dataflow circuit
-  StaticInfo staticinfo;
-  DataInfo data;
+  StaticInfo staticInfo;
+  DataInfo dataInfo;
   //  HandshakeInfo hs; not sure wherher to put it
   // This function insert (backedge pair, mgLabel) to the backEdgeToCFDFC
   void insertBE(unsigned srcBB, unsigned dstBB, StringRef mgLabel);
@@ -180,25 +180,25 @@ static const std::unordered_set<std::string> JOIN_NODE = {
 
 //===----------------------------------------------------------------------===//
 //
-// Class for storing data channel values
+// Class for storing data-channel values
 //
 //===----------------------------------------------------------------------===//
 // A small sruct for storing a single "(value, iterIndex)" pair
-struct ValueIter {
+struct IterationValue {
   int value;
   unsigned iterIndex;
 };
 
-// Struct storing the list of nodes used for data value updates
-struct MgNodeInfo {
-  // "original" => vector of strings
+// Per-segment successor metadata used by propagation and glitch handling.
+struct SegmentSuccessorInfo {
+  // Successors reached on the original (non-glitch) value path.
   std::vector<std::string> original;
-  // "glitch" => vector of strings
+  // Successors reached by glitch propagation.
   std::vector<std::string> glitch;
-  // Following two vectors are specific for control_merge nodes
+  // The following two vectors are specific to control_merge handling.
   std::vector<std::string> control;
   std::vector<std::string> data;
-  // "datawidth" => map from string to unsigned
+  // Successor node -> effective propagated data width.
   std::map<std::string, unsigned> dataWidthMap;
 };
 
@@ -211,7 +211,7 @@ struct LongestPathResult {
   std::string lastSecondBuffer;
 };
 
-// Class used to store information for the finished node that's needed for data
+// Class used to store information for finished nodes needed for data
 // propagation The instances of this class shall be stored globally, as this
 // will be used for the update of all segments
 class DataBase {
@@ -230,16 +230,16 @@ public:
 
   // Key: iteration_index -> single (value, iteration) pair
   // TODO: remove the redudant index information
-  std::map<unsigned, ValueIter> originalDataOut;
+  std::map<unsigned, IterationValue> originalDataOut;
 
   // Map from iter_index to value Vec with glitch values
-  std::map<unsigned, std::vector<int>> oriGlitchDataOut;
+  std::map<unsigned, std::vector<int>> glitchDataOutByIter;
 
   // Map from segindex to succeeding node storing structure
-  std::map<std::string, MgNodeInfo> segSucNodeMap;
+  std::map<std::string, SegmentSuccessorInfo> segmentSuccessorInfoMap;
 
   // For control merge node, we need to store the controlDataOut info as well
-  std::map<unsigned, ValueIter> controlDataOut;
+  std::map<unsigned, IterationValue> controlDataOut;
 
   // Support LLVM node casting
   enum class NodeKind { DataBaseKind, CMergeDataKind };
@@ -281,17 +281,17 @@ public:
   //
   //  Internal Storing Variables
   //
-  // ControlMerge node has one more data out port: control dataout
-  std::map<unsigned, ValueIter> controlDataOut;
+  // ControlMerge has one extra output channel: control dataout.
+  std::map<unsigned, IterationValue> controlDataOut;
 
   // Per CFDFC storing structure
   // Format:
   // {"mg_label": {"control": control_dataout_node_list; "data":
   // data_channel_node_list}}
-  std::map<std::string, MgNodeInfo> mgSucNodeDict;
+  std::map<std::string, SegmentSuccessorInfo> cmergeSegmentSuccessorInfoMap;
 
   // Vector to store the control glitch value
-  std::vector<int> controlGlitchVec;
+  std::vector<int> controlGlitchValues;
 };
 
 //===----------------------------------------------------------------------===//
@@ -336,7 +336,7 @@ std::string removeDigits(const std::string &inStr);
 unsigned getUnsigned(float_t inputValue);
 
 // This function prints the node succ list info
-void printMgNodeInfo(const MgNodeInfo &info);
+void printSegmentSuccessorInfo(const SegmentSuccessorInfo &info);
 
 // Function to print a vector of strings (mainStack)
 void printMainStack(const std::vector<std::string> &mainStack);

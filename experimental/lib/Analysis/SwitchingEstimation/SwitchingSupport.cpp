@@ -38,19 +38,19 @@ using namespace dynamatic::buffer;
 // Function definition for SwitchingInfo
 void SwitchingInfo::insertBE(unsigned srcBB, unsigned dstBB,
                              StringRef mgLabel) {
-  std::pair<unsigned, unsigned> BBPair = {srcBB, dstBB};
+  std::pair<unsigned, unsigned> backedgePair = {srcBB, dstBB};
 
   // Update the seg label to Backedge pair list
-  segToBackedgePairMap[mgLabel.str()] = BBPair;
+  segToBackedgePairMap[mgLabel.str()] = backedgePair;
 
   // Check the existence of the backedge pair
-  if (contains(staticinfo.backEdgeToCFDFC, BBPair)) {
-    staticinfo.backEdgeToCFDFC[BBPair].push_back(
+  if (contains(staticInfo.backEdgeToCFDFC, backedgePair)) {
+    staticInfo.backEdgeToCFDFC[backedgePair].push_back(
         static_cast<unsigned>(std::stoul(mgLabel.str())));
   } else {
     std::vector<unsigned> tmpVector{
         static_cast<unsigned>(std::stoul(mgLabel.str()))};
-    staticinfo.backEdgeToCFDFC[std::make_pair(srcBB, dstBB)] = tmpVector;
+    staticInfo.backEdgeToCFDFC[std::make_pair(srcBB, dstBB)] = tmpVector;
   }
 }
 

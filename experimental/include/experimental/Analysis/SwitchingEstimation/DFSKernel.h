@@ -132,7 +132,7 @@ inline bool searchInSuccessorLists(SwitchingInfo &si,
                                    bool useSubstring = false) {
   if (contains(nodeName, mappedNode))
     return true;
-  auto &m = si.data.dfgBaseNodeValue[mappedNode]->segSucNodeMap[segment];
+  auto &m = si.dataInfo.nodeToDataState[mappedNode]->segmentSuccessorInfoMap[segment];
   auto matches = [&](auto const &lst) {
     return std::any_of(lst.begin(), lst.end(), [&](auto const &s) {
       return useSubstring ? s.find(nodeName) != std::string::npos
@@ -146,7 +146,7 @@ inline bool searchInSuccessorLists(SwitchingInfo &si,
 // Check if a node is a DataBase node
 inline bool isDataBase(const SwitchingInfo &SwitchInfo,
                        const std::string &node) {
-  return contains(SwitchInfo.staticinfo.dataflowGraph->allDataBaseNode, node);
+  return contains(SwitchInfo.staticInfo.dataflowGraph->allDataBaseNode, node);
 }
 
 // SKip conditional branch nodes' data port during DFS
@@ -157,7 +157,7 @@ inline bool skipCondBrPort(const SwitchingInfo &si, const std::string &prev,
     return false;
 
   auto *cbr =
-      llvm::dyn_cast<CBrNode>(si.staticinfo.dataflowGraph->nodes[cur].get());
+      llvm::dyn_cast<CBrNode>(si.staticInfo.dataflowGraph->nodes[cur].get());
   if (!cbr)
     return false;
 
@@ -173,13 +173,13 @@ inline bool crossesCondPort(const SwitchingInfo &SwitchInfo,
   // cond_br control port?
   if (contains(cur, "cond_br")) {
     auto *cbr = llvm::dyn_cast<CBrNode>(
-        SwitchInfo.staticinfo.dataflowGraph->nodes[cur].get());
+        SwitchInfo.staticInfo.dataflowGraph->nodes[cur].get());
     return cbr && prev == cbr->condPreNodeName;
   }
   // mux control port?
   if (contains(cur, "mux")) {
     auto *mux = llvm::dyn_cast<MuxNode>(
-        SwitchInfo.staticinfo.dataflowGraph->nodes[cur].get());
+        SwitchInfo.staticInfo.dataflowGraph->nodes[cur].get());
     return mux && prev == mux->conPreNodeName;
   }
   return false;
@@ -192,7 +192,7 @@ inline bool skipMuxPort(const SwitchingInfo &si, const std::string &prev,
     return false;
 
   auto *mux =
-      llvm::dyn_cast<MuxNode>(si.staticinfo.dataflowGraph->nodes[cur].get());
+      llvm::dyn_cast<MuxNode>(si.staticInfo.dataflowGraph->nodes[cur].get());
   if (!mux)
     return false;
 
@@ -210,7 +210,7 @@ inline bool bufferOutsideSeg(const SwitchingInfo &SwitchInfo,
                              llvm::ArrayRef<unsigned> segBBs) {
   if (!(contains(n, "buffer")))
     return false;
-  unsigned bb = SwitchInfo.staticinfo.dataflowGraph->nodes[n]->bbindex;
+  unsigned bb = SwitchInfo.staticInfo.dataflowGraph->nodes[n]->bbindex;
   return !llvm::is_contained(segBBs, bb);
 }
 // check if it's invalid backge, return true

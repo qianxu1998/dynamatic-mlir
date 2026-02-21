@@ -29,11 +29,11 @@
 void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
                              bool debug) {
   // Get the corresponding graph
-  auto selAdjGraph = switchInfo.staticinfo.segToGraph[selMG];
+  auto selAdjGraph = switchInfo.staticInfo.segToGraph[selMG];
 
   // Get needed information
   double_t selMgThroughput =
-      switchInfo.staticinfo.cfdfcThroughput[std::stoi(selMG)];
+      switchInfo.staticInfo.cfdfcThroughput[std::stoi(selMG)];
   unsigned selMGII = selAdjGraph->cfdfcII;
   std::string baseNode = selAdjGraph->baseNode;
 
@@ -309,9 +309,9 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
 void mgHandshakeSwitchingCounting(SwitchingInfo &switchInfo, std::string selMG,
                                   bool debug) {
   // Get the corresponding graph
-  auto selAdjGraph = switchInfo.staticinfo.segToGraph[selMG];
+  auto selAdjGraph = switchInfo.staticInfo.segToGraph[selMG];
   double_t selMgThroughput =
-      switchInfo.staticinfo.cfdfcThroughput[std::stoi(selMG)];
+      switchInfo.staticInfo.cfdfcThroughput[std::stoi(selMG)];
 
   unsigned selMGII = selAdjGraph->cfdfcII;
 
@@ -442,7 +442,7 @@ void mgHandshakeSwitchingCounting(SwitchingInfo &switchInfo, std::string selMG,
 void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
                          std::string &selMG, unsigned selMGII, bool debug) {
   // Get the corresponding storing structure
-  auto selAdjGraph = switchInfo.staticinfo.segToGraph[selMG];
+  auto selAdjGraph = switchInfo.staticInfo.segToGraph[selMG];
   auto selNodeStoringDict = selAdjGraph->nodes;
 
   // Get all needed information if available
@@ -1029,14 +1029,14 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
 
         // Check whether the index exist or not
         int condValue = 0;
-        if (switchInfo.staticinfo.dataflowGraph->nodes[condPortName]
+        if (switchInfo.staticInfo.dataflowGraph->nodes[condPortName]
                 ->dataOut[selNode]
-                .size() > switchInfo.data.firstExecutedIter[selMG]) {
+                .size() > switchInfo.dataInfo.segmentToFirstExecutionIter[selMG]) {
           condValue =
-              switchInfo.staticinfo.dataflowGraph->nodes[condPortName]
-                  ->dataOut[selNode][switchInfo.data.firstExecutedIter[selMG]];
+              switchInfo.staticInfo.dataflowGraph->nodes[condPortName]
+                  ->dataOut[selNode][switchInfo.dataInfo.segmentToFirstExecutionIter[selMG]];
         } else {
-          condValue = switchInfo.staticinfo.dataflowGraph->nodes[condPortName]
+          condValue = switchInfo.staticInfo.dataflowGraph->nodes[condPortName]
                           ->dataOut[selNode][0];
         }
 
@@ -1259,7 +1259,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
 std::vector<std::string>
 getLoadsInfluencedByBuffers(SwitchingInfo &switchInfo, std::string selMG,
                             std::vector<std::string> bufferList) {
-  auto selAdjGraph = switchInfo.staticinfo.segToGraph[selMG];
+  auto selAdjGraph = switchInfo.staticInfo.segToGraph[selMG];
 
   //
   std::vector<std::string> transBufferList;
@@ -1365,7 +1365,7 @@ std::vector<std::string>
 breakHandshakeUpdateDeadlock(SwitchingInfo &switchInfo,
                              const std::vector<std::string> &pendingNodeList,
                              std::string selMG, unsigned selMGII) {
-  auto selAdjGraph = switchInfo.staticinfo.segToGraph[selMG];
+  auto selAdjGraph = switchInfo.staticInfo.segToGraph[selMG];
 
   // Get all join type nodes in the pending list
   std::vector<std::string> selNodeList;
@@ -1435,7 +1435,7 @@ int mgGetNodeStartingPoint(SwitchingInfo &switchInfo, std::string &selNode,
                            std::string &selMG) {
   // MG Info
   // Get the corresponding graph
-  auto selAdjGraph = switchInfo.staticinfo.segToGraph[selMG];
+  auto selAdjGraph = switchInfo.staticInfo.segToGraph[selMG];
   unsigned selMGII = selAdjGraph->cfdfcII;
   std::string baseNode = selAdjGraph->baseNode;
 

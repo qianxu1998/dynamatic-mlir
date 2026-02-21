@@ -58,36 +58,28 @@ public:
   // This function constructs the overall segment execution counts
   void constructSegExeCount();
 
-  //
-  //  Global Storing Structure for analyzing the profiling results
-  //
-  std::vector<unsigned>
-      executedBBTrace; // Vector used to store the execution trace of BB labels
-  std::vector<unsigned> iterEndIndex; // Vector storing the ending edge index on
-                                      // the boundary of different segments
-  std::vector<std::string>
-      executedSegTrace; // Vector used to store the execution trace consists of
-                        // segment labels
-  std::map<unsigned, unsigned>
-      bbToIterMap; // Map from the index of a BB in the executedBBTrace to the
-                   // corresponding Iteration index
+  // Global storage extracted from one unified profiling trace.
+  std::vector<unsigned> executedBasicBlockTrace;
+  std::vector<unsigned> segmentEndEdgeIndices;
+  std::vector<std::string> executedSegmentTrace;
+  // Edge index in `executedBasicBlockTrace` -> segment iteration index.
+  std::map<unsigned, unsigned> edgeIndexToIterationMap;
+  // Execution phase index -> (segment label, number of consecutive executions).
+  // Example: 5 -> ("2", 3) means phase #5 executed segment "2" three times.
   std::map<unsigned, std::pair<std::string, unsigned>>
-      execPhaseToSegExecNumMap; // Map from execution stage to (segLabel,
-                                // numExec) pair
-  std::map<std::string, std::vector<std::pair<int, unsigned>>>
-      opNameToValueListMap; // Map from Hndshake level opName to the list of
-                            // value in the data profiling process, format:
-                            // (value, iterIdx)
+      executionPhaseToSegmentExecCount;
+  // Handshake node name -> [(value, iteration index), ...].
+  std::map<std::string, std::vector<std::pair<int, unsigned>>> nodeToValueTrace;
 
   // Map from SCF level op name to Handshake level op name
   std::map<std::string, std::string> scfToHandshakeNameMap;
 
   // Map from the segment label to the first iteration that the segment starts
   // execution
-  std::map<std::string, unsigned> segToStartIterIndexMap;
+  std::map<std::string, unsigned> segmentToFirstIteration;
 
-  // Vector of arguments names
-  std::vector<std::string> argNamesVec;
+  // List of traced argument names in the order they appear in the log.
+  std::vector<std::string> argumentNames;
 };
 
 //===----------------------------------------------------------------------===//
