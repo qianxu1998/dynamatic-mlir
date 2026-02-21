@@ -201,146 +201,146 @@ void AdjNode::totalDataSwitchingCounting(bool mapped) {
 
 // Define all printing functions to facilitate debugging
 void AdjNode::printNodeDetails() {
-  LLVM_DEBUG(
+  
       llvm::dbgs()
       << "[DEBUG] "
-         "\t=============================================================\n");
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t[Node Info Start]\n");
+         "\t=============================================================\n";
+  llvm::dbgs() << "[DEBUG] \t[Node Info Start]\n";
 
   //
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tLatency: " << nodeLatency << ";\n");
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tPredecessors: [");
+  llvm::dbgs() << "[DEBUG] \t\tLatency: " << nodeLatency << ";\n";
+  llvm::dbgs() << "[DEBUG] \t\tPredecessors: [";
   for (const auto &p : pres) {
-    LLVM_DEBUG(llvm::dbgs() << p << " ");
+    llvm::dbgs() << p << " ";
   }
-  LLVM_DEBUG(llvm::dbgs() << "]\n[DEBUG] \t\tSuccessors: [");
+  llvm::dbgs() << "]\n[DEBUG] \t\tSuccessors: [";
   for (const auto &s : sucs) {
-    LLVM_DEBUG(llvm::dbgs() << s << " ");
+    llvm::dbgs() << s << " ";
   }
-  LLVM_DEBUG(llvm::dbgs() << "]\n");
+  llvm::dbgs() << "]\n";
 
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tSuccessor Channel DataWidth: \n");
+  llvm::dbgs() << "[DEBUG] \t\tSuccessor Channel DataWidth: \n";
   for (const auto &[s, width] : sucsDataWidthMap) {
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s
-                            << ", Data_width: " << width << "\n");
+    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s
+                            << ", Data_width: " << width << "\n";
   }
 
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tSuccessor Channel Data Value\n");
+  llvm::dbgs() << "[DEBUG] \t\tSuccessor Channel Data Value\n";
   for (const auto &[s, valueVec] : dataOut) {
-    LLVM_DEBUG(llvm::dbgs()
-               << "[DEBUG] \t\t\tNode: " << s << ", Output Value Vector: \n");
+    llvm::dbgs()
+               << "[DEBUG] \t\t\tNode: " << s << ", Output Value Vector: \n";
     int counter = 0;
     for (const auto &val : valueVec) {
-      LLVM_DEBUG(llvm::dbgs() << "[" << counter++ << "] : " << val << "; ");
+      llvm::dbgs() << "[" << counter++ << "] : " << val << "; ";
     }
-    LLVM_DEBUG(llvm::dbgs() << "\n");
+    llvm::dbgs() << "\n";
   }
 
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tValid Channel Switching: \n");
+  llvm::dbgs() << "[DEBUG] \t\tValid Channel Switching: \n";
   for (const auto &[s, numSwitches] : validSignal) {
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s
-                            << ", Data_width: " << numSwitches << "\n");
+    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s
+                            << ", Data_width: " << numSwitches << "\n";
   }
 
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tReady Channel Switching: \n");
+  llvm::dbgs() << "[DEBUG] \t\tReady Channel Switching: \n";
   for (const auto &[s, numSwitches] : readySignal) {
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s
-                            << ", Data_width: " << numSwitches << "\n");
+    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s
+                            << ", Data_width: " << numSwitches << "\n";
   }
 
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tValid Active Range: \n");
+  llvm::dbgs() << "[DEBUG] \t\tValid Active Range: \n";
   for (const auto &[s, valueVec] : setV) {
-    LLVM_DEBUG(llvm::dbgs()
-               << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [");
+    llvm::dbgs()
+               << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [";
     for (unsigned i = 0, e = valueVec.size(); i < e; ++i)
-      LLVM_DEBUG(llvm::dbgs() << (valueVec.test(i) ? 1 : 0) << " ");
-    LLVM_DEBUG(llvm::dbgs() << "]\n");
+      llvm::dbgs() << (valueVec.test(i) ? 1 : 0) << " ";
+    llvm::dbgs() << "]\n";
   }
 
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tReady Active Range: \n");
+  llvm::dbgs() << "[DEBUG] \t\tReady Active Range: \n";
   for (const auto &[s, valueVec] : setR) {
-    LLVM_DEBUG(llvm::dbgs()
-               << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [");
+    llvm::dbgs()
+               << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [";
     for (unsigned i = 0, e = valueVec.size(); i < e; ++i)
-      LLVM_DEBUG(llvm::dbgs() << (valueVec.test(i) ? 1 : 0) << " ");
-    LLVM_DEBUG(llvm::dbgs() << "]\n");
+      llvm::dbgs() << (valueVec.test(i) ? 1 : 0) << " ";
+    llvm::dbgs() << "]\n";
   }
 }
 
 void AdjNode::printHandshakeSwitching() {
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tTotal Valid Switching Number: "
-                          << totalValidSwitching << "\n");
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tTotal Ready Switching Number: "
-                          << totalReadySwitching << "\n");
+  llvm::dbgs() << "[DEBUG] \t\tTotal Valid Switching Number: "
+                          << totalValidSwitching << "\n";
+  llvm::dbgs() << "[DEBUG] \t\tTotal Ready Switching Number: "
+                          << totalReadySwitching << "\n";
 
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tValid Channel Switching: \n");
+  llvm::dbgs() << "[DEBUG] \t\tValid Channel Switching: \n";
   for (const auto &[s, numSwitches] : validSignal) {
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s
-                            << ", Data_width: " << numSwitches << "\n");
+    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s
+                            << ", Data_width: " << numSwitches << "\n";
   }
 
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tReady Channel Switching: \n");
+  llvm::dbgs() << "[DEBUG] \t\tReady Channel Switching: \n";
   for (const auto &[s, numSwitches] : readySignal) {
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s
-                            << ", Data_width: " << numSwitches << "\n");
+    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s
+                            << ", Data_width: " << numSwitches << "\n";
   }
 
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tValid Active Range: \n");
+  llvm::dbgs() << "[DEBUG] \t\tValid Active Range: \n";
   for (const auto &[s, valueVec] : setV) {
-    LLVM_DEBUG(llvm::dbgs()
-               << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [");
+    llvm::dbgs()
+               << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [";
     for (unsigned i = 0, e = valueVec.size(); i < e; ++i)
-      LLVM_DEBUG(llvm::dbgs() << (valueVec.test(i) ? 1 : 0) << " ");
-    LLVM_DEBUG(llvm::dbgs() << "]\n");
+      llvm::dbgs() << (valueVec.test(i) ? 1 : 0) << " ";
+    llvm::dbgs() << "]\n";
   }
 
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tReady Active Range: \n");
+  llvm::dbgs() << "[DEBUG] \t\tReady Active Range: \n";
   for (const auto &[s, valueVec] : setR) {
-    LLVM_DEBUG(llvm::dbgs()
-               << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [");
+    llvm::dbgs()
+               << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [";
     for (unsigned i = 0, e = valueVec.size(); i < e; ++i)
-      LLVM_DEBUG(llvm::dbgs() << (valueVec.test(i) ? 1 : 0) << " ");
-    LLVM_DEBUG(llvm::dbgs() << "]\n");
+      llvm::dbgs() << (valueVec.test(i) ? 1 : 0) << " ";
+    llvm::dbgs() << "]\n";
   }
 }
 
 void AdjNode::printDataChannelSwitching() {
-  LLVM_DEBUG(
+  
       llvm::dbgs() << "[DEBUG] \t\tTotal Number of Data Channel Switches: "
-                   << totalDataSwitching << "\n");
+                   << totalDataSwitching << "\n";
 
   // Print per channel data switches
   for (const auto &[suc, value] : dataSwitches) {
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\t\tChannel: " << suc
-                            << ", Num Switches: " << value << "\n");
+    llvm::dbgs() << "[DEBUG] \t\t\tChannel: " << suc
+                            << ", Num Switches: " << value << "\n";
   }
 }
 
 void AdjNode::printPerDataChannelPerBitToggleNumber() {
-  LLVM_DEBUG(
-      llvm::dbgs() << "[DEBUG] \t\tPer Data Channel Per Bit Toggle Number: \n");
+  
+      llvm::dbgs() << "[DEBUG] \t\tPer Data Channel Per Bit Toggle Number: \n";
 
   for (const auto &[suc, valueVec] : perChannelToggle) {
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\t Node: " << suc << "\n");
+    llvm::dbgs() << "[DEBUG] \t\t Node: " << suc << "\n";
 
     for (const auto &[selBit, value] : valueVec) {
-      LLVM_DEBUG(llvm::dbgs()
-                 << "[DEBUG] \t\t\tBit " << selBit << ": " << value << "\n");
+      llvm::dbgs()
+                 << "[DEBUG] \t\t\tBit " << selBit << ": " << value << "\n";
     }
   }
 }
 
 void AdjNode::printPerHandshakeChannelToggleNumber() {
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\t[VALID CHANNEL]\n");
+  llvm::dbgs() << "[DEBUG] \t\t[VALID CHANNEL]\n";
   for (const auto &[suc, validSwitch] : validSignal) {
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\t\tNode: " << suc
-                            << ", Valid Switching: " << validSwitch << "\n");
+    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << suc
+                            << ", Valid Switching: " << validSwitch << "\n";
   }
 
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\t[READY CHANNEL]\n");
+  llvm::dbgs() << "[DEBUG] \t\t[READY CHANNEL]\n";
   for (const auto &[pre, readySwitching] : readySignal) {
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\t\tNode: " << pre
-                            << ", Ready Switching: " << readySwitching << "\n");
+    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << pre
+                            << ", Ready Switching: " << readySwitching << "\n";
   }
 }
 
@@ -419,23 +419,23 @@ AdjGraph::AdjGraph(CFDFC *cfdfc, const TimingDatabase &timingDB,
     auto nodeBBIndexAttr = selNode->getAttrOfType<IntegerAttr>("handshake.bb");
     unsigned nodeBBIndex = 0;
     if (!nodeBBIndexAttr) {
-      LLVM_DEBUG(llvm::dbgs()
+      llvm::dbgs()
                  << "[WARNING] \t[AdjGraph] Cannot find the BB index for node: "
-                 << unitName << "\n");
+                 << unitName << "\n";
     } else {
       nodeBBIndex = nodeBBIndexAttr.getUInt();
     }
 
     //! Testing
-    // LLVM_DEBUG(
+    // 
     //     llvm::dbgs()
     //     << "[DEBUG] "
-    //        "\t=============================================================\n");
-    // LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n");
-    // LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tNode Latency From DataBase: "
-    //                         << nodeLatency << "\n");
-    // LLVM_DEBUG(llvm::dbgs()
-    //            << "[DEBUG] \tNode BB Index: " << nodeBBIndex << "\n");
+    //        "\t=============================================================\n";
+    // llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n";
+    // llvm::dbgs() << "[DEBUG] \tNode Latency From DataBase: "
+    //                         << nodeLatency << "\n";
+    // llvm::dbgs()
+    //            << "[DEBUG] \tNode BB Index: " << nodeBBIndex << "\n";
 
     // Step 2.1: Construct the node storing structure
     auto newNode = createNodeFromOperation(selNode, nodeToPresMap[unitName],
@@ -475,11 +475,11 @@ AdjGraph::AdjGraph(
     orderedNodeName.push_back(unitName);
 
     //! Testing
-    // LLVM_DEBUG(
+    // 
     //     llvm::dbgs()
     //     << "[DEBUG] "
-    //        "\t=============================================================\n");
-    // LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n");
+    //        "\t=============================================================\n";
+    // llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n";
 
     std::vector<std::string> pres;
     std::vector<std::string> sucs;
@@ -551,8 +551,8 @@ AdjGraph::AdjGraph(
     if (!nodeBBIndexAttr) {
       // For now we just print a warning message and keep a large number for the
       // bbIndex
-      LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tCan't get the BB index of the op: "
-                              << unitName << "\n");
+      llvm::dbgs() << "[DEBUG] \tCan't get the BB index of the op: "
+                              << unitName << "\n";
     } else {
       nodeBBIndex = nodeBBIndexAttr.getUInt();
     }

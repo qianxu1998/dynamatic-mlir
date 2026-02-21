@@ -34,8 +34,8 @@ namespace {
 int getDataOutValueAtOrBefore(const std::shared_ptr<DataBase> &nodeData,
                               unsigned iter, int fallback = 0) {
   if (!nodeData) {
-    LLVM_DEBUG(llvm::dbgs() << "[WARNING] Node data is null, return fallback "
-                            << fallback << "\n");
+    llvm::dbgs() << "[WARNING] Node data is null, return fallback "
+                            << fallback << "\n";
     return fallback;
   }
 
@@ -508,12 +508,12 @@ void buildSegmentSuccNodesList(SwitchingInfo &switchInfo,
                                SCFProfilingResult &profileResults) {
   //! Testing
   for (const auto &[label, bblist] : switchInfo.staticinfo.segToBBs) {
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tSeg Label: " << label << "\n");
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\t\tBB List: ");
+    llvm::dbgs() << "[DEBUG] \t\tSeg Label: " << label << "\n";
+    llvm::dbgs() << "[DEBUG] \t\t\tBB List: ";
     for (const auto &selBB : bblist) {
-      LLVM_DEBUG(llvm::dbgs() << selBB << ", ");
+      llvm::dbgs() << selBB << ", ";
     }
-    LLVM_DEBUG(llvm::dbgs() << "\n");
+    llvm::dbgs() << "\n";
   }
 
   for (const auto &selBaseNode :
@@ -587,10 +587,10 @@ void dataGlitchNodeSearch(SwitchingInfo &switchInfo,
     auto &orderedALUs = switchInfo.data.segToOrderedALUNodes[label];
 
     //! Testing
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tCFDFC Label: " << label << "\n");
-    LLVM_DEBUG(llvm::dbgs()
-               << "[DEBUG] \t\tCFDFC Base Node: " << mgBaseNode << "\n");
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tCFDFC II: " << mgII << "\n");
+    llvm::dbgs() << "[DEBUG] \tCFDFC Label: " << label << "\n";
+    llvm::dbgs()
+               << "[DEBUG] \t\tCFDFC Base Node: " << mgBaseNode << "\n";
+    llvm::dbgs() << "[DEBUG] \t\tCFDFC II: " << mgII << "\n";
 
     //
     std::map<std::string, std::vector<NodeGlitchInfo>> tmpGlitchDict;
@@ -598,7 +598,7 @@ void dataGlitchNodeSearch(SwitchingInfo &switchInfo,
 
     // Iterate over all mapped nodes in the CFDFC
     for (const auto &selNode : orderedALUs) {
-      LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tALU Node: " << selNode << "\n");
+      llvm::dbgs() << "[DEBUG] \t\tALU Node: " << selNode << "\n";
 
       const std::string nodeType = getNodeType(selNode);
       if (GLITCH_NODE.find(nodeType) == GLITCH_NODE.end())
@@ -808,8 +808,8 @@ static std::string peelBufferChain(const SwitchingInfo &SI, std::string node) {
 void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
                               SCFProfilingResult &profileResults, bool debug) {
   if (debug) {
-    LLVM_DEBUG(llvm::dbgs()
-               << "[DEBUG]\n[DEBUG] \t\t[NODE GLITCHING VALUE CALCULATION]\n");
+    llvm::dbgs()
+               << "[DEBUG]\n[DEBUG] \t\t[NODE GLITCHING VALUE CALCULATION]\n";
   }
 
   //
@@ -823,8 +823,8 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
     bool glitchUpdateFlag = false;
 
     if (debug) {
-      LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t******** Iter: " << i
-                              << ", Seg: " << executedSeg << "\n");
+      llvm::dbgs() << "[DEBUG] \t******** Iter: " << i
+                              << ", Seg: " << executedSeg << "\n";
     }
 
     // Check whether we need to update the glitch value for this seg
@@ -892,10 +892,10 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
 
           //! Testing
           if (debug) {
-            LLVM_DEBUG(llvm::dbgs()
+            llvm::dbgs()
                        << "[DEBUG] \t\tGlitch Node: " << selNode << "\n"
                        << "[DEBUG] \t\t\tPre_src_1: " << preSrc1 << "\n"
-                       << "[DEBUG] \t\t\tPre_src_2: " << preSrc2 << "\n");
+                       << "[DEBUG] \t\t\tPre_src_2: " << preSrc2 << "\n";
           }
 
           // If this is the last iteration, we ignore the glitching value, just
@@ -903,9 +903,9 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
           if (i == segExecTrace.size() - 1) {
             //! Testing
             if (debug) {
-              LLVM_DEBUG(
+              
                   llvm::dbgs()
-                  << "[DEBUG] \t\t(LAST ITER DURING GLITCH CALCULATION)\n");
+                  << "[DEBUG] \t\t(LAST ITER DURING GLITCH CALCULATION)\n";
             }
 
             switchInfo.data.dfgBaseNodeValue[selNode]->oriGlitchDataOut[i] = {
@@ -935,14 +935,14 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
 
               //! Testing
               if (debug) {
-                LLVM_DEBUG(
+                
                     llvm::dbgs()
                     << "[DEBUG] \t\t\t[Value 1]: \n"
                     << "[DEBUG] \t\t\t\tOp_1_src_node: " << fasterNode << "\n"
                     << "[DEBUG] \t\t\t\tOp_1_pre_index: " << op1PreIndex << "\n"
                     << "[DEBUG] \t\t\t\tOp_2_src_node: " << slowerNode << "\n"
                     << "[DEBUG] \t\t\t\tOp_2_pre_index: " << op2PreIndex
-                    << "\n");
+                    << "\n";
               }
 
               // Check the existence of the selected iter
@@ -963,10 +963,10 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
                              op2PreIndex))) {
                 //! Testing
                 if (debug) {
-                  LLVM_DEBUG(llvm::dbgs()
+                  llvm::dbgs()
                              << "[DEBUG] \t\t\t[Value 1]: \n"
                              << "[DEBUG] \t\t\t\t[Warning] S Last Active Iter "
-                                "Not in the corresponding storing structure\n");
+                                "Not in the corresponding storing structure\n";
                 }
                 op2 = 0;
               } else {
@@ -979,12 +979,12 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
 
               //! Testing
               if (debug) {
-                LLVM_DEBUG(
+                
                     llvm::dbgs()
                     << "[DEBUG] \t\t\t\tFaster Node: " << fasterNode << "\n"
                     << "[DEBUG] \t\t\t\tOp_1: " << op1 << "\n"
                     << "[DEBUG] \t\t\t\tSlower Node: " << slowerNode << "\n"
-                    << "[DEBUG] \t\t\t\tOp_2: " << op2 << "\n");
+                    << "[DEBUG] \t\t\t\tOp_2: " << op2 << "\n";
               }
             }
 
@@ -1081,7 +1081,7 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
 
             //! Testing
             if (debug) {
-              LLVM_DEBUG(
+              
                   llvm::dbgs()
                   << "[DEBUG] \t\t\t\tFaster Node: " << fasterNode << "\n"
                   << "[DEBUG] \t\t\t\tF Last Active Iter: " << op1PreIndex
@@ -1090,7 +1090,7 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
                   << "[DEBUG] \t\t\t\tSlower Node: " << slowerNode << "\n"
                   << "[DEBUG] \t\t\t\tS Last Active Iter: " << op2PreIndex
                   << "\n"
-                  << "[DEBUG] \t\t\t\tOp_2: " << op2 << "\n");
+                  << "[DEBUG] \t\t\t\tOp_2: " << op2 << "\n";
             }
 
             // Value 3: F[x] op S[x]
@@ -1130,13 +1130,13 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
             tmpValue.push_back(calGlitchValue(op1, op2, selNode));
 
             if (debug) {
-              LLVM_DEBUG(llvm::dbgs() << "\t[Value 3]: \n"
+              llvm::dbgs() << "\t[Value 3]: \n"
                                       << "\t\tOp_1: " << op1 << "\n"
                                       << "\t\tOp_2: " << op2 << "\n"
-                                      << "\t\t[FINAL] ");
+                                      << "\t\t[FINAL] ";
               for (auto v : tmpValue)
                 llvm::dbgs() << v << " ";
-              LLVM_DEBUG(llvm::dbgs() << "\n");
+              llvm::dbgs() << "\n";
             }
           }
         } else {
@@ -1193,12 +1193,12 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
 
       //! Testing
       if (debug) {
-        LLVM_DEBUG(llvm::dbgs()
+        llvm::dbgs()
                    << "Mux Node: " << selMuxNode << "\n"
                    << "\t[CUR_VALUE]\n"
                    << "\t\tCond Node: " << selCondInputNode << "\n"
                    << "\t\tCond_value: " << condValue << "\n"
-                   << "\t\tCur data src: " << selDataSrcNode << "\n");
+                   << "\t\tCur data src: " << selDataSrcNode << "\n";
       }
 
       // TODO: Validate the following indexing mechanism
@@ -1261,8 +1261,8 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
 
         //! Testing
         if (debug) {
-          LLVM_DEBUG(llvm::dbgs() << "\t\tCur src node has glitches, buffered: "
-                                  << bufferedFlag << "\n");
+          llvm::dbgs() << "\t\tCur src node has glitches, buffered: "
+                                  << bufferedFlag << "\n";
         }
 
         if (bufferedFlag) {
@@ -1281,10 +1281,10 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
 
       //! Testing
       if (debug) {
-        LLVM_DEBUG(llvm::dbgs() << "\t\tCur_value: ");
+        llvm::dbgs() << "\t\tCur_value: ";
         for (auto v : curValue)
-          LLVM_DEBUG(llvm::dbgs() << v << " ");
-        LLVM_DEBUG(llvm::dbgs() << "\n\t[TRANSATION GLITCHES]\n");
+          llvm::dbgs() << v << " ";
+        llvm::dbgs() << "\n\t[TRANSATION GLITCHES]\n";
       }
 
       // Calculate control flow glitches
@@ -1360,15 +1360,15 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
 
         //! Testing
         if (debug) {
-          LLVM_DEBUG(llvm::dbgs()
+          llvm::dbgs()
                      << "\t\tDouble transition: " << doubleTransFlag << "\n"
-                     << "\t\tPre_value: ");
+                     << "\t\tPre_value: ";
           for (auto v : preValue)
-            LLVM_DEBUG(llvm::dbgs() << v << " ");
-          LLVM_DEBUG(llvm::dbgs() << "\n\t\tNext value: ");
+            llvm::dbgs() << v << " ";
+          llvm::dbgs() << "\n\t\tNext value: ";
           for (auto v : nexValue)
-            LLVM_DEBUG(llvm::dbgs() << v << " ");
-          LLVM_DEBUG(llvm::dbgs() << "\n");
+            llvm::dbgs() << v << " ";
+          llvm::dbgs() << "\n";
         }
       } else {
         switchInfo.data.dfgBaseNodeValue[selMuxNode]->skipControlCal = false;
@@ -1386,10 +1386,10 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
 
       //! Testing
       if (debug) {
-        LLVM_DEBUG(llvm::dbgs() << "\t\t[FINAL MUX OUTPUT] ");
+        llvm::dbgs() << "\t\t[FINAL MUX OUTPUT] ";
         for (auto v : finalMuxOutputList)
-          LLVM_DEBUG(llvm::dbgs() << v << " ");
-        LLVM_DEBUG(llvm::dbgs() << "\n");
+          llvm::dbgs() << v << " ";
+        llvm::dbgs() << "\n";
       }
 
       // Update the storing structure
@@ -1497,22 +1497,22 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
 
     //! Testing
     if (debug)
-      LLVM_DEBUG(llvm::dbgs()
-                 << "[DEBUG] ==================================\n");
+      llvm::dbgs()
+                 << "[DEBUG] ==================================\n";
 
     // Propagate data values for all non_memory related nodes
     for (const auto &selNode :
          switchInfo.data.segToDataBaseVec[executedSeg].all) {
       //! Testing
       if (debug)
-        LLVM_DEBUG(llvm::dbgs() << "[DEBUG] Node: " << selNode << "\n");
+        llvm::dbgs() << "[DEBUG] Node: " << selNode << "\n";
 
       // Case 1: Mapped Nodes --> All ALUs
       if (containsValue(switchInfo.data.segToOrderedALUNodes[executedSeg],
                         selNode)) {
         //! Testing
         if (debug)
-          LLVM_DEBUG(llvm::dbgs() << "[DEBUG] ALU Node Detected \n");
+          llvm::dbgs() << "[DEBUG] ALU Node Detected \n";
 
         // Defensive check for ALU node
         if (!contains(switchInfo.data.dfgBaseNodeValue, selNode)) {
@@ -1532,7 +1532,7 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
           // Step 2: Update the glitching suceeding list
           //! Testing
           if (debug)
-            LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t[Glitch Output]\n");
+            llvm::dbgs() << "[DEBUG] \t[Glitch Output]\n";
 
           // Defensive check for segSucNodeMap access
           if (!contains(
@@ -2550,14 +2550,14 @@ DataBase::DataBase(const std::string &node)
     : nodeName(node), lastUpdateIndex(0), skipControlCal(false) {}
 
 void DataBase::printDetail() {
-  LLVM_DEBUG(llvm::dbgs() << "Node Name: " << nodeName << "\n");
+  llvm::dbgs() << "Node Name: " << nodeName << "\n";
 
   // Print originalDataOut
-  LLVM_DEBUG(llvm::dbgs() << "\tOriginal Dataout:\n");
+  llvm::dbgs() << "\tOriginal Dataout:\n";
   for (const auto &kv : originalDataOut) {
-    LLVM_DEBUG(llvm::dbgs()
+    llvm::dbgs()
                << "\t\tIter " << kv.first << ": (" << kv.second.value << ", "
-               << kv.second.iterIndex << ")\n");
+               << kv.second.iterIndex << ")\n";
   }
 
   // Print mg_suc_node_dict, which is a map<mg_label, MgInfo>
@@ -2565,58 +2565,58 @@ void DataBase::printDetail() {
     const auto &mgLabel = mgPair.first;
     const MgNodeInfo &info = mgPair.second;
 
-    LLVM_DEBUG(llvm::dbgs() << "\tSegment Label: " << mgLabel << "\n");
+    llvm::dbgs() << "\tSegment Label: " << mgLabel << "\n";
     // Print "original"
-    LLVM_DEBUG(llvm::dbgs() << "\t\toriginal = [");
+    llvm::dbgs() << "\t\toriginal = [";
     for (size_t i = 0; i < info.original.size(); ++i) {
-      LLVM_DEBUG(llvm::dbgs() << info.original[i]);
+      llvm::dbgs() << info.original[i];
       if (i + 1 < info.original.size())
-        LLVM_DEBUG(llvm::dbgs() << ", ");
+        llvm::dbgs() << ", ";
     }
-    LLVM_DEBUG(llvm::dbgs() << "]\n");
+    llvm::dbgs() << "]\n";
     // Print "glitch"
-    LLVM_DEBUG(llvm::dbgs() << "\t\tglitch = [");
+    llvm::dbgs() << "\t\tglitch = [";
     for (size_t i = 0; i < info.glitch.size(); ++i) {
-      LLVM_DEBUG(llvm::dbgs() << info.glitch[i]);
+      llvm::dbgs() << info.glitch[i];
       if (i + 1 < info.glitch.size())
-        LLVM_DEBUG(llvm::dbgs() << ", ");
+        llvm::dbgs() << ", ";
     }
-    LLVM_DEBUG(llvm::dbgs() << "]\n");
+    llvm::dbgs() << "]\n";
     // Print data_width
-    LLVM_DEBUG(llvm::dbgs() << "\t\tdata_width:\n");
+    llvm::dbgs() << "\t\tdata_width:\n";
     for (const auto &dw : info.dataWidthMap) {
-      LLVM_DEBUG(llvm::dbgs()
-                 << "\t\t  " << dw.first << " => " << dw.second << "\n");
+      llvm::dbgs()
+                 << "\t\t  " << dw.first << " => " << dw.second << "\n";
     }
   }
 
   // if this is a control merge node
   if (controlDataOut.size()) {
-    LLVM_DEBUG(llvm::dbgs() << "\tControl Dataout:\n");
+    llvm::dbgs() << "\tControl Dataout:\n";
     for (const auto &kv : controlDataOut) {
-      LLVM_DEBUG(llvm::dbgs()
+      llvm::dbgs()
                  << "\t\tIter " << kv.first << ": (" << kv.second.value << ", "
-                 << kv.second.iterIndex << ")\n");
+                 << kv.second.iterIndex << ")\n";
     }
   }
 }
 
 void CMergeData::printDetail() {
-  LLVM_DEBUG(llvm::dbgs() << "Node Name: " << nodeName << "\n");
+  llvm::dbgs() << "Node Name: " << nodeName << "\n";
 
   // Print originalDataOut
-  LLVM_DEBUG(llvm::dbgs() << "\tOriginal Dataout:\n");
+  llvm::dbgs() << "\tOriginal Dataout:\n";
   for (const auto &kv : originalDataOut) {
-    LLVM_DEBUG(llvm::dbgs()
+    llvm::dbgs()
                << "\t\tIter " << kv.first << ": (" << kv.second.value << ", "
-               << kv.second.iterIndex << ")\n");
+               << kv.second.iterIndex << ")\n";
   }
 
-  LLVM_DEBUG(llvm::dbgs() << "\tControl Dataout:\n");
+  llvm::dbgs() << "\tControl Dataout:\n";
   for (const auto &kv : controlDataOut) {
-    LLVM_DEBUG(llvm::dbgs()
+    llvm::dbgs()
                << "\t\tIter " << kv.first << ": (" << kv.second.value << ", "
-               << kv.second.iterIndex << ")\n");
+               << kv.second.iterIndex << ")\n";
   }
 
   // Print mg_suc_node_dict, which is a map<mg_label, MgInfo>
@@ -2624,38 +2624,38 @@ void CMergeData::printDetail() {
     const std::string &mgLabel = mgPair.first;
     const MgNodeInfo &info = mgPair.second;
 
-    LLVM_DEBUG(llvm::dbgs() << "\tCFDFC/Segment Label: " << mgLabel << "\n");
+    llvm::dbgs() << "\tCFDFC/Segment Label: " << mgLabel << "\n";
     // Print "original"
-    LLVM_DEBUG(llvm::dbgs() << "\t\tcontrol = [");
+    llvm::dbgs() << "\t\tcontrol = [";
     for (size_t i = 0; i < info.original.size(); ++i) {
-      LLVM_DEBUG(llvm::dbgs() << info.original[i]);
+      llvm::dbgs() << info.original[i];
       if (i + 1 < info.original.size())
-        LLVM_DEBUG(llvm::dbgs() << ", ");
+        llvm::dbgs() << ", ";
     }
-    LLVM_DEBUG(llvm::dbgs() << "]\n");
+    llvm::dbgs() << "]\n";
     // Print "glitch"
-    LLVM_DEBUG(llvm::dbgs() << "\t\tdata = [");
+    llvm::dbgs() << "\t\tdata = [";
     for (size_t i = 0; i < info.glitch.size(); ++i) {
-      LLVM_DEBUG(llvm::dbgs() << info.glitch[i]);
+      llvm::dbgs() << info.glitch[i];
       if (i + 1 < info.glitch.size())
-        LLVM_DEBUG(llvm::dbgs() << ", ");
+        llvm::dbgs() << ", ";
     }
-    LLVM_DEBUG(llvm::dbgs() << "]\n");
+    llvm::dbgs() << "]\n";
     // Print data_width
-    LLVM_DEBUG(llvm::dbgs() << "\t\tdata_width:\n");
+    llvm::dbgs() << "\t\tdata_width:\n";
     for (const auto &dw : info.dataWidthMap) {
-      LLVM_DEBUG(llvm::dbgs()
-                 << "\t\t  " << dw.first << " => " << dw.second << "\n");
+      llvm::dbgs()
+                 << "\t\t  " << dw.first << " => " << dw.second << "\n";
     }
   }
 
   // if this is a control merge node
   if (controlGlitchVec.size()) {
-    LLVM_DEBUG(llvm::dbgs() << "\tControl glitch Dataout:\n\t");
+    llvm::dbgs() << "\tControl glitch Dataout:\n\t";
     for (const auto &kv : controlGlitchVec) {
-      LLVM_DEBUG(llvm::dbgs() << std::to_string(kv) << " ,");
+      llvm::dbgs() << std::to_string(kv) << " ,";
     }
-    LLVM_DEBUG(llvm::dbgs() << "\n");
+    llvm::dbgs() << "\n";
   }
 }
 
@@ -2765,34 +2765,34 @@ segCtrlMergeGlitchSuccSearch(SwitchingInfo &switchInfo, std::string startNode,
 //
 //===----------------------------------------------------------------------===//
 void printDataBaseNodesTriple(DataBaseNodesTriple dbnt) {
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tDataBaseNodesTriple:\n");
+  llvm::dbgs() << "[DEBUG] \t\tDataBaseNodesTriple:\n";
 
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\t  All: [");
+  llvm::dbgs() << "[DEBUG] \t\t  All: [";
   for (size_t i = 0; i < dbnt.all.size(); ++i) {
-    LLVM_DEBUG(llvm::dbgs() << dbnt.all[i]);
+    llvm::dbgs() << dbnt.all[i];
     if (i + 1 < dbnt.all.size()) {
-      LLVM_DEBUG(llvm::dbgs() << ", ");
+      llvm::dbgs() << ", ";
     }
   }
-  LLVM_DEBUG(llvm::dbgs() << "]\n");
+  llvm::dbgs() << "]\n";
 
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\t  Control: [");
+  llvm::dbgs() << "[DEBUG] \t\t  Control: [";
   for (size_t i = 0; i < dbnt.control.size(); ++i) {
-    LLVM_DEBUG(llvm::dbgs() << dbnt.control[i]);
+    llvm::dbgs() << dbnt.control[i];
     if (i + 1 < dbnt.control.size()) {
-      LLVM_DEBUG(llvm::dbgs() << ", ");
+      llvm::dbgs() << ", ";
     }
   }
-  LLVM_DEBUG(llvm::dbgs() << "]\n");
+  llvm::dbgs() << "]\n";
 
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\t  Data: [");
+  llvm::dbgs() << "[DEBUG] \t\t  Data: [";
   for (size_t i = 0; i < dbnt.data.size(); ++i) {
-    LLVM_DEBUG(llvm::dbgs() << dbnt.data[i]);
+    llvm::dbgs() << dbnt.data[i];
     if (i + 1 < dbnt.data.size()) {
-      LLVM_DEBUG(llvm::dbgs() << ", ");
+      llvm::dbgs() << ", ";
     }
   }
-  LLVM_DEBUG(llvm::dbgs() << "]\n");
+  llvm::dbgs() << "]\n";
 }
 
 // 1) Print the muxToSrcNodeMap

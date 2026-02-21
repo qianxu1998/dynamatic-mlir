@@ -68,6 +68,8 @@ std::string getHandshakeNodeName(mlir::Value &selRes) {
       return nameAttr.getValue().str();
     }
   }
+
+  return "";
 }
 
 void printBEToCFDFCMap(const std::map<std::pair<unsigned, unsigned>,
@@ -76,14 +78,14 @@ void printBEToCFDFCMap(const std::map<std::pair<unsigned, unsigned>,
     const std::pair<unsigned, unsigned> &key = selPair.first;
     const std::vector<unsigned> mgList = selPair.second;
 
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tBackEdge Pair: (" << key.first << ", "
-                            << key.second << ") : [");
+    llvm::dbgs() << "[DEBUG] \tBackEdge Pair: (" << key.first << ", "
+                            << key.second << ") : [";
 
     for (const auto &selMG : mgList) {
-      LLVM_DEBUG(llvm::dbgs() << selMG << ", ");
+      llvm::dbgs() << selMG << ", ";
     }
 
-    LLVM_DEBUG(llvm::dbgs() << "]\n");
+    llvm::dbgs() << "]\n";
   }
 }
 
@@ -93,13 +95,13 @@ void printSegToBBListMap(
     const std::string segLabel = selPair.first;
     const mlir::SetVector<unsigned> BBList = selPair.second;
 
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \tSeg Label: " << segLabel << " : [");
+    llvm::dbgs() << "[DEBUG] \tSeg Label: " << segLabel << " : [";
 
     for (const auto &selBB : BBList) {
-      LLVM_DEBUG(llvm::dbgs() << selBB << ", ");
+      llvm::dbgs() << selBB << ", ";
     }
 
-    LLVM_DEBUG(llvm::dbgs() << "]\n");
+    llvm::dbgs() << "]\n";
   }
 }
 
