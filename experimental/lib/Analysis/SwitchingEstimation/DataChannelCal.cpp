@@ -34,8 +34,8 @@ namespace {
 int getDataOutValueAtOrBefore(const std::shared_ptr<DataBase> &nodeData,
                               unsigned iter, int fallback = 0) {
   if (!nodeData) {
-    llvm::dbgs() << "[WARNING] Node data is null, return fallback "
-                            << fallback << "\n";
+    llvm::dbgs() << "[WARNING] Node data is null, return fallback " << fallback
+                 << "\n";
     return fallback;
   }
 
@@ -53,6 +53,23 @@ int getDataOutValueAtOrBefore(const std::shared_ptr<DataBase> &nodeData,
 
   --upper;
   return upper->second.value;
+}
+
+unsigned getSegmentII(const SwitchingInfo &switchInfo,
+                      const std::string &segLabel) {
+  if (segLabel.empty())
+    return 1;
+  if (!std::all_of(segLabel.begin(), segLabel.end(),
+                   [](unsigned char c) { return std::isdigit(c); }))
+    return 1;
+
+  unsigned mgIndex = static_cast<unsigned>(std::stoul(segLabel));
+  auto it = switchInfo.staticInfo.cfdfcIIs.find(mgIndex);
+  if (it == switchInfo.staticInfo.cfdfcIIs.end())
+    return 1;
+
+  unsigned ii = static_cast<unsigned>(std::llround(it->second));
+  return std::max(ii, 1U);
 }
 } // namespace
 
@@ -92,10 +109,12 @@ void mapBBPairToControlMerge(SwitchingInfo &switchInfo) {
         // Update the storing dict
         if (contains(switchInfo.dataInfo.bbPairToControlMergeOutputs,
                      std::make_pair(preBB, CMBB))) {
-          switchInfo.dataInfo.bbPairToControlMergeOutputs[std::make_pair(preBB, CMBB)]
+          switchInfo.dataInfo
+              .bbPairToControlMergeOutputs[std::make_pair(preBB, CMBB)]
               .push_back(std::make_pair(nodeName, i));
         } else {
-          switchInfo.dataInfo.bbPairToControlMergeOutputs[std::make_pair(preBB, CMBB)] = {
+          switchInfo.dataInfo
+              .bbPairToControlMergeOutputs[std::make_pair(preBB, CMBB)] = {
               std::make_pair(nodeName, i)};
         }
       }
@@ -148,14 +167,17 @@ void getDataBaseNodes(SwitchingInfo &switchInfo,
                 nodeName);
           }
 
-          switchInfo.dataInfo.segmentToDataSourceNodes[segLabel].data.push_back(nodeName);
-          switchInfo.dataInfo.segmentToDataSourceNodes[segLabel].all.push_back(nodeName);
-          switchInfo.dataInfo.segmentToOrderedDataSourceNodes[segLabel].push_back(
+          switchInfo.dataInfo.segmentToDataSourceNodes[segLabel].data.push_back(
               nodeName);
+          switchInfo.dataInfo.segmentToDataSourceNodes[segLabel].all.push_back(
+              nodeName);
+          switchInfo.dataInfo.segmentToOrderedDataSourceNodes[segLabel]
+              .push_back(nodeName);
 
           if ((!contains(nodeName, "constant")) &&
               (!contains(nodeName, "load")) && (!contains(nodeName, "source")))
-            switchInfo.dataInfo.segmentToOrderedAluNodes[segLabel].push_back(nodeName);
+            switchInfo.dataInfo.segmentToOrderedAluNodes[segLabel].push_back(
+                nodeName);
         }
       }
       switchInfo.staticInfo.dataflowGraph->profileBaseNodes.insert(nodeName);
@@ -172,16 +194,17 @@ void getDataBaseNodes(SwitchingInfo &switchInfo,
                 nodeName);
           }
 
-          switchInfo.dataInfo.segmentToDataSourceNodes[segLabel].control.push_back(
+          switchInfo.dataInfo.segmentToDataSourceNodes[segLabel]
+              .control.push_back(nodeName);
+          switchInfo.dataInfo.segmentToDataSourceNodes[segLabel].all.push_back(
               nodeName);
-          switchInfo.dataInfo.segmentToDataSourceNodes[segLabel].all.push_back(nodeName);
 
           if (contains(nodeName, "control_merge")) {
-            switchInfo.dataInfo.segmentControlNodes[segLabel].controlMergeNodes.push_back(
-                nodeName);
+            switchInfo.dataInfo.segmentControlNodes[segLabel]
+                .controlMergeNodes.push_back(nodeName);
           } else {
-            switchInfo.dataInfo.segmentControlNodes[segLabel].muxNodes.push_back(
-                nodeName);
+            switchInfo.dataInfo.segmentControlNodes[segLabel]
+                .muxNodes.push_back(nodeName);
           }
         }
       }
@@ -310,8 +333,9 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
       for (auto selValuePair : itCM->second) {
         auto nodeName = selValuePair.first;
         int outValue = selValuePair.second;
-        // `executedBasicBlockTrace[i]` corresponds to edge-index `(i - 1)` in the
-        // profiler log. Align the query index with `edgeIndexToIterationMap` keys.
+        // `executedBasicBlockTrace[i]` corresponds to edge-index `(i - 1)` in
+        // the profiler log. Align the query index with
+        // `edgeIndexToIterationMap` keys.
         unsigned iterIndex = getExecutionIter(i - 1, curBB, profileResults);
 
         //! Testing
@@ -423,7 +447,8 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
                 // llvm::dbgs() << "[DEBUG] \t\t\t(CASE4)\n";
                 // TODO: Check the following update logic
                 unsigned fallbackIter = (iterIndex == 0) ? 0 : iterIndex - 1;
-                IterationValue tmpInnerMuxValuePair = {tmpMuxOutput, fallbackIter};
+                IterationValue tmpInnerMuxValuePair = {tmpMuxOutput,
+                                                       fallbackIter};
                 srcDb->originalDataOut[fallbackIter] = tmpInnerMuxValuePair;
                 tmpUnUpdatedMux.push_back(selMuxNode);
                 continue;
@@ -588,8 +613,7 @@ void dataGlitchNodeSearch(SwitchingInfo &switchInfo,
 
     //! Testing
     llvm::dbgs() << "[DEBUG] \tCFDFC Label: " << label << "\n";
-    llvm::dbgs()
-               << "[DEBUG] \t\tCFDFC Base Node: " << mgBaseNode << "\n";
+    llvm::dbgs() << "[DEBUG] \t\tCFDFC Base Node: " << mgBaseNode << "\n";
     llvm::dbgs() << "[DEBUG] \t\tCFDFC II: " << mgII << "\n";
 
     //
@@ -786,7 +810,9 @@ static std::string peelBufferChain(const SwitchingInfo &SI, std::string node) {
     }
 
     const auto &preds =
-        nodeIt->second->segmentSuccessorInfoMap; // Note: using segmentSuccessorInfoMap as it exists
+        nodeIt->second
+            ->segmentSuccessorInfoMap; // Note: using segmentSuccessorInfoMap as
+                                       // it exists
     if (preds.size() != 1) {
       llvm::errs() << "[ERROR] Buffer " << node
                    << " has multiple or no predecessors; can't peel.\n";
@@ -808,8 +834,7 @@ static std::string peelBufferChain(const SwitchingInfo &SI, std::string node) {
 void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
                               SCFProfilingResult &profileResults, bool debug) {
   if (debug) {
-    llvm::dbgs()
-               << "[DEBUG]\n[DEBUG] \t\t[NODE GLITCHING VALUE CALCULATION]\n";
+    llvm::dbgs() << "[DEBUG]\n[DEBUG] \t\t[NODE GLITCHING VALUE CALCULATION]\n";
   }
 
   //
@@ -824,7 +849,7 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
 
     if (debug) {
       llvm::dbgs() << "[DEBUG] \t******** Iter: " << i
-                              << ", Seg: " << executedSeg << "\n";
+                   << ", Seg: " << executedSeg << "\n";
     }
 
     // Check whether we need to update the glitch value for this seg
@@ -892,10 +917,9 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
 
           //! Testing
           if (debug) {
-            llvm::dbgs()
-                       << "[DEBUG] \t\tGlitch Node: " << selNode << "\n"
-                       << "[DEBUG] \t\t\tPre_src_1: " << preSrc1 << "\n"
-                       << "[DEBUG] \t\t\tPre_src_2: " << preSrc2 << "\n";
+            llvm::dbgs() << "[DEBUG] \t\tGlitch Node: " << selNode << "\n"
+                         << "[DEBUG] \t\t\tPre_src_1: " << preSrc1 << "\n"
+                         << "[DEBUG] \t\t\tPre_src_2: " << preSrc2 << "\n";
           }
 
           // If this is the last iteration, we ignore the glitching value, just
@@ -903,14 +927,14 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
           if (i == segExecTrace.size() - 1) {
             //! Testing
             if (debug) {
-              
-                  llvm::dbgs()
+
+              llvm::dbgs()
                   << "[DEBUG] \t\t(LAST ITER DURING GLITCH CALCULATION)\n";
             }
 
-            switchInfo.dataInfo.nodeToDataState[selNode]->glitchDataOutByIter[i] = {
-                getDataOutValueAtOrBefore(
-                    switchInfo.dataInfo.nodeToDataState[selNode], i, 0)};
+            switchInfo.dataInfo.nodeToDataState[selNode]
+                ->glitchDataOutByIter[i] = {getDataOutValueAtOrBefore(
+                switchInfo.dataInfo.nodeToDataState[selNode], i, 0)};
             switchInfo.dataInfo.nodeToDataState[selNode]->lastUpdateIndex = i;
             continue;
           }
@@ -928,15 +952,15 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
             // Value 1: F[x - 1] op S[x - 1] if needed
             if (srcStartTimeDict[fasterNode] > 0) {
               // Initialization
-              op1PreIndex =
-                  switchInfo.dataInfo.nodeToDataState[fasterNode]->lastUpdateIndex;
-              op2PreIndex =
-                  switchInfo.dataInfo.nodeToDataState[slowerNode]->lastUpdateIndex;
+              op1PreIndex = switchInfo.dataInfo.nodeToDataState[fasterNode]
+                                ->lastUpdateIndex;
+              op2PreIndex = switchInfo.dataInfo.nodeToDataState[slowerNode]
+                                ->lastUpdateIndex;
 
               //! Testing
               if (debug) {
-                
-                    llvm::dbgs()
+
+                llvm::dbgs()
                     << "[DEBUG] \t\t\t[Value 1]: \n"
                     << "[DEBUG] \t\t\t\tOp_1_src_node: " << fasterNode << "\n"
                     << "[DEBUG] \t\t\t\tOp_1_pre_index: " << op1PreIndex << "\n"
@@ -964,9 +988,9 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
                 //! Testing
                 if (debug) {
                   llvm::dbgs()
-                             << "[DEBUG] \t\t\t[Value 1]: \n"
-                             << "[DEBUG] \t\t\t\t[Warning] S Last Active Iter "
-                                "Not in the corresponding storing structure\n";
+                      << "[DEBUG] \t\t\t[Value 1]: \n"
+                      << "[DEBUG] \t\t\t\t[Warning] S Last Active Iter "
+                         "Not in the corresponding storing structure\n";
                 }
                 op2 = 0;
               } else {
@@ -979,8 +1003,8 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
 
               //! Testing
               if (debug) {
-                
-                    llvm::dbgs()
+
+                llvm::dbgs()
                     << "[DEBUG] \t\t\t\tFaster Node: " << fasterNode << "\n"
                     << "[DEBUG] \t\t\t\tOp_1: " << op1 << "\n"
                     << "[DEBUG] \t\t\t\tSlower Node: " << slowerNode << "\n"
@@ -998,10 +1022,10 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
             // Be careful that one of the operand may be generated by the
             // selNode itself, then we need to use the value in the previous
             // iteration in the calculation
-            op1PreIndex =
-                switchInfo.dataInfo.nodeToDataState[fasterNode]->lastUpdateIndex;
-            op2PreIndex =
-                switchInfo.dataInfo.nodeToDataState[slowerNode]->lastUpdateIndex;
+            op1PreIndex = switchInfo.dataInfo.nodeToDataState[fasterNode]
+                              ->lastUpdateIndex;
+            op2PreIndex = switchInfo.dataInfo.nodeToDataState[slowerNode]
+                              ->lastUpdateIndex;
 
             // Get the value of op1
             if (fasterNode == selNode) {
@@ -1043,8 +1067,9 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
               } else {
                 // unsigned tmpSize =
                 // switchInfo.dataInfo.nodeToDataState[fasterNode]->glitchDataOutByIter[i].size();
-                auto &glitchvec = switchInfo.dataInfo.nodeToDataState[fasterNode]
-                                      ->glitchDataOutByIter[i];
+                auto &glitchvec =
+                    switchInfo.dataInfo.nodeToDataState[fasterNode]
+                        ->glitchDataOutByIter[i];
                 // ! If the list is smaller than 2, something is wrong
                 int op1 = 0;
                 if (glitchvec.size() >= 2) {
@@ -1081,16 +1106,17 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
 
             //! Testing
             if (debug) {
-              
-                  llvm::dbgs()
-                  << "[DEBUG] \t\t\t\tFaster Node: " << fasterNode << "\n"
-                  << "[DEBUG] \t\t\t\tF Last Active Iter: " << op1PreIndex
-                  << "\n"
-                  << "[DEBUG] \t\t\t\tOp_1: " << op1 << "\n"
-                  << "[DEBUG] \t\t\t\tSlower Node: " << slowerNode << "\n"
-                  << "[DEBUG] \t\t\t\tS Last Active Iter: " << op2PreIndex
-                  << "\n"
-                  << "[DEBUG] \t\t\t\tOp_2: " << op2 << "\n";
+
+              llvm::dbgs() << "[DEBUG] \t\t\t\tFaster Node: " << fasterNode
+                           << "\n"
+                           << "[DEBUG] \t\t\t\tF Last Active Iter: "
+                           << op1PreIndex << "\n"
+                           << "[DEBUG] \t\t\t\tOp_1: " << op1 << "\n"
+                           << "[DEBUG] \t\t\t\tSlower Node: " << slowerNode
+                           << "\n"
+                           << "[DEBUG] \t\t\t\tS Last Active Iter: "
+                           << op2PreIndex << "\n"
+                           << "[DEBUG] \t\t\t\tOp_2: " << op2 << "\n";
             }
 
             // Value 3: F[x] op S[x]
@@ -1131,9 +1157,9 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
 
             if (debug) {
               llvm::dbgs() << "\t[Value 3]: \n"
-                                      << "\t\tOp_1: " << op1 << "\n"
-                                      << "\t\tOp_2: " << op2 << "\n"
-                                      << "\t\t[FINAL] ";
+                           << "\t\tOp_1: " << op1 << "\n"
+                           << "\t\tOp_2: " << op2 << "\n"
+                           << "\t\t[FINAL] ";
               for (auto v : tmpValue)
                 llvm::dbgs() << v << " ";
               llvm::dbgs() << "\n";
@@ -1150,7 +1176,8 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
       }
 
       // Update the storing structure
-      switchInfo.dataInfo.nodeToDataState[selNode]->glitchDataOutByIter[i] = tmpValue;
+      switchInfo.dataInfo.nodeToDataState[selNode]->glitchDataOutByIter[i] =
+          tmpValue;
     }
 
     // Step 1.5: Update the list of last update index for all data base nodes
@@ -1160,6 +1187,7 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
 
     // Step 2: Update value for all MUXs
     // TODO: Pre store the information like mux etc.
+    const unsigned segII = getSegmentII(switchInfo, executedSeg);
     for (const auto &selMuxNode :
          switchInfo.dataInfo.segmentControlNodes[executedSeg].muxNodes) {
       auto muxSrcIt =
@@ -1174,110 +1202,132 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
         selCondInputNode = controlIt->second;
 
       int condValue = 0;
+      CMergeData *selCMBaseNode = nullptr;
       if (!selCondInputNode.empty() &&
           contains(switchInfo.dataInfo.nodeToDataState, selCondInputNode) &&
           switchInfo.dataInfo.nodeToDataState[selCondInputNode]) {
-        if (auto *selCMBaseNode = dyn_cast<CMergeData>(
+        if (auto *tmpCMBaseNode = dyn_cast<CMergeData>(
                 switchInfo.dataInfo.nodeToDataState[selCondInputNode].get())) {
+          selCMBaseNode = tmpCMBaseNode;
           condValue = selCMBaseNode->getControlOutput(i);
         }
       }
 
-      std::string selDataSrcNode = "";
-      auto dataSrcIt = muxSrcIt->second.find(std::to_string(condValue));
-      if (dataSrcIt != muxSrcIt->second.end())
-        selDataSrcNode = dataSrcIt->second;
-
       // Temp Value vector definition
       std::vector<int> preValue, curValue, nexValue;
+      auto appendMuxValuesForCond = [&](int muxCondValue,
+                                        std::vector<int> &outValues) {
+        std::string selDataSrcNode = "";
+        auto dataSrcIt = muxSrcIt->second.find(std::to_string(muxCondValue));
+        if (dataSrcIt != muxSrcIt->second.end())
+          selDataSrcNode = dataSrcIt->second;
+
+        // TODO: Validate the following indexing mechanism
+        // Check whether we have glitches from the srcs or not
+        bool validDataSrcNode =
+            !selDataSrcNode.empty() &&
+            contains(switchInfo.dataInfo.nodeToDataState, selDataSrcNode) &&
+            switchInfo.dataInfo.nodeToDataState[selDataSrcNode];
+
+        if (!validDataSrcNode) {
+          llvm::errs() << "[WARNING] Invalid data source \"" << selDataSrcNode
+                       << "\" for mux node " << selMuxNode << " at iter " << i
+                       << ", using 0\n";
+          outValues.push_back(0);
+        } else if (contains(selDataSrcNode, "constant") ||
+                   contains(selDataSrcNode, "source") ||
+                   contains(selDataSrcNode, "start")) {
+          outValues.push_back(switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
+                                  ->originalDataOut[0]
+                                  .value);
+        } else if (selDataSrcNode == selMuxNode) {
+          // The src node is the selected node itself
+          unsigned preIndex = switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
+                                  ->lastUpdateIndex;
+          // Check whether the preIndex exists or not
+          if (contains(switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
+                           ->originalDataOut,
+                       preIndex)) {
+            outValues.push_back(
+                switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
+                    ->originalDataOut[preIndex]
+                    .value);
+          } else {
+            outValues.push_back(0);
+          }
+        } else if (glitchUpdateFlag &&
+                   (contains(switchInfo.dataInfo.glitches[executedSeg],
+                             selDataSrcNode))) {
+          // Check whether there are buffers in between
+          std::string preNode = "";
+          auto selMuxNodeStructure = dyn_cast<MuxNode>(
+              switchInfo.staticInfo.dataflowGraph->nodes[selMuxNode].get());
+
+          // Get the actual preNode
+          // TODO: Need to check the portidx to name mapping
+          for (const auto &[nodeName, portIdx] :
+               selMuxNodeStructure->preNameToPortIdxMap) {
+            //* Here we need to do cond + 1, as the port map of muxnode assigns
+            // 0 to its control input.
+            const unsigned int cond_add1 =
+                static_cast<unsigned>(muxCondValue + 1);
+            if (portIdx == (cond_add1))
+              preNode = nodeName;
+          }
+
+          bool bufferedFlag = false;
+          auto segSucIt = switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
+                              ->segmentSuccessorInfoMap.find(executedSeg);
+          if (segSucIt != switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
+                              ->segmentSuccessorInfoMap.end() &&
+              containsValue(segSucIt->second.original, preNode))
+            bufferedFlag = true;
+
+          //! Testing
+          if (debug) {
+            llvm::dbgs() << "\t\tCur src node has glitches, buffered: "
+                         << bufferedFlag << "\n";
+          }
+
+          if (bufferedFlag) {
+            // Src glitching but buffered
+            outValues.push_back(getDataOutValueAtOrBefore(
+                switchInfo.dataInfo.nodeToDataState[selDataSrcNode], i, 0));
+          } else {
+            auto &glitchValues = switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
+                                     ->glitchDataOutByIter[i];
+            outValues.insert(outValues.end(), glitchValues.begin(),
+                             glitchValues.end());
+          }
+        } else {
+          // Handling special case for cascaded Muxes
+          outValues.push_back(getDataOutValueAtOrBefore(
+              switchInfo.dataInfo.nodeToDataState[selDataSrcNode], i, 0));
+        }
+      };
 
       //! Testing
       if (debug) {
-        llvm::dbgs()
-                   << "Mux Node: " << selMuxNode << "\n"
-                   << "\t[CUR_VALUE]\n"
-                   << "\t\tCond Node: " << selCondInputNode << "\n"
-                   << "\t\tCond_value: " << condValue << "\n"
-                   << "\t\tCur data src: " << selDataSrcNode << "\n";
+        std::string selDataSrcNode = "";
+        auto dataSrcIt = muxSrcIt->second.find(std::to_string(condValue));
+        if (dataSrcIt != muxSrcIt->second.end())
+          selDataSrcNode = dataSrcIt->second;
+
+        llvm::dbgs() << "Mux Node: " << selMuxNode << "\n"
+                     << "\t[CUR_VALUE]\n"
+                     << "\t\tCond Node: " << selCondInputNode << "\n"
+                     << "\t\tCond_value: " << condValue << "\n"
+                     << "\t\tCur data src: " << selDataSrcNode << "\n";
       }
 
-      // TODO: Validate the following indexing mechanism
-      // Check whether we have glitches from the srcs or not
-      bool validDataSrcNode =
-          !selDataSrcNode.empty() &&
-          contains(switchInfo.dataInfo.nodeToDataState, selDataSrcNode) &&
-          switchInfo.dataInfo.nodeToDataState[selDataSrcNode];
+      appendMuxValuesForCond(condValue, curValue);
 
-      if (!validDataSrcNode) {
-        llvm::errs() << "[WARNING] Invalid data source \"" << selDataSrcNode
-                     << "\" for mux node " << selMuxNode << " at iter " << i
-                     << ", using 0\n";
-        curValue.push_back(0);
-      } else if (contains(selDataSrcNode, "constant") ||
-                 contains(selDataSrcNode, "source") ||
-                 contains(selDataSrcNode, "start")) {
-        curValue.push_back(switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
-                               ->originalDataOut[0]
-                               .value);
-      } else if (selDataSrcNode == selMuxNode) {
-        // The src node is the selected node itself
-        unsigned preIndex =
-            switchInfo.dataInfo.nodeToDataState[selDataSrcNode]->lastUpdateIndex;
-        // Check whether the preIndex exists or not
-        if (contains(switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
-                         ->originalDataOut,
-                     preIndex)) {
-          curValue.push_back(switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
-                                 ->originalDataOut[preIndex]
-                                 .value);
-        } else
-          curValue.push_back(0);
-      } else if (glitchUpdateFlag &&
-                 (contains(switchInfo.dataInfo.glitches[executedSeg],
-                           selDataSrcNode))) {
-        // Check whether there are buffers in between
-        std::string preNode = "";
-        auto selMuxNodeStructure = dyn_cast<MuxNode>(
-            switchInfo.staticInfo.dataflowGraph->nodes[selMuxNode].get());
-
-        // Get the actual preNode
-        // TODO: Need to check the portidx to name mapping
-        for (const auto &[nodeName, portIdx] :
-             selMuxNodeStructure->preNameToPortIdxMap) {
-          //* Here we need to do cond + 1, as the port map of muxnode assigns 0
-          // to its control input.
-          const unsigned int cond_add1 = condValue + 1;
-          if (portIdx == (cond_add1))
-            preNode = nodeName;
-        }
-
-        bool bufferedFlag = false;
-        auto segSucIt = switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
-                            ->segmentSuccessorInfoMap.find(executedSeg);
-        if (segSucIt != switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
-                            ->segmentSuccessorInfoMap.end() &&
-            containsValue(segSucIt->second.original, preNode))
-          bufferedFlag = true;
-
-        //! Testing
-        if (debug) {
-          llvm::dbgs() << "\t\tCur src node has glitches, buffered: "
-                                  << bufferedFlag << "\n";
-        }
-
-        if (bufferedFlag) {
-          // Src glitching but buffered
-          curValue.push_back(getDataOutValueAtOrBefore(
-              switchInfo.dataInfo.nodeToDataState[selDataSrcNode], i, 0));
-        } else {
-          curValue = switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
-                         ->glitchDataOutByIter[i];
-        }
-      } else {
-        // Handling special case for cascaded Muxes
-        curValue.push_back(getDataOutValueAtOrBefore(
-            switchInfo.dataInfo.nodeToDataState[selDataSrcNode], i, 0));
-      }
+      // Control-merge pulse modeling:
+      // when control_merge emits 1 in an MG with II > 1, the control line
+      // falls back to 0 in the same iteration window. Account for the mux data
+      // path selected by that trailing 0 as an extra glitch event.
+      if (selCMBaseNode && condValue == 1 && segII > 1)
+        appendMuxValuesForCond(0, curValue);
 
       //! Testing
       if (debug) {
@@ -1307,11 +1357,12 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
           // Transition detected, check the next iter mg label
           if (i != segExecTrace.size() - 1) {
             // Check the existence of the mux node
-            if (std::find(switchInfo.dataInfo.segmentControlNodes[segExecTrace[i + 1]]
-                              .muxNodes.begin(),
-                          switchInfo.dataInfo.segmentControlNodes[segExecTrace[i + 1]]
-                              .muxNodes.end(),
-                          selMuxNode) !=
+            if (std::find(
+                    switchInfo.dataInfo.segmentControlNodes[segExecTrace[i + 1]]
+                        .muxNodes.begin(),
+                    switchInfo.dataInfo.segmentControlNodes[segExecTrace[i + 1]]
+                        .muxNodes.end(),
+                    selMuxNode) !=
                 switchInfo.dataInfo.segmentControlNodes[segExecTrace[i + 1]]
                     .muxNodes.end()) {
               std::string nextExecSegLabel = segExecTrace[i + 1];
@@ -1339,7 +1390,8 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
             std::string preDataSrc = preSrcIt->second;
 
             auto dbIt = switchInfo.dataInfo.nodeToDataState.find(preDataSrc);
-            if (dbIt == switchInfo.dataInfo.nodeToDataState.end() || !dbIt->second)
+            if (dbIt == switchInfo.dataInfo.nodeToDataState.end() ||
+                !dbIt->second)
               continue;
 
             // Check whether the value exist or not
@@ -1353,16 +1405,16 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
 
           // If double transition
           if (doubleTransFlag) {
-            switchInfo.dataInfo.nodeToDataState[selMuxNode]->skipControlCal = true;
+            switchInfo.dataInfo.nodeToDataState[selMuxNode]->skipControlCal =
+                true;
             nexValue = preValue;
           }
         }
 
         //! Testing
         if (debug) {
-          llvm::dbgs()
-                     << "\t\tDouble transition: " << doubleTransFlag << "\n"
-                     << "\t\tPre_value: ";
+          llvm::dbgs() << "\t\tDouble transition: " << doubleTransFlag << "\n"
+                       << "\t\tPre_value: ";
           for (auto v : preValue)
             llvm::dbgs() << v << " ";
           llvm::dbgs() << "\n\t\tNext value: ";
@@ -1395,7 +1447,8 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
       // Update the storing structure
       switchInfo.dataInfo.nodeToDataState[selMuxNode]->glitchDataOutByIter[i] =
           finalMuxOutputList;
-      switchInfo.dataInfo.nodeToDataState[selMuxNode]->lastValidSeg = executedSeg;
+      switchInfo.dataInfo.nodeToDataState[selMuxNode]->lastValidSeg =
+          executedSeg;
       switchInfo.dataInfo.nodeToDataState[selMuxNode]->lastUpdateIndex = i;
     }
 
@@ -1459,10 +1512,20 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
   //
   auto segExecTrace = profileResults.executedSegmentTrace;
 
+  // Defensive reset in case propagation is rerun in the same pass instance.
+  for (auto &[nodeName, nodeDb] : switchInfo.dataInfo.nodeToDataState) {
+    (void)nodeName;
+    if (!nodeDb)
+      continue;
+    if (auto *cmNode = dyn_cast<CMergeData>(nodeDb.get()))
+      cmNode->controlGlitchValues.clear();
+  }
+
   // Iterate through the execution trace and propagate base nodes values in the
   // selected segment
   for (unsigned i = 0; i < segExecTrace.size(); i++) {
     std::string executedSeg = segExecTrace[i];
+    const unsigned segII = getSegmentII(switchInfo, executedSeg);
 
     // List storing nodes that need special treatment
     std::vector<std::string> pendingMemList;
@@ -1475,8 +1538,8 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
       if (baseNodeIt != switchInfo.dataInfo.nodeToDataState.end() &&
           baseNodeIt->second &&
           contains(baseNodeIt->second->segmentSuccessorInfoMap, executedSeg)) {
-        auto &dwMap =
-            baseNodeIt->second->segmentSuccessorInfoMap[executedSeg].dataWidthMap;
+        auto &dwMap = baseNodeIt->second->segmentSuccessorInfoMap[executedSeg]
+                          .dataWidthMap;
         auto it = dwMap.find(dstNode);
         if (it != dwMap.end() && it->second > 0)
           width = std::max(width, it->second);
@@ -1497,8 +1560,7 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
 
     //! Testing
     if (debug)
-      llvm::dbgs()
-                 << "[DEBUG] ==================================\n";
+      llvm::dbgs() << "[DEBUG] ==================================\n";
 
     // Propagate data values for all non_memory related nodes
     for (const auto &selNode :
@@ -1508,8 +1570,9 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
         llvm::dbgs() << "[DEBUG] Node: " << selNode << "\n";
 
       // Case 1: Mapped Nodes --> All ALUs
-      if (containsValue(switchInfo.dataInfo.segmentToOrderedAluNodes[executedSeg],
-                        selNode)) {
+      if (containsValue(
+              switchInfo.dataInfo.segmentToOrderedAluNodes[executedSeg],
+              selNode)) {
         //! Testing
         if (debug)
           llvm::dbgs() << "[DEBUG] ALU Node Detected \n";
@@ -1525,7 +1588,8 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
         // The value shall be obtained from ori_glitch_dataout
         // Step 1: Update the selected node itself
         for (const auto &selValue :
-             switchInfo.dataInfo.nodeToDataState[selNode]->glitchDataOutByIter[i]) {
+             switchInfo.dataInfo.nodeToDataState[selNode]
+                 ->glitchDataOutByIter[i]) {
           switchInfo.staticInfo.dataflowGraph->nodes[selNode]
               ->updateDataoutChannel(selValue);
 
@@ -1535,12 +1599,13 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
             llvm::dbgs() << "[DEBUG] \t[Glitch Output]\n";
 
           // Defensive check for segmentSuccessorInfoMap access
-          if (!contains(
-                  switchInfo.dataInfo.nodeToDataState[selNode]->segmentSuccessorInfoMap,
-                  executedSeg)) {
-            llvm::errs() << "[ERROR] Warning: segment " << executedSeg
-                         << " not found in segmentSuccessorInfoMap for ALU node "
-                         << selNode << "\n";
+          if (!contains(switchInfo.dataInfo.nodeToDataState[selNode]
+                            ->segmentSuccessorInfoMap,
+                        executedSeg)) {
+            llvm::errs()
+                << "[ERROR] Warning: segment " << executedSeg
+                << " not found in segmentSuccessorInfoMap for ALU node "
+                << selNode << "\n";
             continue;
           }
 
@@ -1593,9 +1658,10 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
         //! Testing
         if (debug)
           llvm::dbgs() << "[DEBUG] \t[Ori Output]\n";
-        for (const auto &selSucNode : switchInfo.dataInfo.nodeToDataState[selNode]
-                                          ->segmentSuccessorInfoMap[executedSeg]
-                                          .original) {
+        for (const auto &selSucNode :
+             switchInfo.dataInfo.nodeToDataState[selNode]
+                 ->segmentSuccessorInfoMap[executedSeg]
+                 .original) {
           // Get Node Bitwidth
           unsigned tmpNodeWidth = resolveOutWidth(selNode, selSucNode);
 
@@ -1609,9 +1675,10 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
             auto selStoreNode = dyn_cast<DStoreNode>(
                 switchInfo.staticInfo.dataflowGraph->nodes[selSucNode].get());
             selStoreNode->updateDataout(
-                reduceBits(getDataOutValueAtOrBefore(
-                               switchInfo.dataInfo.nodeToDataState[selNode], i, 0),
-                           tmpNodeWidth),
+                reduceBits(
+                    getDataOutValueAtOrBefore(
+                        switchInfo.dataInfo.nodeToDataState[selNode], i, 0),
+                    tmpNodeWidth),
                 selNode);
           } else if (contains(selSucNode, "cond_br")) {
             // Get the node
@@ -1623,9 +1690,10 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
                 getCondBrNodeCondValue(switchInfo, i, selSucNode);
 
             selCondStoreNode->updateDataout(
-                reduceBits(getDataOutValueAtOrBefore(
-                               switchInfo.dataInfo.nodeToDataState[selNode], i, 0),
-                           tmpNodeWidth),
+                reduceBits(
+                    getDataOutValueAtOrBefore(
+                        switchInfo.dataInfo.nodeToDataState[selNode], i, 0),
+                    tmpNodeWidth),
                 tmpCondValue);
           } else {
             switchInfo.staticInfo.dataflowGraph->nodes[selSucNode]
@@ -1656,29 +1724,37 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
           // Get node
           auto selCMNode = dyn_cast<CMergeData>(
               switchInfo.dataInfo.nodeToDataState[selNode].get());
+          auto selCMGraphNode = dyn_cast<CMergeNode>(
+              switchInfo.staticInfo.dataflowGraph->nodes[selNode].get());
+          if (!selCMGraphNode) {
+            llvm::errs() << "[ERROR] Warning: Graph node " << selNode
+                         << " is not a CMergeNode at iteration " << i << "\n";
+            continue;
+          }
           int initValue = 0;
 
           //! For all transition related nodes, we need to check the iter 0 as
           //! well
           if (i == 1) {
             initValue = selCMNode->getControlOutput(0);
-            switchInfo.staticInfo.dataflowGraph->nodes[selNode]
-                ->updateDataoutChannel(initValue);
+            selCMGraphNode->updateDataout(initValue);
           } else {
             initValue = 0;
           }
 
           // Step 1: Update the node itself
           int selValue = selCMNode->getControlOutput(i);
-          switchInfo.staticInfo.dataflowGraph->nodes[selNode]
-              ->updateDataoutChannel(selValue);
+          std::vector<int> cmControlOutputEvents = {selValue};
+          if (selValue == 1 && segII > 1)
+            cmControlOutputEvents.push_back(0);
 
-          // Special case: If the cm_value = 1, then the value will
-          // automatically go to 0 in previous implementations
-          // if (selValue == 1) {
-          //   switchInfo.staticInfo.dataflowGraph->nodes[selNode]
-          //       ->updateDataoutChannel(0);
-          // }
+          // Keep a trace of control-side glitch events for debug/inspection.
+          for (int v : cmControlOutputEvents)
+            selCMNode->controlGlitchValues.push_back(v);
+
+          for (int v : cmControlOutputEvents) {
+            selCMGraphNode->updateDataout(v);
+          }
 
           // Step 2: Update all nodes in the control succeeding node list
           //! Testing
@@ -1687,10 +1763,10 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
 
           // Defensive check for segmentSuccessorInfoMap access
           if (!contains(selCMNode->segmentSuccessorInfoMap, executedSeg)) {
-            llvm::errs()
-                << "[ERROR] Segment " << executedSeg
-                << " not found in segmentSuccessorInfoMap for control merge node "
-                << selNode << "\n";
+            llvm::errs() << "[ERROR] Segment " << executedSeg
+                         << " not found in segmentSuccessorInfoMap for control "
+                            "merge node "
+                         << selNode << "\n";
             continue;
           }
 
@@ -1704,20 +1780,9 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
               switchInfo.staticInfo.dataflowGraph->nodes[selSucNode]
                   ->updateDataoutChannel(initValue);
             }
-            switchInfo.staticInfo.dataflowGraph->nodes[selSucNode]
-                ->updateDataoutChannel(selValue);
-
-            // Step 2.5: Update all glitch node, if cm_value = 1, then change it
-            // back to 0, unless II == 1
-            if (selValue == 1) {
-              if (std::find(
-                      selCMNode->cmergeSegmentSuccessorInfoMap[executedSeg].glitch.begin(),
-                      selCMNode->cmergeSegmentSuccessorInfoMap[executedSeg].glitch.end(),
-                      selSucNode) !=
-                  selCMNode->cmergeSegmentSuccessorInfoMap[executedSeg].glitch.end()) {
-                switchInfo.staticInfo.dataflowGraph->nodes[selSucNode]
-                    ->updateDataoutChannel(0);
-              }
+            for (int v : cmControlOutputEvents) {
+              switchInfo.staticInfo.dataflowGraph->nodes[selSucNode]
+                  ->updateDataoutChannel(v);
             }
           }
 
@@ -1770,7 +1835,8 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
           }
 
           for (const auto &selValue :
-               switchInfo.dataInfo.nodeToDataState[selNode]->glitchDataOutByIter[i]) {
+               switchInfo.dataInfo.nodeToDataState[selNode]
+                   ->glitchDataOutByIter[i]) {
             switchInfo.staticInfo.dataflowGraph->nodes[selNode]
                 ->updateDataoutChannel(selValue);
 
@@ -1780,12 +1846,12 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
               llvm::dbgs() << "[DEBUG] \t[Glitch Output]\n";
 
             // Defensive check for segmentSuccessorInfoMap access
-            if (!contains(
-                    switchInfo.dataInfo.nodeToDataState[selNode]->segmentSuccessorInfoMap,
-                    executedSeg)) {
+            if (!contains(switchInfo.dataInfo.nodeToDataState[selNode]
+                              ->segmentSuccessorInfoMap,
+                          executedSeg)) {
               llvm::errs() << "[ERROR] Warning: segment " << executedSeg
-                           << " not found in segmentSuccessorInfoMap for node " << selNode
-                           << "\n";
+                           << " not found in segmentSuccessorInfoMap for node "
+                           << selNode << "\n";
               continue;
             }
 
@@ -1836,9 +1902,9 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
             unsigned tmpNodeWidth = resolveOutWidth(selNode, selSucNode);
 
             //
-            if (contains(
-                    switchInfo.dataInfo.nodeToDataState[selNode]->originalDataOut,
-                    i)) {
+            if (contains(switchInfo.dataInfo.nodeToDataState[selNode]
+                             ->originalDataOut,
+                         i)) {
               if (contains(selSucNode, "store")) {
                 auto selStoreNode = dyn_cast<DStoreNode>(
                     switchInfo.staticInfo.dataflowGraph->nodes[selSucNode]
@@ -1889,7 +1955,8 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
           // All other nodes
           int selValue = 0;
           if (contains(selNode, "source") || contains(selNode, "start")) {
-            if (i == switchInfo.dataInfo.segmentToFirstExecutionIter[executedSeg]) {
+            if (i ==
+                switchInfo.dataInfo.segmentToFirstExecutionIter[executedSeg]) {
               selValue = switchInfo.dataInfo.nodeToDataState[selNode]
                              ->originalDataOut[0]
                              .value;
@@ -1903,8 +1970,8 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
             // Defensive check to prevent crash
             if (!contains(switchInfo.dataInfo.nodeToDataState, selNode)) {
               llvm::errs() << "[ERROR] Warning: selNode " << selNode
-                           << " not found in nodeToDataState at iteration "
-                           << i << "\n";
+                           << " not found in nodeToDataState at iteration " << i
+                           << "\n";
               selValue = 0; // Default value
             } else if (!contains(switchInfo.dataInfo.nodeToDataState[selNode]
                                      ->originalDataOut,
@@ -1925,11 +1992,12 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
 
           // Step 2: Update all glitching nodes in the succeeding list
           // Defensive check for segmentSuccessorInfoMap access
-          if (!contains(
-                  switchInfo.dataInfo.nodeToDataState[selNode]->segmentSuccessorInfoMap,
-                  executedSeg)) {
+          if (!contains(switchInfo.dataInfo.nodeToDataState[selNode]
+                            ->segmentSuccessorInfoMap,
+                        executedSeg)) {
             // llvm::dbgs() << "[DEBUG] Warning: segment " << executedSeg << "
-            // not found in segmentSuccessorInfoMap for other node " << selNode << "\n";
+            // not found in segmentSuccessorInfoMap for other node " << selNode
+            // << "\n";
             continue;
           }
 
@@ -2017,7 +2085,8 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
 
       // Step 2: Update teh nodes in glitching list
       // Defensive check for segmentSuccessorInfoMap access
-      if (!contains(switchInfo.dataInfo.nodeToDataState[selNode]->segmentSuccessorInfoMap,
+      if (!contains(switchInfo.dataInfo.nodeToDataState[selNode]
+                        ->segmentSuccessorInfoMap,
                     executedSeg)) {
         llvm::errs() << "[ERROR] Warning: segment " << executedSeg
                      << " not found in segmentSuccessorInfoMap for memory node "
@@ -2025,9 +2094,10 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
         continue;
       }
 
-      for (const auto &selSucNode : switchInfo.dataInfo.nodeToDataState[selNode]
-                                        ->segmentSuccessorInfoMap[executedSeg]
-                                        .glitch) {
+      for (const auto &selSucNode :
+           switchInfo.dataInfo.nodeToDataState[selNode]
+               ->segmentSuccessorInfoMap[executedSeg]
+               .glitch) {
         //! Exclude the memory controller
         if ((!contains(selSucNode, "mem_controller")) &&
             ((!contains(selSucNode, "end")))) {
@@ -2051,9 +2121,10 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
       }
 
       // Step 3: Update nodes in non glitching list
-      for (const auto &selSucNode : switchInfo.dataInfo.nodeToDataState[selNode]
-                                        ->segmentSuccessorInfoMap[executedSeg]
-                                        .original) {
+      for (const auto &selSucNode :
+           switchInfo.dataInfo.nodeToDataState[selNode]
+               ->segmentSuccessorInfoMap[executedSeg]
+               .original) {
         // Get bitwidth
         unsigned tmpNodeWidth = resolveOutWidth(selNode, selSucNode);
 
@@ -2253,9 +2324,10 @@ unsigned getExecutionIter(unsigned bbIndex, unsigned curBB,
   auto ub = profileResults.edgeIndexToIterationMap.upper_bound(bbIndex);
   if (ub != profileResults.edgeIndexToIterationMap.begin()) {
     --ub;
-    llvm::errs() << "[WARNING] Missing edgeIndexToIterationMap entry for bbIndex "
-                 << bbIndex << ", falling back to nearest mapped index "
-                 << ub->first << " (iter " << ub->second << ")\n";
+    llvm::errs()
+        << "[WARNING] Missing edgeIndexToIterationMap entry for bbIndex "
+        << bbIndex << ", falling back to nearest mapped index " << ub->first
+        << " (iter " << ub->second << ")\n";
     return ub->second;
   }
 
@@ -2476,7 +2548,8 @@ findSrcInSegment(const SwitchingInfo &si, const std::string &nodeName,
   }
 
   // Iterate all mapped roots
-  for (auto const &mapped : si.dataInfo.segmentToDataSourceNodes.at(segLabel).all) {
+  for (auto const &mapped :
+       si.dataInfo.segmentToDataSourceNodes.at(segLabel).all) {
     // 2) Direct name-match
     if (contains(nodeName, mapped)) {
       return mapped;
@@ -2493,7 +2566,8 @@ findSrcInSegment(const SwitchingInfo &si, const std::string &nodeName,
     // 4) Check if segSuc entry exists
     if (!contains(nodeVal->segmentSuccessorInfoMap, segLabel)) {
       llvm::errs() << "[ERROR] Segment " << segLabel
-                   << " not found in segmentSuccessorInfoMap for node " << mapped << "\n";
+                   << " not found in segmentSuccessorInfoMap for node "
+                   << mapped << "\n";
       continue;
     }
     auto const &mSuc = nodeVal->segmentSuccessorInfoMap.at(segLabel);
@@ -2521,7 +2595,8 @@ std::string segENodeSrcSearch(SwitchingInfo &switchInfo, std::string nodeName,
   if (profileResults.executedSegmentTrace.size() >= 2) {
     auto prev =
         profileResults
-            .executedSegmentTrace[profileResults.executedSegmentTrace.size() - 2];
+            .executedSegmentTrace[profileResults.executedSegmentTrace.size() -
+                                  2];
     if (auto src = findSrcInSegment(switchInfo, nodeName, prev))
       return *src;
   }
@@ -2556,9 +2631,8 @@ void DataBase::printDetail() {
   // Print originalDataOut
   llvm::dbgs() << "\tOriginal Dataout:\n";
   for (const auto &kv : originalDataOut) {
-    llvm::dbgs()
-               << "\t\tIter " << kv.first << ": (" << kv.second.value << ", "
-               << kv.second.iterIndex << ")\n";
+    llvm::dbgs() << "\t\tIter " << kv.first << ": (" << kv.second.value << ", "
+                 << kv.second.iterIndex << ")\n";
   }
 
   // Print mg_suc_node_dict, which is a map<mg_label, MgInfo>
@@ -2586,8 +2660,7 @@ void DataBase::printDetail() {
     // Print data_width
     llvm::dbgs() << "\t\tdata_width:\n";
     for (const auto &dw : info.dataWidthMap) {
-      llvm::dbgs()
-                 << "\t\t  " << dw.first << " => " << dw.second << "\n";
+      llvm::dbgs() << "\t\t  " << dw.first << " => " << dw.second << "\n";
     }
   }
 
@@ -2595,9 +2668,8 @@ void DataBase::printDetail() {
   if (controlDataOut.size()) {
     llvm::dbgs() << "\tControl Dataout:\n";
     for (const auto &kv : controlDataOut) {
-      llvm::dbgs()
-                 << "\t\tIter " << kv.first << ": (" << kv.second.value << ", "
-                 << kv.second.iterIndex << ")\n";
+      llvm::dbgs() << "\t\tIter " << kv.first << ": (" << kv.second.value
+                   << ", " << kv.second.iterIndex << ")\n";
     }
   }
 }
@@ -2608,16 +2680,14 @@ void CMergeData::printDetail() {
   // Print originalDataOut
   llvm::dbgs() << "\tOriginal Dataout:\n";
   for (const auto &kv : originalDataOut) {
-    llvm::dbgs()
-               << "\t\tIter " << kv.first << ": (" << kv.second.value << ", "
-               << kv.second.iterIndex << ")\n";
+    llvm::dbgs() << "\t\tIter " << kv.first << ": (" << kv.second.value << ", "
+                 << kv.second.iterIndex << ")\n";
   }
 
   llvm::dbgs() << "\tControl Dataout:\n";
   for (const auto &kv : controlDataOut) {
-    llvm::dbgs()
-               << "\t\tIter " << kv.first << ": (" << kv.second.value << ", "
-               << kv.second.iterIndex << ")\n";
+    llvm::dbgs() << "\t\tIter " << kv.first << ": (" << kv.second.value << ", "
+                 << kv.second.iterIndex << ")\n";
   }
 
   // Print mg_suc_node_dict, which is a map<mg_label, MgInfo>
@@ -2645,8 +2715,7 @@ void CMergeData::printDetail() {
     // Print data_width
     llvm::dbgs() << "\t\tdata_width:\n";
     for (const auto &dw : info.dataWidthMap) {
-      llvm::dbgs()
-                 << "\t\t  " << dw.first << " => " << dw.second << "\n";
+      llvm::dbgs() << "\t\t  " << dw.first << " => " << dw.second << "\n";
     }
   }
 
@@ -2664,18 +2733,9 @@ int CMergeData::getControlOutput(unsigned selIter) {
   if (contains(controlDataOut, selIter))
     return controlDataOut[selIter].value;
 
-  auto it = controlDataOut.upper_bound(selIter);
-  if (it != controlDataOut.begin()) {
-    --it;
-    return it->second.value;
-  }
-
-  if (!controlDataOut.empty())
-    return controlDataOut.begin()->second.value;
-
-  else {
-    return 0;
-  }
+  // ControlMerge control output is event-based in this model. If the selected
+  // iteration has no event, default to 0 rather than reusing an older value.
+  return 0;
 }
 
 std::vector<std::string>

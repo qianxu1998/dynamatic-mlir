@@ -244,22 +244,29 @@ void SwitchingEstimationPass::runOnOperation() {
     }
   }
 
+  //=======================================================================//
   // [STEP 5] Calculate Data channel switching
-
+  //=======================================================================//
   llvm::dbgs() << "[DEBUG] [Step 5] Calculating data channel switching\n";
   calDataChannelSwitching(topModule, profilingResults);
 
+  //=======================================================================//
   // [STEP 6] Calculate Steady State Handshake channel switching
+  //=======================================================================//
   llvm::dbgs() << "[DEBUG] [Step 6] Calculating steady state "
                   "handshake channel switching\n";
   computeSteadyStateHandshakeSwitching(topModule, profilingResults);
 
+  //=======================================================================//
   // [Step 7] Propagate handshake switching to the entire dataflow graph
+  //=======================================================================//
   llvm::dbgs() << "[DEBUG] [Step 7] Propagating handshake switching "
                   "to the entire dataflow graph\n";
   computeTotalHandshakeSwitching(topModule, profilingResults);
 
+  //=======================================================================//
   // [Step 8] Dump the switching estimation results
+  //=======================================================================//
   // TODO: Need to refine the dumping format, we are counting the output ports
   // now, need to record the input ports switching of each node as well
   llvm::dbgs() << "[DEBUG] [Step 8] Dumping the switching estimation results\n";
@@ -513,9 +520,8 @@ void SwitchingEstimationPass::calDataChannelSwitching(
   dataBaseNodeGlitchUpdate(switchingInfo, profileResults, false);
 
   // [SS 8] Propagate all the data base value
-
   llvm::dbgs() << "[DEBUG] [Step 5.8] Propagate all the data base value\n";
-  dfgDataChannelPropagate(switchingInfo, profileResults, false);
+  dfgDataChannelPropagate(switchingInfo, profileResults, true);
 
   // [SS 9] Calculate the data channel switching for each node in the dataflow
   // graph
@@ -530,12 +536,15 @@ void SwitchingEstimationPass::calDataChannelSwitching(
     auto *node = entry.second.get();
     node->totalDataSwitchingCounting(false);
     // llvm::dbgs() << "[DEBUG] \t[Node] " << nodeName << "\n";
-    // llvm::dbgs() << "[DEBUG] \t\tData Switching: "
-    //                         << node->totalDataSwitching << "\n";
-    // llvm::dbgs() << "[DEBUG] \t\tValid Switching: "
-    //                         << node->totalValidSwitching << "\n";
-    // llvm::dbgs() << "[DEBUG] \t\tReady Switching: "
-    //                         << node->totalReadySwitching << "\n";
+    // llvm::dbgs() << "[DEBUG] \t\tData Switching: " <<
+    // node->totalDataSwitching
+    //              << "\n";
+    // llvm::dbgs() << "[DEBUG] \t\tValid Switching: " <<
+    // node->totalValidSwitching
+    //              << "\n";
+    // llvm::dbgs() << "[DEBUG] \t\tReady Switching: " <<
+    // node->totalReadySwitching
+    //              << "\n";
   }
 }
 

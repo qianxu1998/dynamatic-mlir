@@ -107,31 +107,48 @@ struct StaticInfo {
 };
 
 // Runtime storage for the data-channel estimation pipeline.
+// The following maps/vectors are filled while replaying the profiling trace and
+// propagating values/glitches through the graph.
 struct DataInfo {
   // Segment label -> data/control source-node buckets.
+  // Example:
+  //   "mg0.seg2" -> {all={"addi_0","mux_1"}, control={"mux_1"},
+  //                  data={"addi_0"}}
   StringMap<SegmentDataSourceNodes> segmentToDataSourceNodes;
 
   // Segment label -> node name -> glitch descriptors.
+  // Example:
+  //   "mg0.seg2" -> {"addi_0" -> [{srcNode="muli_0", steadyTime=3,
+  //                                 buffered=false}]}
   StringMap<std::map<std::string, std::vector<NodeGlitchInfo>>> glitches;
   // Segment label -> topologically ordered ALU nodes.
+  // Example: "mg0.seg2" -> {"addi_0", "muli_1", "subi_0"}
   StringMap<std::vector<std::string>> segmentToOrderedAluNodes;
   // Segment label -> mux/control_merge node lists.
+  // Example: "mg0.seg2" -> {muxNodes={"mux_0"}, controlMergeNodes={"cm_0"}}
   StringMap<SegmentControlNodes> segmentControlNodes;
   // Segment label -> first execution index in the profiling trace.
+  // Example: "mg0.seg2" -> 17
   StringMap<unsigned> segmentToFirstExecutionIter;
   // Node name -> persistent propagation state.
+  // Example: "addi_0" -> DataBase (contains original/glitch outputs by iter)
   StringMap<std::shared_ptr<DataBase>> nodeToDataState;
   // (preBB, curBB) -> [(control_merge_node, selected_input_port)].
+  // Example: (3, 5) -> {("cm_0", 1), ("cm_2", 0)}
   std::map<std::pair<unsigned, unsigned>,
            std::vector<std::pair<std::string, int>>>
       bbPairToControlMergeOutputs;
   // Segment label -> topologically ordered data-source nodes.
+  // Example: "mg0.seg2" -> {"arg_0", "const_1", "addi_0", "mux_0"}
   StringMap<std::vector<std::string>> segmentToOrderedDataSourceNodes;
   // Global topological order over mux nodes.
+  // Example: {"mux_0", "mux_3", "mux_4"}
   std::vector<std::string> orderedMuxNodes;
   // Full execution-segment trace indexed by global iteration.
+  // Example: index 0 -> "mg0.seg0", 1 -> "mg0.seg1", 2 -> "mg0.seg0"
   std::vector<std::string> executedSegmentTrace;
   // Segment label -> all global iteration indices where that segment executes.
+  // Example: "mg0.seg0" -> {0, 2, 7}
   StringMap<std::vector<unsigned>> segmentToExecutionIndices;
 };
 
