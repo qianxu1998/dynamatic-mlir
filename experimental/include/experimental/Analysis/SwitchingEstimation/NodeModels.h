@@ -55,7 +55,7 @@ inline unsigned normalizeCycleIndex(int cycle, unsigned II) {
     LLVM_DEBUG(llvm::dbgs()
                << "[ERROR]: Negative cycle index before normalization: " << idx
                << "\n");
-  idx += static_cast<int>(II);
+  // idx += static_cast<int>(II);
   return static_cast<unsigned>(idx);
 }
 

@@ -521,7 +521,7 @@ void SwitchingEstimationPass::calDataChannelSwitching(
 
   // [SS 8] Propagate all the data base value
   llvm::dbgs() << "[DEBUG] [Step 5.8] Propagate all the data base value\n";
-  dfgDataChannelPropagate(switchingInfo, profileResults, true);
+  dfgDataChannelPropagate(switchingInfo, profileResults, false);
 
   // [SS 9] Calculate the data channel switching for each node in the dataflow
   // graph

@@ -105,6 +105,9 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
       float_t selBuffOcc = selBuffNode->occupancy;
       unsigned selBufSlots = selBuffNode->numSlots;
       bool selBuffTransparent = selBuffNode->transparent;
+      // TODO: Need to add support for different types of buffers, currently we
+      // only support OEHB and TEHB, which are the most common types of buffers
+      // used in the dataflow circuit
       const auto buffType = selBuffNode->buffType;
 
       // Store occupancy of direct preceding buffer, if exist
@@ -145,8 +148,11 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
 
       IISet tmpBufferValidSet(selMGII, false);
       const bool oneSlotBuffer = selBufSlots == 1;
-      if (tmpNumCycles < 0.0f)
+      if (tmpNumCycles < 0.0f) {
+        llvm::dbgs() << "[WARNING] \t\tNegative active cycles for buffer "
+                     << selBuffName << ", set to 0\n";
         tmpNumCycles = 0.0f;
+      }
 
       // TODO: Need to add support for different types of buffers
       for (unsigned i = 0; i < getUnsigned(tmpNumCycles); ++i) {
@@ -1031,10 +1037,12 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         int condValue = 0;
         if (switchInfo.staticInfo.dataflowGraph->nodes[condPortName]
                 ->dataOut[selNode]
-                .size() > switchInfo.dataInfo.segmentToFirstExecutionIter[selMG]) {
+                .size() >
+            switchInfo.dataInfo.segmentToFirstExecutionIter[selMG]) {
           condValue =
               switchInfo.staticInfo.dataflowGraph->nodes[condPortName]
-                  ->dataOut[selNode][switchInfo.dataInfo.segmentToFirstExecutionIter[selMG]];
+                  ->dataOut[selNode][switchInfo.dataInfo
+                                         .segmentToFirstExecutionIter[selMG]];
         } else {
           condValue = switchInfo.staticInfo.dataflowGraph->nodes[condPortName]
                           ->dataOut[selNode][0];
