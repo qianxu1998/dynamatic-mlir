@@ -21,6 +21,7 @@
 #include "dynamatic/Support/Logging.h"
 #include "dynamatic/Support/TimingModels.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/Support/Debug.h"
 
 #include <algorithm>
 #include <cctype>
@@ -101,7 +102,9 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
 
       selBuffNode->START = finStartPointNorm;
 
+      // =============================================
       // [Step 2] Calculate SET_V
+      // =============================================
       float_t selBuffOcc = selBuffNode->occupancy;
       unsigned selBufSlots = selBuffNode->numSlots;
       bool selBuffTransparent = selBuffNode->transparent;
@@ -115,7 +118,8 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
       float_t tmpNumCycles = 0;
 
       // Handle transparent (bypass-DV) buffers.
-      if (selBuffTransparent) {
+      if (selBuffTransparent &&
+          selBuffNode->buffType == BufferType::ONE_SLOT_BREAK_R) {
         if (tmpLongPath.lastSecondBuffer != "") {
           auto selLastSecondBuff = dyn_cast<BufferNode>(
               selAdjGraph->nodes[tmpLongPath.lastSecondBuffer].get());
@@ -124,19 +128,33 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
 
         // Check whether the second last buffer is directly preceding the
         // current buffer
-        if (std::find(selBuffNode->pres.begin(), selBuffNode->pres.end(),
-                      tmpLongPath.lastSecondBuffer) !=
-            selBuffNode->pres.end()) {
-          tmpPreBuffOcc = 0;
+        // if (std::find(selBuffNode->pres.begin(), selBuffNode->pres.end(),
+        //               tmpLongPath.lastSecondBuffer) !=
+        //     selBuffNode->pres.end()) {
+        //   tmpPreBuffOcc = 0;
 
-          if (debug) {
-            llvm::dbgs() << "[DEBUG] \t\tThe last opaque buffer "
-                         << tmpLongPath.lastSecondBuffer
-                         << " is directly preceding the current buffer "
-                         << selBuffName << "\n";
-          }
+        //   if (debug) {
+        //     llvm::dbgs() << "[DEBUG] \t\tThe last opaque buffer "
+        //                  << tmpLongPath.lastSecondBuffer
+        //                  << " is directly preceding the current buffer "
+        //                  << selBuffName << "\n";
+        //   }
+        // }
+        tmpNumCycles =
+            ((tmpPreBuffOcc + selBuffOcc) / selMgThroughput) -
+            selAdjGraph->startBaseNodeShiftMap[tmpLongPath.selStartNode];
+      } else if (selBuffTransparent &&
+                 selBuffNode->buffType == BufferType::FIFO_BREAK_NONE) {
+        if (tmpLongPath.lastSecondBuffer != "") {
+          auto selLastSecondBuff = dyn_cast<BufferNode>(
+              selAdjGraph->nodes[tmpLongPath.lastSecondBuffer].get());
+          tmpPreBuffOcc = selLastSecondBuff->occupancy;
         }
 
+        // TFIFO valid behavior (from Verilog):
+        //   outs_valid = ins_valid || fifo_valid
+        // so include both bypassed upstream contribution (tmpPreBuffOcc) and
+        // locally buffered contribution (selBuffOcc).
         tmpNumCycles =
             ((tmpPreBuffOcc + selBuffOcc) / selMgThroughput) -
             selAdjGraph->startBaseNodeShiftMap[tmpLongPath.selStartNode];
@@ -175,7 +193,9 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
       }
       selBuffNode->calValidSet(selBuffNode->sucs[0], tmpBufferValidSet);
 
+      // =============================================
       // [Step 3] Calculate SET_R
+      // =============================================
       IISet tmpBufferReadySet(selMGII, false);
       IISet offsetSet(selMGII, false);
 
@@ -214,6 +234,33 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
           }
 
         } else if (selBuffNode->buffType == BufferType::FIFO_BREAK_NONE) {
+          //* Legacy Buffer Type: TFIFO
+          if (debug) {
+            llvm::dbgs() << "[DEBUG] \t\tBuffer Type: TFIFO\n";
+          }
+
+          // TFIFO ready behavior (from Verilog):
+          //   ins_ready = fifo_ready || outs_ready
+          //   fifo_ready = ~Full || outs_ready
+          // => ins_ready = ~Full || outs_ready.
+          // In this occupancy-based model, estimate not-ready cycles from
+          // fullness only; unlike TEHB, this does not depend on a preceding
+          // opaque buffer offset.
+          int tmpMissingCycles = static_cast<int>(
+              ((1 - selMgThroughput) - (selBufSlots - selBuffOcc)) /
+              selMgThroughput);
+
+          if (tmpMissingCycles < 0) {
+            llvm::dbgs() << "[WARNING] Negative missing cycles for buffer "
+                         << selBuffName << ", set to 0\n";
+            tmpMissingCycles = 0;
+          }
+
+          for (int i = 0; i < tmpMissingCycles; i++) {
+            unsigned relativeActiveCycle = (finStartPoint + i) % selMGII;
+            offsetSet.set(relativeActiveCycle);
+          }
+        } else if (selBuffNode->buffType == BufferType::ONE_SLOT_BREAK_R) {
           //* Legacy Buffer Type: TEHB
           if (debug) {
             llvm::dbgs() << "[DEBUG] \t\tBuffer Type: TEHB\n";
@@ -238,9 +285,13 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
                                   (selBufSlots - selBuffOcc - tmpPreBuffOcc)) /
                                  selMgThroughput);
           } else {
-            tmpMissingCycles = static_cast<int>(
-                ((1 - selMgThroughput) - (selBufSlots - selBuffOcc)) /
-                selMgThroughput);
+            if (selMGII == 1) {
+              tmpMissingCycles = 0;
+            } else {
+              tmpMissingCycles = static_cast<int>(
+                  ((1 - selMgThroughput) - (selBufSlots - selBuffOcc)) /
+                  selMgThroughput);
+            }
           }
 
           if (tmpMissingCycles < 0) {
@@ -256,14 +307,6 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
                 selMGII;
             offsetSet.set(relativeActiveCycle);
           }
-        } else if (selBuffNode->buffType == BufferType::ONE_SLOT_BREAK_R) {
-          //* Legacy Buffer Type: TEHB
-          if (debug) {
-            llvm::dbgs() << "[DEBUG] \t\tBuffer Type: TEHB\n";
-          }
-
-          // When the buffer is valid, it is not ready
-          offsetSet = tmpBufferValidSet;
         } else {
           // Unsupported buffer type, report error
           llvm::errs() << "[ERROR] Unsupported buffer type for buffer "
@@ -340,6 +383,13 @@ void mgHandshakeSwitchingCounting(SwitchingInfo &switchInfo, std::string selMG,
   unsigned numIter = 0;
   unsigned deadlockCounter = 0;
   unsigned listLength = pendingList.size();
+
+  //! Testing
+  llvm::dbgs()
+      << "[DEBUG] "
+         "==============================================================\n";
+  llvm::dbgs() << "[DEBUG] [Step 6.2] Event-driven iterative update for MG "
+               << selMG << "\n";
 
   while (pendingList.size() > 0) {
     // List of finished nodes in this iteration
@@ -1240,6 +1290,30 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
                              tmpNReadySetList[0], tmpNodeSSStart, selMGII);
         }
       })
+      .Case<PassNode>([&](PassNode *pass) {
+        // Generic pass-through node (e.g., canonicalized br/merge in graph model)
+        if (debug)
+          llvm::dbgs() << "[DEBUG] 	[Pass NODE] \n";
+
+        // Merge-like pass nodes may have multiple predecessors; propagate valid
+        // if any predecessor is active.
+        int mergedPValid = 0;
+        for (int v : tmpPValidList) {
+          if (v > mergedPValid)
+            mergedPValid = v;
+        }
+
+        for (const auto &selSuc : pass->sucs) {
+          pass->calValidSwitching(selSuc, mergedPValid);
+          pass->calValidSet(selSuc, tmpNodeSSStart, selMGII);
+        }
+
+        for (const auto &selPre : pass->pres) {
+          pass->calReadySwitching(selPre, tmpNReadyList[0]);
+          pass->calReadySet(selPre, tmpNReadySetList[0], tmpNodeSSStart,
+                            selMGII);
+        }
+      })
       .Case<SinkNode>([&](SinkNode *sink) {
         // SinkNode NODE
         //! Testing
@@ -1252,6 +1326,45 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         }
       })
       .Default([&](AdjNode *n) {
+        // Fallback for simple 1-in/1-out pass-through nodes (e.g., branch-like
+        // nodes that are not matched by a specific model in this dispatch).
+        if (n->pres.size() == 1 && n->sucs.size() == 1) {
+          if (debug)
+            llvm::dbgs() << "[DEBUG] \t[Fallback Pass-through NODE] \n";
+
+          const std::string &selPre = n->pres[0];
+          const std::string &selSuc = n->sucs[0];
+
+          int numValid = tmpPValidList.empty() ? -1 : tmpPValidList[0];
+          int numReady = tmpNReadyList.empty() ? -1 : tmpNReadyList[0];
+
+          // Pass-like valid propagation.
+          setValid(n, selSuc, numValid == 0 ? 0U : 2U);
+          if (n->validSignal[selSuc] == 0) {
+            setVSet(n, selSuc, IISet(selMGII, true));
+          } else {
+            IISet tmp(selMGII, false);
+            tmp.set(normalizeCycleIndex(static_cast<int>(tmpNodeSSStart),
+                                        selMGII));
+            setVSet(n, selSuc, std::move(tmp));
+          }
+
+          // Pass-like ready propagation.
+          setReady(n, selPre, numReady == 0 ? 0U : 2U);
+          if (!tmpNReadySetList.empty() && tmpNReadySetList[0] != nullptr) {
+            setRSet(n, selPre, *tmpNReadySetList[0]);
+          } else if (n->readySignal[selPre] == 0) {
+            setRSet(n, selPre, IISet(selMGII, true));
+          } else if (n->readySignal[selPre] > 0) {
+            IISet tmp(selMGII, false);
+            tmp.set(normalizeCycleIndex(static_cast<int>(tmpNodeSSStart),
+                                        selMGII));
+            setRSet(n, selPre, std::move(tmp));
+          }
+
+          return;
+        }
+
         // Unknown node type.
         llvm::errs() << "[ERROR] Unknown node type in nodeHandshakeUpdate: "
                      << selNode << "\n";
