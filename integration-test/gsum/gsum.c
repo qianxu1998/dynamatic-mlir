@@ -11,10 +11,10 @@
 #include "gsum.h"
 #include "dynamatic/Integration.h"
 
-float gsum(in_float_t a[N]) {
+int gsum(in_int_t a[N]) {
   int i;
-  float d;
-  float s = 0.0;
+  int d;
+  int s = 0;
 
   for (i = 0; i < N; i++) {
     d = a[i];
@@ -23,20 +23,18 @@ float gsum(in_float_t a[N]) {
       // scheduler reserves time slot for each iteration causing unnecessary
       // pipeline stalls.
 
-      s += (((((d + (float)0.64) * d + (float)0.7) * d + (float)0.21) * d +
-             (float)0.33) *
-            d);
+      s += ((((d + 6) * d) + 7) * d + 2) * d;
   }
   return s;
 }
 
 int main(void) {
-  in_float_t a[N];
-  in_float_t b[N];
+  in_int_t a[N];
+  in_int_t b[N];
 
   for (int i = 0; i < N; ++i) {
-    a[i] = (float)1 - i;
-    b[i] = (float)i + 10;
+    a[i] = (int)1 - i;
+    b[i] = (int)i + 10;
 
     if (i % 100 == 0)
       a[i] = i;

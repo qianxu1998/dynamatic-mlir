@@ -1,9 +1,9 @@
 #ifndef GSUM_GSUM_H
 #define GSUM_GSUM_H
-typedef float in_float_t;
+typedef int in_int_t;
 
 #define N 1000
 
-float gsum(in_float_t a[N]);
+int gsum(in_int_t a[N]);
 
 #endif // GSUM_GSUM_H
