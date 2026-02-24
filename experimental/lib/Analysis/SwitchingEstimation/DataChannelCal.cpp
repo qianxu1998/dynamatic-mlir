@@ -71,6 +71,24 @@ unsigned getSegmentII(const SwitchingInfo &switchInfo,
   unsigned ii = static_cast<unsigned>(std::llround(it->second));
   return std::max(ii, 1U);
 }
+
+// In data-channel glitch propagation, only opaque buffers block glitches.
+// Transparent buffers are treated as pass-through for glitch events.
+bool isOpaqueBuffer(const SwitchingInfo &switchInfo, const std::string &node) {
+  if (!contains(node, "buffer"))
+    return false;
+
+  auto nodeIt = switchInfo.staticInfo.dataflowGraph->nodes.find(node);
+  if (nodeIt == switchInfo.staticInfo.dataflowGraph->nodes.end() ||
+      !nodeIt->second)
+    return true;
+
+  if (auto *bufferNode = dyn_cast<BufferNode>(nodeIt->second.get()))
+    return !bufferNode->transparent;
+
+  // Keep legacy conservative behavior if we cannot classify this node.
+  return true;
+}
 } // namespace
 
 void mapBBPairToControlMerge(SwitchingInfo &switchInfo) {
@@ -2280,7 +2298,7 @@ SegmentSuccessorInfo segGeneralSuccSearch(SwitchingInfo &switchInfo,
     if (w < minDataWidth)
       minDataWidth = w;
     // 2) Buffer count
-    if (contains(n, "buffer"))
+    if (isOpaqueBuffer(si, n))
       ++numBuffers;
     // 3) Classify
     if (numBuffers > 0)
@@ -2297,7 +2315,7 @@ SegmentSuccessorInfo segGeneralSuccSearch(SwitchingInfo &switchInfo,
 
   auto onExit = [&](const std::string &n) {
     if (!currentPath.empty() && currentPath.back() == n) {
-      if (contains(n, "buffer"))
+      if (isOpaqueBuffer(si, n))
         --numBuffers;
       currentPath.pop_back();
     }
@@ -2797,7 +2815,7 @@ segCtrlMergeGlitchSuccSearch(SwitchingInfo &switchInfo, std::string startNode,
     if (n == startNode)
       return; // <-- skip root itself
 
-    if (contains(n, "buffer"))
+    if (isOpaqueBuffer(switchInfo, n))
       numBuffers++;
     if (numBuffers == 0) {
       glitchSuccNodeList.push_back(n);
@@ -2807,7 +2825,7 @@ segCtrlMergeGlitchSuccSearch(SwitchingInfo &switchInfo, std::string startNode,
   // C) post: exactly as before
   auto post = [&](const std::string &n) {
     if (!currentPath.empty() && currentPath.back() == n) {
-      if (contains(n, "buffer"))
+      if (isOpaqueBuffer(switchInfo, n))
         numBuffers--;
       currentPath.pop_back();
     }
