@@ -26,7 +26,9 @@
 #include "dynamatic/Transforms/BufferPlacement/CFDFC.h"
 #include "dynamatic/Transforms/HandshakeMaterialize.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/Path.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdlib>
 
@@ -70,6 +72,12 @@ struct SwitchingEstimationPass
   // Dump the switching information
   void dumpSwitchingResults(const SwitchingInfo &switchInfo,
                             StringRef dumpPath);
+  // Dump propagated data-channel values/toggles for debug.
+  void dumpDataChannelDetails(const SwitchingInfo &switchInfo,
+                              StringRef dumpPath);
+  // Dump per-MG steady-state handshake channel estimations for debug.
+  void dumpPerMGHandshakeDetails(const SwitchingInfo &switchInfo,
+                                 StringRef dumpPath);
 
   //
   //  DataChannel Switching Calculation
@@ -90,6 +98,58 @@ struct SwitchingEstimationPass
   void computeTotalHandshakeSwitching(mlir::ModuleOp &topModule,
                                       SCFProfilingResult &profileResults);
 };
+
+namespace {
+
+/// Build a sibling debug-dump file path from the main CSV dump path.
+/// Example:
+///   /tmp/switching_estimation.csv + "_data_channels"
+///   -> /tmp/switching_estimation_data_channels.txt
+static std::string deriveSiblingDumpPath(StringRef basePath, StringRef suffix) {
+  if (basePath.empty())
+    return "";
+
+  llvm::SmallString<256> out(basePath);
+  llvm::sys::path::remove_filename(out);
+
+  llvm::SmallString<128> name(llvm::sys::path::stem(basePath));
+  name += suffix;
+  name += ".txt";
+
+  llvm::sys::path::append(out, name);
+  return std::string(out.str());
+}
+
+/// Render the active-cycle set as "{0, 3, 7}".
+static std::string formatActiveCycles(const IISet &set) {
+  std::string rendered;
+  llvm::raw_string_ostream os(rendered);
+  os << "{";
+  bool first = true;
+  for (unsigned i = 0, e = set.size(); i < e; ++i) {
+    if (!set.test(i))
+      continue;
+    if (!first)
+      os << ", ";
+    os << i;
+    first = false;
+  }
+  if (first)
+    os << "-";
+  os << "}";
+  return os.str();
+}
+
+/// Render the active-cycle bitmask in index order [0..II-1], e.g. "1010".
+static std::string formatCycleMask(const IISet &set) {
+  std::string rendered;
+  llvm::raw_string_ostream os(rendered);
+  for (unsigned i = 0, e = set.size(); i < e; ++i)
+    os << (set.test(i) ? '1' : '0');
+  return os.str();
+}
+
+} // namespace
 
 void SwitchingEstimationPass::runOnOperation() {
   llvm::dbgs() << "[DEBUG] Running switching estimation pass\n";
@@ -272,6 +332,21 @@ void SwitchingEstimationPass::runOnOperation() {
   llvm::dbgs() << "[DEBUG] [Step 8] Dumping the switching estimation results\n";
   llvm::dbgs() << "[DEBUG] Dump file path: " << dumpFile << "\n";
   dumpSwitchingResults(switchingInfo, dumpFile);
+
+  // Extra debug dumps:
+  //  1) data-channel propagation details (per channel/per bit/per value)
+  //  2) per-MG steady-state handshake channel details (valid/ready + IISets)
+  const std::string dataChannelDump =
+      deriveSiblingDumpPath(dumpFile, "_data_channels");
+  const std::string mgHandshakeDump =
+      deriveSiblingDumpPath(dumpFile, "_mg_handshake");
+
+  llvm::dbgs() << "[DEBUG] Data-channel detail dump path: " << dataChannelDump
+               << "\n";
+  llvm::dbgs() << "[DEBUG] Per-MG handshake detail dump path: "
+               << mgHandshakeDump << "\n";
+  dumpDataChannelDetails(switchingInfo, dataChannelDump);
+  dumpPerMGHandshakeDetails(switchingInfo, mgHandshakeDump);
 }
 
 //===----------------------------------------------------------------------===//
@@ -431,6 +506,190 @@ void SwitchingEstimationPass::dumpSwitchingResults(
     const auto *node = entry.second.get();
     OS << nodeName << "," << node->totalDataSwitching << ","
        << node->totalValidSwitching << "," << node->totalReadySwitching << "\n";
+  }
+}
+
+void SwitchingEstimationPass::dumpDataChannelDetails(
+    const SwitchingInfo &switchInfo, StringRef dumpPath) {
+  std::error_code EC;
+  llvm::raw_fd_ostream OS(dumpPath, EC);
+
+  if (EC) {
+    llvm::errs() << "[ERROR] Could not open data-channel debug dump file "
+                 << dumpPath << ": " << EC.message() << "\n";
+    return;
+  }
+
+  OS << "# Switching Estimation Debug Dump: Data-Channel Propagation\n";
+  OS << "# Includes per-node/per-channel values, total switches, and per-bit "
+        "toggles.\n\n";
+
+  auto graph = switchInfo.staticInfo.dataflowGraph;
+  if (!graph) {
+    OS << "(no dataflow graph available)\n";
+    return;
+  }
+
+  for (const auto &nodeName : graph->orderedNodeName) {
+    auto it = graph->nodes.find(nodeName);
+    if (it == graph->nodes.end())
+      continue;
+
+    const auto *node = it->second.get();
+    if (contains(nodeName, "mem_controller"))
+      continue;
+
+    OS << "================================================================\n";
+    OS << "Node: " << nodeName << "\n";
+    OS << "  total_data_switching: " << node->totalDataSwitching << "\n";
+    OS << "  data_channel_count: " << node->dataOut.size() << "\n";
+
+    if (node->dataOut.empty()) {
+      OS << "  (no propagated data channels)\n\n";
+      continue;
+    }
+
+    for (const auto &[channelName, values] : node->dataOut) {
+      unsigned width = 0;
+      if (auto widthIt = node->sucsDataWidthMap.find(channelName);
+          widthIt != node->sucsDataWidthMap.end())
+        width = widthIt->second;
+
+      unsigned switches = 0;
+      if (auto swIt = node->dataSwitches.find(channelName);
+          swIt != node->dataSwitches.end())
+        switches = swIt->second;
+
+      OS << "  Channel: " << channelName << "\n";
+      OS << "    width: " << width << "\n";
+      OS << "    switches: " << switches << "\n";
+
+      OS << "    values (sequence):\n";
+      if (values.empty()) {
+        OS << "      (none)\n";
+      } else {
+        for (unsigned idx = 0, e = values.size(); idx < e; ++idx) {
+          int value = values[idx];
+          if (value == -1)
+            OS << "      [" << idx << "] X(-1)\n";
+          else
+            OS << "      [" << idx << "] " << value << "\n";
+        }
+      }
+
+      OS << "    per_bit_toggles:\n";
+      auto bitToggleIt = node->perChannelToggle.find(channelName);
+      if (bitToggleIt == node->perChannelToggle.end() ||
+          bitToggleIt->second.empty()) {
+        OS << "      (none)\n";
+      } else {
+        for (const auto &[bitIdx, toggleNum] : bitToggleIt->second)
+          OS << "      bit[" << bitIdx << "] = " << toggleNum << "\n";
+      }
+    }
+
+    OS << "\n";
+  }
+}
+
+void SwitchingEstimationPass::dumpPerMGHandshakeDetails(
+    const SwitchingInfo &switchInfo, StringRef dumpPath) {
+  std::error_code EC;
+  llvm::raw_fd_ostream OS(dumpPath, EC);
+
+  if (EC) {
+    llvm::errs() << "[ERROR] Could not open per-MG handshake debug dump file "
+                 << dumpPath << ": " << EC.message() << "\n";
+    return;
+  }
+
+  OS << "# Switching Estimation Debug Dump: Per-MG Handshake Estimation\n";
+  OS << "# Includes per-node valid/ready switching and active II sets.\n\n";
+
+  std::vector<std::string> mgLabels;
+  mgLabels.reserve(switchInfo.staticInfo.segToGraph.size());
+  for (const auto &entry : switchInfo.staticInfo.segToGraph)
+    mgLabels.push_back(entry.first().str());
+
+  std::sort(mgLabels.begin(), mgLabels.end(),
+            [](const std::string &lhs, const std::string &rhs) {
+              unsigned lhsNum = 0, rhsNum = 0;
+              bool lhsIsNum =
+                  !lhs.empty() && !llvm::StringRef(lhs).getAsInteger(10, lhsNum);
+              bool rhsIsNum =
+                  !rhs.empty() && !llvm::StringRef(rhs).getAsInteger(10, rhsNum);
+              if (lhsIsNum && rhsIsNum)
+                return lhsNum < rhsNum;
+              if (lhsIsNum != rhsIsNum)
+                return lhsIsNum;
+              return lhs < rhs;
+            });
+
+  for (const auto &mgLabel : mgLabels) {
+    auto mgIt = switchInfo.staticInfo.segToGraph.find(mgLabel);
+    if (mgIt == switchInfo.staticInfo.segToGraph.end())
+      continue;
+    auto mgGraph = mgIt->second;
+
+    unsigned mgIndex = 0;
+    double throughput = 0.0;
+    if (!llvm::StringRef(mgLabel).getAsInteger(10, mgIndex)) {
+      if (auto tpIt = switchInfo.staticInfo.cfdfcThroughput.find(mgIndex);
+          tpIt != switchInfo.staticInfo.cfdfcThroughput.end())
+        throughput = tpIt->second;
+    }
+
+    OS << "================================================================\n";
+    OS << "MG: " << mgLabel << "\n";
+    OS << "  II: " << mgGraph->cfdfcII << "\n";
+    OS << "  Throughput: " << throughput << "\n";
+    OS << "  Node Count: " << mgGraph->nodes.size() << "\n\n";
+
+    for (const auto &nodeName : mgGraph->orderedNodeName) {
+      auto nodeIt = mgGraph->nodes.find(nodeName);
+      if (nodeIt == mgGraph->nodes.end())
+        continue;
+      const auto *node = nodeIt->second.get();
+
+      OS << "  Node: " << nodeName << "\n";
+      OS << "    total_valid_switching: " << node->totalValidSwitching << "\n";
+      OS << "    total_ready_switching: " << node->totalReadySwitching << "\n";
+
+      OS << "    valid_channels:\n";
+      if (node->validSignal.empty()) {
+        OS << "      (none)\n";
+      } else {
+        for (const auto &[sucName, switchNum] : node->validSignal) {
+          OS << "      " << sucName << " : " << switchNum;
+          auto setIt = node->setV.find(sucName);
+          if (setIt != node->setV.end()) {
+            OS << " ; active_cycles=" << formatActiveCycles(setIt->second)
+               << " ; mask=" << formatCycleMask(setIt->second);
+          } else {
+            OS << " ; active_cycles={missing}";
+          }
+          OS << "\n";
+        }
+      }
+
+      OS << "    ready_channels:\n";
+      if (node->readySignal.empty()) {
+        OS << "      (none)\n";
+      } else {
+        for (const auto &[preName, switchNum] : node->readySignal) {
+          OS << "      " << preName << " : " << switchNum;
+          auto setIt = node->setR.find(preName);
+          if (setIt != node->setR.end()) {
+            OS << " ; active_cycles=" << formatActiveCycles(setIt->second)
+               << " ; mask=" << formatCycleMask(setIt->second);
+          } else {
+            OS << " ; active_cycles={missing}";
+          }
+          OS << "\n";
+        }
+      }
+      OS << "\n";
+    }
   }
 }
 
