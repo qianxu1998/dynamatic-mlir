@@ -55,6 +55,7 @@ struct SegmentDataSourceNodes {
   std::vector<std::string> all;
   std::vector<std::string> control;
   std::vector<std::string> data;
+  std::vector<std::string> opaque_buffers;
 };
 
 // Struct storing the list of mux and control merge nodes in each seg

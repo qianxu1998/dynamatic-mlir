@@ -313,7 +313,8 @@ public:
                              std::unordered_set<std::string> &baseNodeSet);
 
   // This function conducts backtracking in the MG from the specified node,
-  // the search will stop when there is no node left and return all buffer nodes.
+  // the search will stop when there is no node left and return all buffer
+  // nodes.
   std::vector<std::string> mgBacktrackBuffer(std::string srcNode);
 
   //===----------------------------------------------------------------------===//
@@ -363,6 +364,8 @@ public:
   // port_idx), ], }
   llvm::StringMap<std::vector<std::pair<std::string, unsigned>>>
       condBrToBufferMap;
+  // Map from data source node to opaque buffer nodes
+  llvm::StringMap<std::string> dataSrcToOpaqueBufferMap;
 
   //===----------------------------------------------------------------------===//
   // Path Caching Structures

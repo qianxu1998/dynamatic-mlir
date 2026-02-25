@@ -309,7 +309,7 @@ void SwitchingEstimationPass::runOnOperation() {
   //=======================================================================//
   llvm::dbgs() << "[DEBUG] [Step 5] Calculating data channel switching\n";
   calDataChannelSwitching(topModule, profilingResults);
-
+  return;
   //=======================================================================//
   // [STEP 6] Calculate Steady State Handshake channel switching
   //=======================================================================//
@@ -614,10 +614,10 @@ void SwitchingEstimationPass::dumpPerMGHandshakeDetails(
   std::sort(mgLabels.begin(), mgLabels.end(),
             [](const std::string &lhs, const std::string &rhs) {
               unsigned lhsNum = 0, rhsNum = 0;
-              bool lhsIsNum =
-                  !lhs.empty() && !llvm::StringRef(lhs).getAsInteger(10, lhsNum);
-              bool rhsIsNum =
-                  !rhs.empty() && !llvm::StringRef(rhs).getAsInteger(10, rhsNum);
+              bool lhsIsNum = !lhs.empty() &&
+                              !llvm::StringRef(lhs).getAsInteger(10, lhsNum);
+              bool rhsIsNum = !rhs.empty() &&
+                              !llvm::StringRef(rhs).getAsInteger(10, rhsNum);
               if (lhsIsNum && rhsIsNum)
                 return lhsNum < rhsNum;
               if (lhsIsNum != rhsIsNum)
@@ -747,7 +747,7 @@ void SwitchingEstimationPass::calDataChannelSwitching(
 
   // [SS 3] Contruct the data source node info of mux, condbr and mem node
   llvm::dbgs() << "[DEBUG] [Step 5.3] Contruct the data source node "
-                  "info of mux, condbr and mem node\n";
+                  "info of mux, condbr and mem node and opaque buffers\n";
   switchingInfo.staticInfo.dataflowGraph->buildSrcMaps();
 
   //! Testing
@@ -763,6 +763,7 @@ void SwitchingEstimationPass::calDataChannelSwitching(
   llvm::dbgs() << "[DEBUG] [Step 5.4] Update value for all data base nodes\n";
   dataChannelBaseNodesValueUpdate(switchingInfo, profileResults);
 
+  return;
   // [SS 5] Build succeeding node list for data base nodes in different segments
   llvm::dbgs() << "[DEBUG] [Step 5.5] Build succeeding node list "
                   "for data base nodes in different segments\n";
@@ -821,13 +822,13 @@ void SwitchingEstimationPass::computeSteadyStateHandshakeSwitching(
   // Step 1
   for (unsigned i = 0; i < switchingInfo.staticInfo.cfdfcThroughput.size();
        i++) {
-    updateMGBufferSwitching(switchingInfo, std::to_string(i), true);
+    updateMGBufferSwitching(switchingInfo, std::to_string(i), false);
   }
 
   // Step 2
   for (unsigned i = 0; i < switchingInfo.staticInfo.cfdfcThroughput.size();
        i++) {
-    mgHandshakeSwitchingCounting(switchingInfo, std::to_string(i), true);
+    mgHandshakeSwitchingCounting(switchingInfo, std::to_string(i), false);
   }
 
   // Debug: Print steady-state handshake values after calculation

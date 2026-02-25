@@ -153,6 +153,9 @@ public:
   unsigned numSlots;
   bool transparent; // This is indeed bypassDV
   BufferType buffType;
+
+  // Data source node
+  std::string dataInSrcNode;
 };
 
 //

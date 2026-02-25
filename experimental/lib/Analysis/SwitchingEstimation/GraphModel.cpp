@@ -1289,6 +1289,32 @@ void AdjGraph::buildSrcMaps() {
         selStoreNode->dataInSrcNode = dataPreNode;
       break;
     }
+    case AdjNode::NodeKind::BufferNodeKind: {
+      auto *selBufferNode = dyn_cast<BufferNode>(nodes[selNode].get());
+      if (selBufferNode->transparent) {
+        break;
+      } else {
+        // We only backtrack the opaque buffers
+        if (selBufferNode->pres.size() > 1) {
+          llvm::errs() << "[WARNING] Buffer node " << selNode
+                       << " has multiple predecessors; only backtracking the "
+                          "first one\n";
+        }
+        std::string preNode =
+            selBufferNode->pres.empty() ? "" : selBufferNode->pres[0];
+        selBufferNode->dataInSrcNode = graphBacktrack(preNode, allDataBaseNode);
+      }
+
+      // Update the data source to buffer map
+      if (!selBufferNode->dataInSrcNode.empty())
+        dataSrcToOpaqueBufferMap[selBufferNode->dataInSrcNode] = selNode;
+      //! Testing
+      llvm::dbgs() << "[DEBUG] \t\tBuffer Node: " << selNode
+                   << "; DataInSrcNode: " << selBufferNode->dataInSrcNode
+                   << "\n";
+
+      break;
+    }
     }
   }
 }
