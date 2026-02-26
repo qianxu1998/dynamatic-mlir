@@ -309,7 +309,7 @@ void SwitchingEstimationPass::runOnOperation() {
   //=======================================================================//
   llvm::dbgs() << "[DEBUG] [Step 5] Calculating data channel switching\n";
   calDataChannelSwitching(topModule, profilingResults);
-  return;
+
   //=======================================================================//
   // [STEP 6] Calculate Steady State Handshake channel switching
   //=======================================================================//
@@ -763,7 +763,6 @@ void SwitchingEstimationPass::calDataChannelSwitching(
   llvm::dbgs() << "[DEBUG] [Step 5.4] Update value for all data base nodes\n";
   dataChannelBaseNodesValueUpdate(switchingInfo, profileResults);
 
-  return;
   // [SS 5] Build succeeding node list for data base nodes in different segments
   llvm::dbgs() << "[DEBUG] [Step 5.5] Build succeeding node list "
                   "for data base nodes in different segments\n";
