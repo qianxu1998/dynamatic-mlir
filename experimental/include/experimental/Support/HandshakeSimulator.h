@@ -2,6 +2,7 @@
 #define EXPERIMENTAL_SUPPORT_HANDSHAKE_SIMULATOR_H
 #include "dynamatic/Dialect/Handshake/HandshakeOps.h"
 #include "dynamatic/Dialect/Handshake/HandshakeTypes.h"
+#include "dynamatic/Support/JSON/JSON.h"
 #include "dynamatic/Support/LLVM.h"
 #include "dynamatic/Transforms/HandshakeMaterialize.h"
 #include "mlir/IR/Value.h"
@@ -11,8 +12,14 @@
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include <cstdint>
+#include <deque>
 #include <functional>
+#include <map>
+#include <optional>
 #include <string>
+#include <tuple>
+#include <unordered_map>
 #include <vector>
 
 using namespace llvm;
@@ -21,6 +28,25 @@ using namespace dynamatic;
 
 namespace dynamatic {
 namespace experimental {
+
+enum class HSInputFormat { Auto, Dat, Plain };
+
+struct ArgInputTransactions {
+  llvm::SmallVector<llvm::SmallVector<std::string>> transactions;
+  bool provided = false;
+};
+
+struct SimulationInputs {
+  mlir::DenseMap<unsigned, ArgInputTransactions> byArgIndex;
+  unsigned numTransactions = 0;
+};
+
+struct SimulatorOptions {
+  unsigned maxCycles = 1000000;
+  std::string lsqConfigDir;
+};
+
+class Simulator;
 
 // The wrapper for llvm::Any that lets the user check if the value was changed
 // It's required for updaters to stop the internal loop
@@ -41,6 +67,31 @@ struct Data {
 
   bool hasValue() const;
 };
+
+template <class T>
+T dataCast(const Data &value) {
+  return llvm::any_cast<T>(value.data);
+}
+
+template <class T>
+T dataCast(Data &value) {
+  return llvm::any_cast<T>(value.data);
+}
+
+template <class T>
+T dataCast(Data &&value) {
+  return llvm::any_cast<T>(value.data);
+}
+
+template <class T>
+const T *dataCast(const Data *value) {
+  return llvm::any_cast<T>(&value->data);
+}
+
+template <class T>
+T *dataCast(Data *value) {
+  return llvm::any_cast<T>(&value->data);
+}
 
 //===----------------------------------------------------------------------===//
 // States
@@ -339,6 +390,40 @@ protected:
   template <typename State, typename Data>
   void printValue(const std::string &name, State *ins, Data *insData);
 };
+
+template <typename Op>
+OpExecutionModel<Op>::OpExecutionModel(Op op)
+    : ExecutionModel(op.getOperation()) {}
+
+template <typename Op>
+Op OpExecutionModel<Op>::getOperation() {
+  return cast<Op>(op);
+}
+
+template <typename Op>
+template <typename State>
+State *OpExecutionModel<Op>::getState(Value val,
+                                      mlir::DenseMap<Value, RW *> &rws) {
+  return static_cast<State *>(rws[val]);
+}
+
+template <typename Op>
+template <typename State, typename DataTy>
+void OpExecutionModel<Op>::printValue(const std::string &name, State *ins,
+                                      DataTy *insData) {
+  llvm::outs() << name << ": ";
+  if (insData) {
+    APInt t = dataCast<APInt>(*insData);
+    auto val = t.reverseBits().getZExtValue();
+    for (unsigned i = 0; i < t.getBitWidth(); ++i) {
+      llvm::outs() << (val & 1);
+      val >>= 1;
+    }
+    llvm::outs() << " ";
+  }
+
+  llvm::outs() << ins->valid << " " << ins->ready << "\n";
+}
 
 //===----------------------------------------------------------------------===//
 // Support
@@ -686,15 +771,6 @@ private:
   std::vector<ConsumerData> insData;
   ProducerData outsData;
 
-  // merge dataless
-  bool tehbValid = false, tehbReady = false;
-  ConsumerRW insTEHB;
-  // merge datafull
-  Data tehbDataIn;
-
-  // internal components
-  TEHBSupport muxTEHB;
-
   void execDataless();
 
   void execDataFull();
@@ -782,11 +858,13 @@ private:
   TEHBSupport returnTEHB;
 };
 
-class EndModel : public OpExecutionModel<handshake::EndOp> {
+/// Multi-slot elastic buffer model for `tfifo`/`elastic_fifo_inner` style units.
+/// It implements exact bypass and queue handshaking equations used in RTL.
+class FIFOBufferModel : public OpExecutionModel<handshake::BufferOp> {
 public:
-  using OpExecutionModel<handshake::EndOp>::OpExecutionModel;
-  EndModel(handshake::EndOp endOp, mlir::DenseMap<Value, RW *> &subset,
-           bool &resValid, const bool &resReady, Data &resData);
+  using OpExecutionModel<handshake::BufferOp>::OpExecutionModel;
+  FIFOBufferModel(handshake::BufferOp bufferOp,
+                  mlir::DenseMap<Value, RW *> &subset);
 
   void reset() override;
 
@@ -795,10 +873,236 @@ public:
   void printStates() override;
 
 private:
-  // ports
-  ChannelConsumerRW *ins;
-  ProducerRW outs;
-  Data &outsData;
+  ConsumerRW *ins;
+  ProducerRW *outs;
+  ConsumerData insData;
+  ProducerData outsData;
+
+  unsigned capacity = 1;
+  bool bypass = false;
+  bool hasData = false;
+  unsigned occupancy = 0;
+  std::deque<Data> payloads;
+  bool readEnable = false;
+  bool writeEnable = false;
+
+  void updateCombinational();
+  void updateSequential();
+};
+
+class LoadModel : public OpExecutionModel<handshake::LoadOp> {
+public:
+  using OpExecutionModel<handshake::LoadOp>::OpExecutionModel;
+  LoadModel(handshake::LoadOp loadOp, mlir::DenseMap<Value, RW *> &subset);
+
+  void reset() override;
+
+  void exec(bool isClkRisingEdge) override;
+
+  void printStates() override;
+
+private:
+  ChannelConsumerRW *addrIn;
+  ChannelConsumerRW *dataFromMem;
+  ChannelProducerRW *addrOut;
+  ChannelProducerRW *dataOut;
+
+  TEHBSupport addrTEHB;
+  TEHBSupport dataTEHB;
+};
+
+class StoreModel : public OpExecutionModel<handshake::StoreOp> {
+public:
+  using OpExecutionModel<handshake::StoreOp>::OpExecutionModel;
+  StoreModel(handshake::StoreOp storeOp, mlir::DenseMap<Value, RW *> &subset);
+
+  void reset() override;
+
+  void exec(bool isClkRisingEdge) override;
+
+  void printStates() override;
+
+private:
+  ChannelConsumerRW *addrIn;
+  ChannelConsumerRW *dataIn;
+  ChannelProducerRW *addrOut;
+  ChannelProducerRW *dataOut;
+};
+
+class MemoryControllerModel : public OpExecutionModel<handshake::MemoryControllerOp> {
+public:
+  using OpExecutionModel<handshake::MemoryControllerOp>::OpExecutionModel;
+  MemoryControllerModel(handshake::MemoryControllerOp mcOp,
+                        mlir::DenseMap<Value, RW *> &subset,
+                        Simulator &sim);
+
+  void reset() override;
+
+  void exec(bool isClkRisingEdge) override;
+
+  void printStates() override;
+
+  uint64_t getPendingCount() const;
+
+private:
+  struct MCPortLoad {
+    ChannelConsumerRW *addrIn = nullptr;
+    ChannelProducerRW *dataOut = nullptr;
+  };
+
+  struct MCPortStore {
+    ChannelConsumerRW *addrIn = nullptr;
+    ChannelConsumerRW *dataIn = nullptr;
+  };
+
+  handshake::MemoryControllerOp mcOp;
+  Simulator &sim;
+  Value memref;
+
+  ControlConsumerRW *memStart = nullptr;
+  ControlConsumerRW *ctrlEnd = nullptr;
+  ControlProducerRW *memEnd = nullptr;
+
+  std::vector<ChannelConsumerRW *> ctrlInputs;
+  std::vector<MCPortLoad> loadPorts;
+  std::vector<MCPortStore> storePorts;
+
+  bool running = false;
+  bool noMoreRequests = false;
+  uint64_t pendingStores = 0;
+
+  struct PendingLoad {
+    unsigned portIdx = 0;
+    Data data;
+    unsigned remainingCycles = 1;
+  };
+  std::deque<PendingLoad> pendingLoads;
+  std::vector<uint8_t> loadValidRegs;
+  std::vector<Data> loadDataRegs;
+
+  std::optional<unsigned> selectedLoadPort;
+  std::optional<unsigned> selectedStorePort;
+  std::optional<Data> selectedStoreAddr;
+  std::optional<Data> selectedStoreData;
+
+  void updateSequential();
+  void updateCombinational();
+};
+
+class LSQModel : public OpExecutionModel<handshake::LSQOp> {
+public:
+  using OpExecutionModel<handshake::LSQOp>::OpExecutionModel;
+  LSQModel(handshake::LSQOp lsqOp, mlir::DenseMap<Value, RW *> &subset,
+           Simulator &sim);
+
+  void reset() override;
+
+  void exec(bool isClkRisingEdge) override;
+
+  void printStates() override;
+
+  uint64_t getPendingCount() const;
+
+private:
+  enum class AccessKind { Load, Store };
+
+  struct Access {
+    AccessKind kind;
+    unsigned groupIdx = 0;
+    unsigned groupAccessIndex = 0;
+    unsigned requiredStoresBefore = 0;
+    ChannelConsumerRW *addrIn = nullptr;
+    ChannelConsumerRW *dataIn = nullptr;
+    ChannelProducerRW *dataOut = nullptr;
+  };
+
+  struct GroupFrame {
+    unsigned issuedCount = 0;
+    unsigned acceptedStores = 0;
+    std::vector<uint8_t> issued;
+  };
+
+  struct GroupState {
+    ControlConsumerRW *ctrl = nullptr;
+    std::vector<unsigned> accesses;
+    unsigned numLoads = 0;
+    unsigned numStores = 0;
+    std::deque<GroupFrame> frames;
+  };
+
+  handshake::LSQOp lsqOp;
+  Simulator &sim;
+  bool isMaster = false;
+  Value memref;
+
+  ControlConsumerRW *memStart = nullptr;
+  ControlConsumerRW *ctrlEnd = nullptr;
+  ControlProducerRW *memEnd = nullptr;
+
+  ChannelConsumerRW *ldDataFromMC = nullptr;
+  ChannelProducerRW *ldAddrToMC = nullptr;
+  ChannelProducerRW *stAddrToMC = nullptr;
+  ChannelProducerRW *stDataToMC = nullptr;
+
+  std::vector<GroupState> groups;
+  std::vector<Access> accesses;
+  std::vector<uint64_t> addrSlotsByAccess;
+  std::vector<uint64_t> storeDataSlotsByAccess;
+  std::vector<std::deque<Data>> pendingAddrByAccess;
+  std::vector<std::deque<Data>> pendingStoreDataByAccess;
+  std::vector<std::deque<Data>> loadResponsesByAccess;
+  std::deque<std::tuple<unsigned, Data, unsigned>> pendingMasterLoads;
+  std::optional<unsigned> selectedLoadAccess;
+  std::optional<unsigned> selectedStoreAccess;
+  Data selectedLoadAddr;
+  Data selectedStoreAddr;
+  Data selectedStoreData;
+  /// When false, only one group can be accepted/issued at a time. This mirrors
+  /// the LSQ `groupMulti=0` configuration and preserves per-group ordering.
+  bool allowMultipleActiveGroups = true;
+  unsigned loadQueueDepth = 16;
+  unsigned storeQueueDepth = 16;
+
+  bool running = false;
+  bool memStartReadyReg = true;
+  bool ctrlEndReadyReg = false;
+  bool memEndValidReg = false;
+  bool lsqTempGenMem = false;
+  std::deque<unsigned> pendingLoadAccesses;
+  std::deque<std::pair<unsigned, Data>> pendingMasterLoadData;
+  Data lastObservedLoadDataGlobal;
+  bool hasLastObservedLoadDataGlobal = false;
+  std::vector<Data> lastObservedLoadDataByAccess;
+  std::vector<uint8_t> hasLastObservedLoadDataByAccess;
+
+  bool loadInterfaceBusy = false;
+  bool storeInterfaceBusy = false;
+  uint64_t allocatedLoadEntries = 0;
+  uint64_t allocatedStoreEntries = 0;
+
+  void updateSequential();
+  void updateCombinational();
+};
+
+class EndModel : public OpExecutionModel<handshake::EndOp> {
+public:
+  using OpExecutionModel<handshake::EndOp>::OpExecutionModel;
+  EndModel(handshake::EndOp endOp, mlir::DenseMap<Value, RW *> &subset,
+           std::vector<bool> &resValid, const std::vector<bool> &resReady,
+           std::vector<Data> &resData);
+
+  void reset() override;
+
+  void exec(bool isClkRisingEdge) override;
+
+  void printStates() override;
+
+private:
+  std::vector<ConsumerRW *> ins;
+  std::vector<ConsumerData> insData;
+  std::vector<bool> &resValid;
+  const std::vector<bool> &resReady;
+  std::vector<Data> &resData;
 };
 
 //===----------------------------------------------------------------------===//
@@ -905,13 +1209,14 @@ private:
   ChannelConsumerRW *lhs, *rhs;
   ChannelProducerRW *result;
 
-  // latency parameters
+  // handshake/pipeline state
   std::vector<ConsumerRW *> insJoin;
-  ProducerRW outsJoin;
   bool joinValid = false;
-  unsigned counter = 0;
-  bool hasData = false;
-  Data tempData = APInt(bitwidth, 0);
+  bool oehbReady = false;
+  bool outputValid = false;
+  std::vector<bool> validPipeline;
+  std::vector<Data> dataPipeline;
+  Data currentCombData;
 
   // internal components
   JoinSupport binJoin;
@@ -923,11 +1228,124 @@ private:
 
 class Simulator {
 public:
-  Simulator(handshake::FuncOp funcOp, unsigned cyclesLimit = 100);
+  struct ChannelSwitching {
+    std::string src;
+    std::string dst;
+    unsigned operandIndex = 0;
+    bool isToEnd = false;
+    bool hasData = false;
+    unsigned dataWidth = 0;
+
+    std::vector<uint8_t> valid;
+    std::vector<uint8_t> ready;
+    std::vector<uint8_t> transfer;
+    std::vector<llvm::APInt> dataWave;
+
+    uint64_t validToggles = 0;
+    uint64_t readyToggles = 0;
+    uint64_t transferToggles = 0;
+    uint64_t dataWordToggles = 0;
+    uint64_t dataBitToggles = 0;
+    uint64_t transferDataWordToggles = 0;
+    uint64_t transferDataBitToggles = 0;
+    uint64_t transfers = 0;
+  };
+
+  struct ResultRecord {
+    std::string name;
+    std::string type;
+    std::string value;
+    bool observed = false;
+  };
+
+  struct MemoryRecord {
+    std::string name;
+    std::string type;
+    std::vector<std::string> values;
+    std::vector<uint8_t> writtenMask;
+    uint64_t writtenCount = 0;
+  };
+
+  struct VCDMismatch {
+    std::string src;
+    std::string dst;
+    unsigned operandIndex = 0;
+    std::string signal;
+    unsigned cycle = 0;
+    uint64_t simulated = 0;
+    uint64_t vcd = 0;
+  };
+
+  struct VCDCheck {
+    bool enabled = false;
+    bool passed = false;
+    std::string message;
+    unsigned comparedCycles = 0;
+    unsigned firstMismatchCycle = 0;
+    uint64_t mismatchCount = 0;
+    uint64_t comparedValidSamples = 0;
+    uint64_t validMismatchCount = 0;
+    uint64_t comparedReadySamples = 0;
+    uint64_t readyMismatchCount = 0;
+    uint64_t comparedTransferSamples = 0;
+    uint64_t transferMismatchCount = 0;
+    uint64_t comparedDataSamples = 0;
+    uint64_t dataMismatchCount = 0;
+    uint64_t dataWordToggleMismatchCount = 0;
+    uint64_t dataBitToggleMismatchCount = 0;
+    std::vector<VCDMismatch> mismatches;
+  };
+
+  Simulator(handshake::FuncOp funcOp, const SimulatorOptions &options = {});
 
   void reset();
 
+  /// Legacy positional-input behavior (plain scalar channels only).
   void simulate(llvm::ArrayRef<std::string> inputArgs);
+
+  /// Full simulation entrypoint.
+  LogicalResult simulate(const SimulationInputs &inputs);
+
+  LogicalResult loadInputs(StringRef inputVectorsDir, StringRef inputArgsFile,
+                           HSInputFormat format, SimulationInputs &inputs);
+
+  LogicalResult dumpSwitchingJSON(StringRef filepath) const;
+
+  LogicalResult dumpWaveJSON(StringRef filepath) const;
+
+  LogicalResult dumpResultsJSON(StringRef filepath) const;
+
+  /// Dump node-level switching in switching-estimation CSV format:
+  ///   node, data, valid, ready
+  LogicalResult dumpSwitchingEstimationCSV(StringRef filepath) const;
+
+  LogicalResult verifyVCDExact(StringRef topVerilogPath, StringRef vcdPath);
+
+  unsigned getCyclesExecuted() const { return iterNum; }
+
+  bool hasFailed() const { return failedFlag; }
+
+  StringRef getFailureMessage() const { return failureMessage; }
+
+  LogicalResult signalFailure(StringRef message);
+
+  const std::vector<ChannelSwitching> &getSwitching() const {
+    return channelWaves;
+  }
+
+  const std::vector<ResultRecord> &getResultRecords() const { return results; }
+
+  const std::vector<MemoryRecord> &getMemoryRecords() const { return memories; }
+
+  const VCDCheck &getVCDCheck() const { return vcdCheck; }
+
+  const SimulatorOptions &getOptions() const { return options; }
+
+  LogicalResult readMemory(Value memref, const Data &addr, Data &outData,
+                           Location loc);
+
+  LogicalResult writeMemory(Value memref, const Data &addr, const Data &inData,
+                            Location loc);
 
   // Just a temporary function to print the results of the simulation to
   // standart output
@@ -939,52 +1357,145 @@ public:
   ~Simulator();
 
 private:
-  // Maybe need it some day, let it be the part of simulator class
+  struct MemoryImage {
+    Value arg;
+    MemRefType type;
+    std::string name;
+    std::vector<Data> values;
+    std::vector<uint8_t> writtenMask;
+  };
+
+  struct InputDriver {
+    Value arg;
+    unsigned argIndex = 0;
+    bool isChannel = false;
+    bool isControl = false;
+    bool holdHighControl = false;
+    std::deque<Data> channelTokens;
+    uint64_t controlTokens = 0;
+  };
+
+  struct EndObserver {
+    ConsumerRW *in = nullptr;
+    ConsumerData inData = ConsumerData(nullptr);
+    bool seen = false;
+  };
+
+  struct EdgeTrace {
+    std::string src;
+    std::string dst;
+    unsigned operandIndex = 0;
+    bool isToEnd = false;
+    ConsumerRW *edge = nullptr;
+    ConsumerData edgeData = ConsumerData(nullptr);
+    bool hasData = false;
+    unsigned dataWidth = 0;
+    bool captureDataWave = false;
+    std::vector<uint8_t> valid;
+    std::vector<uint8_t> ready;
+    std::vector<uint8_t> transfer;
+    std::vector<llvm::APInt> dataWave;
+    uint64_t dataWordToggles = 0;
+    uint64_t dataBitToggles = 0;
+    uint64_t transferDataWordToggles = 0;
+    uint64_t transferDataBitToggles = 0;
+    std::optional<llvm::APInt> prevData;
+    std::optional<llvm::APInt> prevTransferData;
+  };
+
   handshake::FuncOp funcOp;
-  // Results of the simulation
-  bool resValid = false, resReady = true;
-  Data resData;
-  // End operation to extract results
+  SimulatorOptions options;
+
+  std::vector<bool> resValid;
+  std::vector<bool> resReady;
+  std::vector<Data> resData;
   handshake::EndOp endOp;
-  // Number of iterations during the simulation
   unsigned iterNum = 0;
-  // Map for execution models
+  bool failedFlag = false;
+  std::string failureMessage;
+
   mlir::DenseMap<Operation *, ExecutionModel *> opModels;
-  // Map the stores RW API classes
-  // mlir::DenseMap<std::pair<Value, Operation *>, RW *> rws;
-  // Map that stores the oldValuesStates we read on the current iteration (to
-  // collect new outputs)
   mlir::DenseMap<Value, ValueState *> oldValuesStates;
-  // And this map is for newly collected values (we can'not update
-  // oldValuesStates during collection, because some component can read changed
-  // values then)
   mlir::DenseMap<Value, ValueState *> newValuesStates;
-  // Map to update oldValuesStates with the corresponding values of
-  // newValuesStates at the end of the collection process
   mlir::DenseMap<Value, Updater *> updaters;
-  // Set the number of the iterations for the simulator to execute before force
-  // break
-  unsigned cyclesLimit = 100;
-  /// Maps all value uses to their *consumer*'s RW object.
+
   mlir::DenseMap<OpOperand *, ConsumerRW *> consumerViews;
-  /// Maps all operation results (OpResult) and block arguments
-  /// (BlockArgument) to their *producer*'s RW object.
   mlir::DenseMap<Value, ProducerRW *> producerViews;
 
-  // Register the Model inside opNodels
+  std::vector<EndObserver> endObservers;
+  std::vector<EdgeTrace> edgeTraces;
+  std::vector<ChannelSwitching> channelWaves;
+  std::vector<ResultRecord> results;
+  std::vector<MemoryRecord> memories;
+  VCDCheck vcdCheck;
+
+  std::vector<Value> argOrder;
+  std::vector<std::string> argNames;
+  std::vector<std::string> resNames;
+  std::unordered_map<unsigned, InputDriver> activeDrivers;
+  std::unordered_map<std::string, unsigned> argNameToIndex;
+  mlir::DenseMap<Value, MemoryImage> memoryImages;
+
+  void clearFailure();
+  LogicalResult fail(StringRef message);
+
+  void initializeMetadata();
+
+  void initializeEdgeCatalog();
+
+  bool sampleEdgeStates();
+
+  void finalizeSwitchingStats();
+
+  LogicalResult buildDriversForTransaction(const SimulationInputs &inputs,
+                                           unsigned transactionIdx);
+
+  LogicalResult initializeMemoriesForTransaction(const SimulationInputs &inputs,
+                                                 unsigned transactionIdx);
+
+  void driveInputsForCycle();
+
+  void consumeAcceptedInputs();
+
+  bool allEndResultsSeen() const;
+
+  void resetEndObservers();
+
+  LogicalResult parseInputToken(Type type, StringRef token, Data &out) const;
+
+  std::string dataToString(Type type, const Data &data) const;
+
+  uint64_t getPendingInputTokenCount() const;
+
+  uint64_t getPendingMemoryOpCount() const;
+
+  std::string gatherDeadlockDiagnostics() const;
+
+  LogicalResult parseDatInputDir(StringRef inputVectorsDir,
+                                 SimulationInputs &inputs);
+
+  LogicalResult parsePlainInputFile(StringRef inputArgsFile,
+                                    SimulationInputs &inputs);
+
+  LogicalResult finalizeInputTransactions(SimulationInputs &inputs);
+
+  bool getArgIndexByName(StringRef argName, unsigned &argIdx) const;
+
+  std::string getValueProducerName(Value val) const;
+
+  std::string getOperationName(Operation *op) const;
+
+  LogicalResult emitJSON(StringRef filepath, const llvm::json::Value &value) const;
+
   template <typename Model, typename Op, typename... Args>
   void registerModel(Op op, Args &&...modelArgs);
 
-  // Determine the concrete Model type
   void associateModel(Operation *op);
 
-  // Register the State state where needed (oldValueStates, newValueStates,
-  // updaters, rws).
   template <typename State, typename Updater, typename Producer,
             typename Consumer, typename Ty>
   void registerState(Value val, Operation *producerOp, Ty type);
 
-  // Determine if the state belongs to channel or control
   void associateState(Value val, Operation *producerOp, Location loc);
 };
 

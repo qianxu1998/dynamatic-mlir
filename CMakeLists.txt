@@ -87,6 +87,43 @@ message(STATUS "Including from ${Polly_INCLUDE_DIRS}")
 option(LLVM_BUILD_TOOLS "Build the LLVM tools. If OFF, just generate build targets." ON)
 
 #-------------------------------------------------------------------------------
+# Optional SMT handshake estimation (Z3)
+#-------------------------------------------------------------------------------
+
+option(DYNAMATIC_ENABLE_SMT_HANDSHAKE
+  "Enable SMT-based steady-state handshake estimation (requires local Z3 install)"
+  OFF)
+
+set(DYNAMATIC_SMT_Z3_ROOT "/home/jianliu/TCAD25/third_party/z3/install"
+  CACHE PATH "Root of local Z3 install used when DYNAMATIC_ENABLE_SMT_HANDSHAKE=ON")
+
+if(DYNAMATIC_ENABLE_SMT_HANDSHAKE)
+  add_compile_definitions(DYNAMATIC_ENABLE_SMT_HANDSHAKE)
+
+  find_path(DYNAMATIC_Z3_INCLUDE_DIR
+    NAMES z3++.h z3.h
+    PATHS
+      ${DYNAMATIC_SMT_Z3_ROOT}/include
+    NO_DEFAULT_PATH)
+
+  find_library(DYNAMATIC_Z3_LIBRARY
+    NAMES z3 libz3
+    PATHS
+      ${DYNAMATIC_SMT_Z3_ROOT}/lib
+      ${DYNAMATIC_SMT_Z3_ROOT}/lib64
+    NO_DEFAULT_PATH)
+
+  if(NOT DYNAMATIC_Z3_INCLUDE_DIR OR NOT DYNAMATIC_Z3_LIBRARY)
+    message(FATAL_ERROR
+      "DYNAMATIC_ENABLE_SMT_HANDSHAKE=ON but Z3 was not found under "
+      "${DYNAMATIC_SMT_Z3_ROOT}. Expected include/z3++.h and lib*/libz3.so")
+  endif()
+
+  message(STATUS "SMT handshake enabled with Z3 include: ${DYNAMATIC_Z3_INCLUDE_DIR}")
+  message(STATUS "SMT handshake enabled with Z3 library: ${DYNAMATIC_Z3_LIBRARY}")
+endif()
+
+#-------------------------------------------------------------------------------
 # Dynamatic configuration 
 #-------------------------------------------------------------------------------
 
@@ -285,4 +322,3 @@ add_subdirectory(${DYNAMATIC_SOURCE_DIR}/test)
 add_subdirectory(${DYNAMATIC_SOURCE_DIR}/tools)
 add_subdirectory(${DYNAMATIC_SOURCE_DIR}/tutorials)
 add_subdirectory(${DYNAMATIC_SOURCE_DIR}/unittests)
-

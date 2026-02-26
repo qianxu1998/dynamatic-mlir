@@ -5,6 +5,7 @@ add_dynamatic_library(DynamaticExperimentalSupport
   CreateSmvFormalTestbench.cpp
   StdProfiler.cpp
   HandshakeSimulator.cpp
+  HandshakeUnitModels.cpp
   FtdImplementation.cpp
   FtdSupport.cpp
   CFGAnnotation.cpp
