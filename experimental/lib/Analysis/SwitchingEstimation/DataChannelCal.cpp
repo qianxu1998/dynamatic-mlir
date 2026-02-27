@@ -279,39 +279,6 @@ void getDataBaseNodes(SwitchingInfo &switchInfo,
 
 void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
                                      SCFProfilingResult &profileResults) {
-  const bool enableBaseTrace = true;
-  auto emitCMTrace = [&](const std::string &nodeName, unsigned preBB,
-                         unsigned curBB, unsigned iterIndex, int condValue,
-                         bool dataWritten, bool ctrlWritten,
-                         const std::string &dataState) {
-    if (!enableBaseTrace)
-      return;
-    llvm::dbgs() << "[TRACE][BASE][CM] edge=(" << preBB << "->" << curBB
-                 << ") node=" << nodeName << " iter=" << iterIndex
-                 << " cond=" << condValue << "\n"
-                 << "  data_out=" << dataState
-                 << " updated=" << (dataWritten ? "yes" : "no") << "\n"
-                 << "  control_out="
-                 << (ctrlWritten ? std::to_string(condValue) : "skip")
-                 << " updated=" << (ctrlWritten ? "yes" : "no") << "\n";
-  };
-  auto emitMuxTrace =
-      [&](const std::string &tag, const std::string &muxNode,
-          const std::string &cmNode, unsigned preBB, unsigned curBB,
-          unsigned iterIndex, int condValue, const std::string &srcNode,
-          int srcValue, int outValue, bool updated, const std::string &reason) {
-        if (!enableBaseTrace)
-          return;
-        llvm::dbgs() << "[TRACE][BASE][MUX] " << tag << "\n"
-                     << "  edge=(" << preBB << "->" << curBB
-                     << ") mux=" << muxNode << " cm=" << cmNode << "\n"
-                     << "  iter=" << iterIndex << "  cond=" << condValue << "\n"
-                     << "  src=" << (srcNode.empty() ? "<empty>" : srcNode)
-                     << "  src_value=" << srcValue << "\n"
-                     << "  out=" << outValue
-                     << "  updated=" << (updated ? "yes" : "no")
-                     << "  reason=" << reason << "\n";
-      };
   auto getNodeDataBase =
       [&](const std::string &nodeName) -> std::shared_ptr<DataBase> {
     auto it = switchInfo.dataInfo.nodeToDataState.find(nodeName);
@@ -470,12 +437,21 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
 
   // Define temporary storing structure
   std::map<std::string, int> tmpMuxOutputMap;
+  std::vector<std::string> allMuxNodes;
+  allMuxNodes.reserve(
+      switchInfo.staticInfo.dataflowGraph->muxToSrcNodeMap.size());
+  for (const auto &muxEntry :
+       switchInfo.staticInfo.dataflowGraph->muxToSrcNodeMap) {
+    allMuxNodes.push_back(muxEntry.first().str());
+  }
 
   // [STEP 3] Traverse the executed BB trace
   // Skip the first BB, as it will always be BB 0
   for (unsigned i = 1; i < profileResults.executedBasicBlockTrace.size(); i++) {
     unsigned preBB = profileResults.executedBasicBlockTrace[i - 1];
     unsigned curBB = profileResults.executedBasicBlockTrace[i];
+    const unsigned edgeIterIndex =
+        getExecutionIter(i - 1, curBB, profileResults);
 
     std::pair<unsigned, unsigned> key_pair(preBB, curBB);
 
@@ -484,6 +460,8 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
     // node in the circuit
     auto itCM = switchInfo.dataInfo.bbPairToControlMergeOutputs.find(key_pair);
     if (itCM != switchInfo.dataInfo.bbPairToControlMergeOutputs.end()) {
+      std::set<std::string> activeMuxNodesAtEdge;
+
       // Iterate over all (CMNode, output value) pairs
       for (auto selValuePair : itCM->second) {
         auto nodeName = selValuePair.first;
@@ -491,7 +469,7 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
         // `executedBasicBlockTrace[i]` corresponds to edge-index `(i - 1)` in
         // the profiler log. Align the query index with
         // `edgeIndexToIterationMap` keys.
-        unsigned iterIndex = getExecutionIter(i - 1, curBB, profileResults);
+        unsigned iterIndex = edgeIterIndex;
 
         //! Testing
         // llvm::dbgs() << "[DEBUG] \t\tCtrlMerge Node: " << nodeName << "\n";
@@ -513,12 +491,9 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
         // Keep the first event mapped to this iteration to avoid clobbering
         // control values when multiple BB edges are observed in the same
         // iteration bucket.
-        bool cmDataWritten = false;
-        bool cmCtrlWritten = false;
         if (!contains(selCtrlMergeNode->originalDataOut, iterIndex)) {
           IterationValue tmpDataValuePair = {-1, iterIndex};
           selCtrlMergeNode->originalDataOut[iterIndex] = tmpDataValuePair;
-          cmDataWritten = true;
           // We don't update the data output for control merge node.
           // updateBufferFromSource(nodeName, tmpDataValuePair.value,
           // iterIndex);
@@ -528,10 +503,7 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
         if (!contains(selCtrlMergeNode->controlDataOut, iterIndex)) {
           IterationValue tmpConValuePair = {outValue, iterIndex};
           selCtrlMergeNode->controlDataOut[iterIndex] = tmpConValuePair;
-          cmCtrlWritten = true;
         }
-        emitCMTrace(nodeName, preBB, curBB, iterIndex, outValue, cmDataWritten,
-                    cmCtrlWritten, cmDataWritten ? "-1" : "existing");
 
         // Define the Vector for unupdated mux
         std::vector<std::string> tmpUnUpdatedMux;
@@ -539,13 +511,13 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
         // Get the list of influenced mux node
         std::vector<std::string> selMuxVec =
             switchInfo.staticInfo.dataflowGraph->cmToMuxMap[nodeName];
+        for (const auto &selMuxNode : selMuxVec)
+          activeMuxNodesAtEdge.insert(selMuxNode);
 
         // Build a dependency graph for the multiplexers
         // We may encounter different situation when updating the value for
         // MUX nodes
         for (const auto &selMuxNode : selMuxVec) {
-          std::string muxResolution = "unresolved";
-          int srcValue = 0;
           // Only update muxes this control-merge actually influences
           if (!containsValue(selMuxVec, selMuxNode))
             continue;
@@ -573,22 +545,16 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
               tmpMuxOutput = getDataOutValueAtOrBefore(srcDb, 0, 0);
             else
               tmpMuxOutput = 0;
-            srcValue = tmpMuxOutput;
-            muxResolution = "constant_or_source";
           } else {
             auto srcDb = getNodeDataBase(selMuxDataSrcNode);
             if (!srcDb) {
               llvm::errs() << "[ERROR] Data source node " << selMuxDataSrcNode
                            << " not found for mux node " << selMuxNode << "\n";
               tmpMuxOutput = 0;
-              muxResolution = "src_not_found";
               IterationValue tmpMuxValuePair = {tmpMuxOutput, iterIndex};
               if (auto muxDb = getNodeDataBase(selMuxNode))
                 muxDb->originalDataOut[iterIndex] = tmpMuxValuePair;
               tmpMuxOutputMap[selMuxNode] = tmpMuxOutput;
-              emitMuxTrace("update", selMuxNode, nodeName, preBB, curBB,
-                           iterIndex, outValue, selMuxDataSrcNode, srcValue,
-                           tmpMuxOutput, false, muxResolution);
               continue;
             }
             // If the src node is a mux node
@@ -602,27 +568,21 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
                 // Use the previous value
                 if (contains(tmpMuxOutputMap, selMuxDataSrcNode)) {
                   tmpMuxOutput = tmpMuxOutputMap[selMuxDataSrcNode];
-                  muxResolution = "mux_feedback_to_tmp_map";
                 } else {
                   llvm::errs()
                       << "[ERROR] Data src(" << selMuxDataSrcNode
                       << ") of Mux Node: " << selMuxNode << ", not found.\n";
-                  muxResolution = "mux_feedback_missing";
                 }
               } else if (contains(srcDb->originalDataOut, iterIndex)) {
                 //! Testing
                 // llvm::dbgs() << "[MUX_DEBUG][BASE]     "
                 //                 "resolve_case=SRC_HAS_ITER_VALUE\n";
                 tmpMuxOutput = srcDb->originalDataOut[iterIndex].value;
-                srcValue = tmpMuxOutput;
-                muxResolution = "mux_src_has_iter_value";
               } else if (contains(tmpMuxOutputMap, selMuxDataSrcNode)) {
                 //! Testing
                 // llvm::dbgs()
                 //     << "[MUX_DEBUG][BASE] resolve_case=SRC_FROM_TMP_MAP\n";
                 tmpMuxOutput = tmpMuxOutputMap[selMuxDataSrcNode];
-                srcValue = tmpMuxOutput;
-                muxResolution = "mux_src_from_tmp_map";
               } else {
                 //! Testing
                 // llvm::dbgs() << "[MUX_DEBUG][BASE]     "
@@ -633,7 +593,6 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
                                                        fallbackIter};
                 srcDb->originalDataOut[fallbackIter] = tmpInnerMuxValuePair;
                 tmpUnUpdatedMux.push_back(selMuxNode);
-                muxResolution = "deferred_prev_iter";
                 continue;
               }
             } else {
@@ -643,25 +602,18 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
                     << " is empty\n";
                 // Unconnected , use default vlue
                 tmpMuxOutput = 0;
-                muxResolution = "src_empty";
               } else {
                 auto &omap = srcDb->originalDataOut;
                 if (omap.find(iterIndex) != omap.end()) {
                   tmpMuxOutput = omap[iterIndex].value;
-                  srcValue = tmpMuxOutput;
-                  muxResolution = "src_iter_exact";
                 } else if (contains(tmpMuxOutputMap, selMuxDataSrcNode)) {
                   tmpMuxOutput = tmpMuxOutputMap[selMuxDataSrcNode];
-                  srcValue = tmpMuxOutput;
-                  muxResolution = "src_tmp_map";
                 } else if (getLatestKnownValue(omap, iterIndex, tmpMuxOutput)) {
                   //! Testing
                   // llvm::dbgs() << "[DEBUG] The value for src node " <<
                   // selMuxDataSrcNode << " not found at iteration " <<
                   // iterIndex
                   //              << ", fallback to latest known value\n";
-                  srcValue = tmpMuxOutput;
-                  muxResolution = "src_latest_known";
                 } else if (contains(selMuxDataSrcNode, "buffer")) {
                   auto srcBufDb = getNodeDataBase(selMuxDataSrcNode);
                   if (srcBufDb &&
@@ -671,19 +623,15 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
                     //     << "[DEBUG] The value for buffer source node "
                     //        "not found at iteration "
                     //     << iterIndex << ", fallback to latest known value\n";
-                    srcValue = tmpMuxOutput;
-                    muxResolution = "buffer_latest_known";
                   } else {
                     // If no value is found, we use 0 for the buffer source.
                     tmpMuxOutput = 0;
-                    muxResolution = "buffer_missing_default_zero";
                   }
                 } else {
                   llvm::errs()
                       << "[ERROR] Data src(" << selMuxDataSrcNode
                       << ") of Mux Node: " << selMuxNode << ", not found.\n";
                   tmpMuxOutput = 0;
-                  muxResolution = "src_not_found";
                 }
               }
             }
@@ -695,17 +643,10 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
           // "\n";
 
           IterationValue tmpMuxValuePair = {tmpMuxOutput, iterIndex};
-          bool muxUpdated = false;
           if (auto muxDb = getNodeDataBase(selMuxNode))
             if (!contains(muxDb->originalDataOut, iterIndex)) {
               muxDb->originalDataOut[iterIndex] = tmpMuxValuePair;
-              muxUpdated = true;
             }
-          if (srcValue == 0)
-            srcValue = tmpMuxOutput;
-          emitMuxTrace("update", selMuxNode, nodeName, preBB, curBB, iterIndex,
-                       outValue, selMuxDataSrcNode, srcValue, tmpMuxOutput,
-                       muxUpdated, muxResolution);
           tmpMuxOutputMap[selMuxNode] = tmpMuxOutput;
           updateBufferFromSource(selMuxNode, tmpMuxValuePair.value, iterIndex);
         }
@@ -730,16 +671,10 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
 
           if (contains(tmpMuxOutputMap, selMuxDataSrcNode)) {
             tmpMuxOutput = tmpMuxOutputMap[selMuxDataSrcNode];
-            emitMuxTrace("remaining", leftMuxNode, nodeName, preBB, curBB,
-                         iterIndex, outValue, selMuxDataSrcNode, tmpMuxOutput,
-                         tmpMuxOutput, true, "remaining_tmp_map");
           } else {
             llvm::errs() << "[ERROR] Data src(" << selMuxDataSrcNode
                          << ") of Mux Node: " << leftMuxNode
                          << ", not found in tmpMuxOutputMap.\n";
-            emitMuxTrace("remaining", leftMuxNode, nodeName, preBB, curBB,
-                         iterIndex, outValue, selMuxDataSrcNode, 0,
-                         tmpMuxOutput, false, "remaining_no_tmp_map");
           }
 
           IterationValue tmpMuxValuePair = {tmpMuxOutput, iterIndex};
@@ -748,6 +683,17 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
               leftDb->originalDataOut[iterIndex] = tmpMuxValuePair;
           updateBufferFromSource(leftMuxNode, tmpMuxValuePair.value, iterIndex);
         }
+      }
+
+      // Update all inactive mux nodes at this BB edge iteration.
+      // If a mux isn't influenced by the active control-merge nodes on this
+      // edge, default its payload to zero.
+      for (const auto &muxNode : allMuxNodes) {
+        if (activeMuxNodesAtEdge.find(muxNode) != activeMuxNodesAtEdge.end())
+          continue;
+
+        switchInfo.dataInfo.iterToInactiveMuxNodes[edgeIterIndex].push_back(
+            muxNode);
       }
     }
   }
@@ -1055,24 +1001,15 @@ static std::string peelBufferChain(const SwitchingInfo &SI, std::string node) {
   return node;
 }
 
-static bool shouldRunGlitchUpdateSegment(const std::string &seg,
-                                         std::string &segState) {
-  if (contains(seg, "S") || contains(seg, "E") || contains(seg, "T")) {
-    segState = "skip";
-    return false;
-  }
-  segState = "active";
-  return true;
+static bool shouldRunGlitchUpdateSegment(const std::string &seg) {
+  return !(contains(seg, "S") || contains(seg, "E") || contains(seg, "T"));
 }
 
-template <typename EmitALUTraceFn>
-static void
-updateALUGlitchValuesForSegment(SwitchingInfo &switchInfo,
-                                const std::string &executedSeg, unsigned iter,
-                                bool glitchUpdateFlag, bool debug,
-                                const std::vector<std::string> &segExecTrace,
-                                std::vector<std::string> &indexUpdateList,
-                                const EmitALUTraceFn &emitALUTrace) {
+static void updateALUGlitchValuesForSegment(
+    SwitchingInfo &switchInfo, const std::string &executedSeg, unsigned iter,
+    bool glitchUpdateFlag, bool debug,
+    const std::vector<std::string> &segExecTrace,
+    std::vector<std::string> &indexUpdateList) {
   // ==================================================================
   // Step 1: Calculate glitching for inner MG nodes -- All ALUs, other
   // nodes shall be excluded.
@@ -1087,8 +1024,6 @@ updateALUGlitchValuesForSegment(SwitchingInfo &switchInfo,
 
     // Define vector to store the tmp glitch value
     std::vector<int> tmpValue;
-    std::string nodeReason = "calc_start";
-    std::string nodeDetail = "not_set";
 
     // Check whether we need the glitch value calculation
     if (glitchUpdateFlag) {
@@ -1141,11 +1076,7 @@ updateALUGlitchValuesForSegment(SwitchingInfo &switchInfo,
                 << "[DEBUG] \t\t(LAST ITER DURING GLITCH CALCULATION)\n";
           }
 
-          nodeReason = "last_iteration_no_glitch";
-          nodeDetail = "copy_original_at_last_iter";
           tmpValue.push_back(finalValue);
-          emitALUTrace(executedSeg, iter, selNode, nodeReason, nodeDetail,
-                       tmpValue);
           switchInfo.dataInfo.nodeToDataState[selNode]
               ->glitchDataOutByIter[iter] = tmpValue;
           switchInfo.dataInfo.nodeToDataState[selNode]->lastUpdateIndex = iter;
@@ -1154,7 +1085,6 @@ updateALUGlitchValuesForSegment(SwitchingInfo &switchInfo,
 
         // Check the starting time
         if (preSrc1Start != preSrc2Start) {
-          nodeReason = "glitch_arrival_skew";
           if (preSrc1Start > preSrc2Start) {
             fasterNode = preSrc2;
             slowerNode = preSrc1;
@@ -1215,7 +1145,6 @@ updateALUGlitchValuesForSegment(SwitchingInfo &switchInfo,
             }
 
             tmpValue.push_back(calGlitchValue(op1, op2, selNode));
-            nodeDetail = "case_1_Fx-1_Sx-1";
 
             //! Testing
             if (debug) {
@@ -1317,7 +1246,6 @@ updateALUGlitchValuesForSegment(SwitchingInfo &switchInfo,
           }
 
           tmpValue.push_back(calGlitchValue(op1, op2, selNode));
-          nodeDetail = "case_2_Fx_Sx-1";
 
           //! Testing
           if (debug) {
@@ -1369,7 +1297,6 @@ updateALUGlitchValuesForSegment(SwitchingInfo &switchInfo,
               switchInfo.dataInfo.nodeToDataState[slowerNode], iter, 0);
 
           tmpValue.push_back(calGlitchValue(op1, op2, selNode));
-          nodeDetail = "case_3_Fx_Sx";
 
           if (debug) {
             llvm::dbgs() << "\t[Value 3]: \n"
@@ -1380,26 +1307,18 @@ updateALUGlitchValuesForSegment(SwitchingInfo &switchInfo,
               llvm::dbgs() << v << " ";
             llvm::dbgs() << "\n";
           }
-        } else {
-          nodeReason = "equal_arrival_time";
-          nodeDetail = "fallback_to_existing_downstream_policy";
         }
       } else {
         tmpValue.push_back(getDataOutValueAtOrBefore(
             switchInfo.dataInfo.nodeToDataState[selNode], iter, 0));
-        nodeReason = "no_glitch_annotation";
-        nodeDetail = "copy_original";
       }
     } else {
       // No neeed for glitch value calculation, we directly copy the ori
       // data
       tmpValue.push_back(getDataOutValueAtOrBefore(
           switchInfo.dataInfo.nodeToDataState[selNode], iter, 0));
-      nodeReason = "glitch_skipped_for_segment";
-      nodeDetail = "segment_update_disabled";
     }
     dedupConsecutiveValues(tmpValue);
-    emitALUTrace(executedSeg, iter, selNode, nodeReason, nodeDetail, tmpValue);
 
     // Update the storing structure
     switchInfo.dataInfo.nodeToDataState[selNode]->glitchDataOutByIter[iter] =
@@ -1407,14 +1326,11 @@ updateALUGlitchValuesForSegment(SwitchingInfo &switchInfo,
   }
 }
 
-template <typename EmitMUXTraceFn>
 static void appendMuxValuesForCond(
     SwitchingInfo &switchInfo, const std::string &executedSeg, unsigned iter,
     const std::string &selMuxNode,
     const std::map<std::string, std::string> &muxSrcMap, int muxCondValue,
-    bool glitchUpdateFlag, bool debug, bool enableGlitchTrace,
-    const EmitMUXTraceFn &emitMUXTrace, std::vector<int> &outValues) {
-  const size_t oldSize = outValues.size();
+    bool glitchUpdateFlag, bool debug, std::vector<int> &outValues) {
   std::string selDataSrcNode = "";
   auto dataSrcIt = muxSrcMap.find(std::to_string(muxCondValue));
   if (dataSrcIt != muxSrcMap.end())
@@ -1426,14 +1342,11 @@ static void appendMuxValuesForCond(
       !selDataSrcNode.empty() &&
       contains(switchInfo.dataInfo.nodeToDataState, selDataSrcNode) &&
       switchInfo.dataInfo.nodeToDataState[selDataSrcNode];
-  int selDataSrcValue = 0;
-  std::string reason = "normal";
 
   if (!validDataSrcNode) {
     llvm::errs() << "[WARNING] Invalid data source \"" << selDataSrcNode
                  << "\" for mux node " << selMuxNode << " at iter " << iter
                  << ", using 0\n";
-    reason = "invalid_src_fallback_zero";
     outValues.push_back(0);
   } else if (contains(selDataSrcNode, "constant") ||
              contains(selDataSrcNode, "source") ||
@@ -1442,8 +1355,6 @@ static void appendMuxValuesForCond(
                                 ->originalDataOut[0]
                                 .value;
 
-    selDataSrcValue = constantLikeValue;
-    reason = "const_or_source";
     outValues.push_back(constantLikeValue);
   } else if (selDataSrcNode == selMuxNode) {
     // The src node is the selected node itself
@@ -1458,12 +1369,8 @@ static void appendMuxValuesForCond(
                           ->originalDataOut[preIndex]
                           .value;
 
-      selDataSrcValue = selfValue;
-      reason = "mux_self_feedback";
       outValues.push_back(selfValue);
     } else {
-      selDataSrcValue = 0;
-      reason = "mux_self_feedback_missing_index_fallback_zero";
       outValues.push_back(0);
     }
   } else if (glitchUpdateFlag &&
@@ -1504,17 +1411,11 @@ static void appendMuxValuesForCond(
       int bufferedValue = getDataOutValueAtOrBefore(
           switchInfo.dataInfo.nodeToDataState[selDataSrcNode], iter, 0);
 
-      selDataSrcValue = bufferedValue;
-      reason = "src_buffered_glitch_use_stable";
       outValues.push_back(bufferedValue);
     } else {
       auto &glitchValues = switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
                                ->glitchDataOutByIter[iter];
 
-      reason = "src_unbuffered_glitch_use_events";
-      if (!glitchValues.empty()) {
-        selDataSrcValue = glitchValues.back();
-      }
       outValues.insert(outValues.end(), glitchValues.begin(),
                        glitchValues.end());
     }
@@ -1548,14 +1449,8 @@ static void appendMuxValuesForCond(
       int cascadedStableValue = getDataOutValueAtOrBefore(
           switchInfo.dataInfo.nodeToDataState[selDataSrcNode], iter, 0);
 
-      reason = "cascaded_mux_buffered_or_empty";
-      selDataSrcValue = cascadedStableValue;
       outValues.push_back(cascadedStableValue);
     } else {
-      reason = "cascaded_mux_unbuffered_events";
-      if (!glitchIt->second.empty()) {
-        selDataSrcValue = glitchIt->second.back();
-      }
       outValues.insert(outValues.end(), glitchIt->second.begin(),
                        glitchIt->second.end());
     }
@@ -1564,64 +1459,18 @@ static void appendMuxValuesForCond(
     int stableValue = getDataOutValueAtOrBefore(
         switchInfo.dataInfo.nodeToDataState[selDataSrcNode], iter, 0);
 
-    selDataSrcValue = stableValue;
-    reason = "default_stable";
     outValues.push_back(stableValue);
-  }
-  const size_t appended = outValues.size() - oldSize;
-  if (enableGlitchTrace) {
-    const int outValue = appended > 0 ? outValues.back() : 0;
-    emitMUXTrace(executedSeg, iter, selMuxNode, muxCondValue, selDataSrcNode,
-                 selDataSrcValue, outValue, reason, outValues);
   }
 }
 
-template <typename EmitMUXTraceFn>
 static void updateMuxGlitchValuesForSegment(
     SwitchingInfo &switchInfo, const std::string &executedSeg, unsigned iter,
-    bool glitchUpdateFlag, bool debug, bool enableGlitchTrace,
-    const std::vector<std::string> &segExecTrace,
-    const EmitMUXTraceFn &emitMUXTrace) {
-
-  // ====================================================================
-  // Update all inactive mux nodes
-  // ====================================================================
-  const auto &activeMuxNodes =
-      switchInfo.dataInfo.segmentControlNodes[executedSeg].muxNodes;
-  for (const auto &muxEntry :
-       switchInfo.staticInfo.dataflowGraph->muxToSrcNodeMap) {
-    const std::string selMuxNode = muxEntry.first().str();
-    const auto &muxSrcMap = muxEntry.second;
-    if (containsValue(activeMuxNodes, selMuxNode))
-      continue;
-
-    auto muxDataIt = switchInfo.dataInfo.nodeToDataState.find(selMuxNode);
-    if (muxDataIt == switchInfo.dataInfo.nodeToDataState.end() ||
-        !muxDataIt->second) {
-      llvm::errs() << "[WARNING] Mux node " << selMuxNode
-                   << " not found in nodeToDataState for glitch update\n";
-      continue;
-    }
-
-    //! Testing
-    llvm::dbgs() << "[WARNING] Updating inactive mux node " << selMuxNode
-                 << " for glitch events at iter " << iter << "\n";
-
-    std::vector<int> inactiveMuxOutputList;
-    appendMuxValuesForCond(switchInfo, executedSeg, iter, selMuxNode, muxSrcMap,
-                           /*muxCondValue=*/0,
-                           /*glitchUpdateFlag=*/true, debug, enableGlitchTrace,
-                           emitMUXTrace, inactiveMuxOutputList);
-    dedupConsecutiveValues(inactiveMuxOutputList);
-
-    muxDataIt->second->glitchDataOutByIter[iter] = inactiveMuxOutputList;
-    muxDataIt->second->lastUpdateIndex = iter;
-  }
-
+    bool glitchUpdateFlag, bool debug) {
   // ====================================================================
   // Step 2: Update value for all MUXs
   // ====================================================================
-  const unsigned segII = getSegmentII(switchInfo, executedSeg);
+  const auto &activeMuxNodes =
+      switchInfo.dataInfo.segmentControlNodes[executedSeg].muxNodes;
   // For each mux node in the executed segment, we update its value
   for (const auto &selMuxNode : activeMuxNodes) {
     auto muxSrcIt =
@@ -1635,14 +1484,11 @@ static void updateMuxGlitchValuesForSegment(
       selCondInputNode = controlIt->second;
 
     int condValue = 0;
-    CMergeData *selCMBaseNode = nullptr;
     if (!selCondInputNode.empty() &&
         contains(switchInfo.dataInfo.nodeToDataState, selCondInputNode)) {
       if (auto *tmpCMBaseNode = dyn_cast<CMergeData>(
-              switchInfo.dataInfo.nodeToDataState[selCondInputNode].get())) {
-        selCMBaseNode = tmpCMBaseNode;
-        condValue = selCMBaseNode->getControlOutput(iter);
-      }
+              switchInfo.dataInfo.nodeToDataState[selCondInputNode].get()))
+        condValue = tmpCMBaseNode->getControlOutput(iter);
     }
 
     // Temp Value vector definition
@@ -1662,24 +1508,9 @@ static void updateMuxGlitchValuesForSegment(
                    << "\t\tCur data src: " << selDataSrcNode << "\n";
     }
 
-    std::string muxTraceReason = "normal";
-
     appendMuxValuesForCond(switchInfo, executedSeg, iter, selMuxNode,
                            muxSrcIt->second, condValue, glitchUpdateFlag, debug,
-                           enableGlitchTrace, emitMUXTrace, curValue);
-    muxTraceReason = "cond=" + std::to_string(condValue);
-
-    // Control-merge pulse modeling:
-    // when control_merge emits 1 in an MG with II > 1, the control line
-    // falls back to 0 in the same iteration window. Account for the mux
-    // data path selected by that trailing 0 as an extra glitch event.
-    // if (selCMBaseNode && condValue == 1 && segII > 1) {
-    //   appendMuxValuesForCond(switchInfo, executedSeg, iter, selMuxNode,
-    //                          muxSrcIt->second, /*muxCondValue=*/0,
-    //                          glitchUpdateFlag, debug, enableGlitchTrace,
-    //                          emitMUXTrace, curValue);
-    //   muxTraceReason += "+cm_pulse_fallback_zero";
-    // }
+                           curValue);
 
     //! Testing
     if (debug) {
@@ -1789,6 +1620,13 @@ static void updateMuxGlitchValuesForSegment(
     // Get the final mux output data list
     std::vector<int> finalMuxOutputList;
 
+    // If we have glitches as the mux is inactive for sometime in this iteration
+    if (contains(switchInfo.dataInfo.iterToInactiveMuxNodes, iter) &&
+        containsValue(switchInfo.dataInfo.iterToInactiveMuxNodes[iter],
+                      selMuxNode)) {
+      finalMuxOutputList.push_back(0);
+    }
+
     for (const auto &selValue : preValue)
       finalMuxOutputList.push_back(selValue);
     for (const auto &selValue : curValue)
@@ -1797,13 +1635,6 @@ static void updateMuxGlitchValuesForSegment(
       finalMuxOutputList.push_back(selValue);
 
     dedupConsecutiveValues(finalMuxOutputList);
-
-    if (enableGlitchTrace) {
-      const int finalMuxValue =
-          finalMuxOutputList.empty() ? 0 : finalMuxOutputList.back();
-      emitMUXTrace(executedSeg, iter, selMuxNode, condValue, "control_merge", 0,
-                   finalMuxValue, muxTraceReason, finalMuxOutputList);
-    }
 
     //! Testing
     if (debug) {
@@ -1837,71 +1668,24 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
   if (debug) {
     llvm::dbgs() << "[DEBUG]\n[DEBUG] \t\t[NODE GLITCHING VALUE CALCULATION]\n";
   }
-  const bool enableGlitchTrace = true;
-  auto formatValueVec = [](const std::vector<int> &vals) -> std::string {
-    std::string out = "[";
-    for (size_t idx = 0; idx < vals.size(); ++idx) {
-      out += std::to_string(vals[idx]);
-      if (idx + 1 < vals.size())
-        out += ", ";
-    }
-    out += "]";
-    return out;
-  };
-  auto emitALUTrace = [&](const std::string &executedSeg, unsigned iter,
-                          const std::string &node, const std::string &reason,
-                          const std::string &detail,
-                          const std::vector<int> &glitchVals) {
-    if (!enableGlitchTrace)
-      return;
-    llvm::dbgs() << "[TRACE][GLITCH][ALU] seg=" << executedSeg
-                 << " iter=" << iter << " node=" << node << " reason=" << reason
-                 << " detail=" << detail
-                 << " glitch=" << formatValueVec(glitchVals) << "\n";
-  };
-
-  auto emitMUXTrace = [&](const std::string &executedSeg, unsigned iter,
-                          const std::string &node, int cond,
-                          const std::string &src, int srcValue, int outValue,
-                          const std::string &reason,
-                          const std::vector<int> &curVec) {
-    if (!enableGlitchTrace)
-      return;
-    llvm::dbgs() << "[TRACE][GLITCH][MUX] seg=" << executedSeg
-                 << " iter=" << iter << " node=" << node << " cond=" << cond
-                 << " src=" << (src.empty() ? "<empty>" : src)
-                 << " src_value=" << srcValue << " out=" << outValue
-                 << " reason=" << reason << " curr=" << formatValueVec(curVec)
-                 << "\n";
-  };
-
   //
   auto segExecTrace = profileResults.executedSegmentTrace;
-  std::map<std::string, unsigned> lastSegIterMap;
 
   // Iterate through the execution trace
   for (unsigned i = 0; i < segExecTrace.size(); i++) {
     std::string executedSeg = segExecTrace[i];
-    lastSegIterMap[executedSeg] = i;
 
     if (debug) {
       llvm::dbgs() << "[DEBUG] \t******** Iter: " << i
                    << ", Seg: " << executedSeg << "\n";
     }
 
-    std::string segUpdateState = "skip";
-    bool glitchUpdateFlag =
-        shouldRunGlitchUpdateSegment(executedSeg, segUpdateState);
-
-    if (enableGlitchTrace) {
-      llvm::dbgs() << "[TRACE][GLITCH][SEG] seg=" << executedSeg
-                   << " iter=" << i << " state=" << segUpdateState << "\n";
-    }
+    bool glitchUpdateFlag = shouldRunGlitchUpdateSegment(executedSeg);
 
     std::vector<std::string> indexUpdateList;
     updateALUGlitchValuesForSegment(switchInfo, executedSeg, i,
                                     glitchUpdateFlag, debug, segExecTrace,
-                                    indexUpdateList, emitALUTrace);
+                                    indexUpdateList);
 
     // Step 1.5: update last update index for all data base nodes
     for (const auto &selNode : indexUpdateList) {
@@ -1909,8 +1693,7 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
     }
 
     updateMuxGlitchValuesForSegment(switchInfo, executedSeg, i,
-                                    glitchUpdateFlag, debug, enableGlitchTrace,
-                                    segExecTrace, emitMUXTrace);
+                                    glitchUpdateFlag, debug);
     updateLoadNodesLastUpdateIndexForSegment(switchInfo, executedSeg, i);
   }
 }

@@ -151,6 +151,9 @@ struct DataInfo {
   // Segment label -> all global iteration indices where that segment executes.
   // Example: "mg0.seg0" -> {0, 2, 7}
   StringMap<std::vector<unsigned>> segmentToExecutionIndices;
+  // Iteration index -> inactive mux nodes
+  // Example: 17 -> {"mux_0", "mux_3"}
+  std::map<unsigned, std::vector<std::string>> iterToInactiveMuxNodes;
 };
 
 struct SwitchingInfo {
