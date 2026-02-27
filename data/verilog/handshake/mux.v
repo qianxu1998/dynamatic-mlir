@@ -33,7 +33,7 @@ module mux #(
         ins_ready[i] = 0;
       end
     end else begin
-      selectedData = ins[0 * DATA_TYPE +: DATA_TYPE];
+      selectedData = {DATA_TYPE{1'b0}};
       selectedData_valid = 0;
 
       for (i = SIZE - 1; i >= 0; i = i - 1) begin
