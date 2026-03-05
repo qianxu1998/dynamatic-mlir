@@ -45,7 +45,16 @@ def SwitchingEstimation : Pass<"switching-estimation"> {
     Option<"dumpFile", "dump-file", "std::string", "",
            "Path to the output file where the switching estimation results will be dumped.">,
     Option<"targetPeriod", "target-period", "double", "",
-           "Target clock period to be used in the analysis.">,];
+           "Target clock period to be used in the analysis.">,
+    Option<"debug", "debug", "bool", "false",
+           "Enable structured debug output for switching-estimation.">,
+    Option<"debugCategories", "debug-categories", "std::string", "\"pipeline\"",
+           "Comma-separated debug categories: pipeline, cfdfc, profiling, data, mux, handshake, node, graph, dump, all.">,
+    Option<"dumpDataChannels", "dump-data-channels", "bool", "false",
+           "Dump per-node data-channel details to a sibling text file.">,
+    Option<"dumpMGHandshake", "dump-mg-handshake", "bool", "false",
+           "Dump per-MG handshake details to a sibling text file.">,
+  ];
   
   let dependentDialects = ["handshake::HandshakeDialect"];
 }

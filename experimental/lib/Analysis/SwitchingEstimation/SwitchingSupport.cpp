@@ -9,6 +9,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "experimental/Analysis/SwitchingEstimation/SwitchingSupport.h"
+#include "experimental/Analysis/SwitchingEstimation/Debug.h"
 #include "dynamatic/Dialect/Handshake/HandshakeAttributes.h"
 #include "dynamatic/Dialect/Handshake/HandshakeDialect.h"
 #include "dynamatic/Dialect/Handshake/HandshakeInterfaces.h"
@@ -32,6 +33,7 @@
 using namespace llvm;
 using namespace mlir;
 using namespace dynamatic;
+using namespace dynamatic::experimental;
 using namespace dynamatic::handshake;
 using namespace dynamatic::buffer;
 
@@ -78,14 +80,14 @@ void printBEToCFDFCMap(const std::map<std::pair<unsigned, unsigned>,
     const std::pair<unsigned, unsigned> &key = selPair.first;
     const std::vector<unsigned> mgList = selPair.second;
 
-    llvm::dbgs() << "[DEBUG] \tBackEdge Pair: (" << key.first << ", "
+    switchingDebugStream(SwitchingDebugCategory::Data) << "[DEBUG] \tBackEdge Pair: (" << key.first << ", "
                             << key.second << ") : [";
 
     for (const auto &selMG : mgList) {
-      llvm::dbgs() << selMG << ", ";
+      switchingDebugStream(SwitchingDebugCategory::Data) << selMG << ", ";
     }
 
-    llvm::dbgs() << "]\n";
+    switchingDebugStream(SwitchingDebugCategory::Data) << "]\n";
   }
 }
 
@@ -95,13 +97,13 @@ void printSegToBBListMap(
     const std::string segLabel = selPair.first;
     const mlir::SetVector<unsigned> BBList = selPair.second;
 
-    llvm::dbgs() << "[DEBUG] \tSeg Label: " << segLabel << " : [";
+    switchingDebugStream(SwitchingDebugCategory::Data) << "[DEBUG] \tSeg Label: " << segLabel << " : [";
 
     for (const auto &selBB : BBList) {
-      llvm::dbgs() << selBB << ", ";
+      switchingDebugStream(SwitchingDebugCategory::Data) << selBB << ", ";
     }
 
-    llvm::dbgs() << "]\n";
+    switchingDebugStream(SwitchingDebugCategory::Data) << "]\n";
   }
 }
 

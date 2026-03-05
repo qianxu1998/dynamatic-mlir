@@ -9,6 +9,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "experimental/Analysis/SwitchingEstimation/GraphModel.h"
+#include "experimental/Analysis/SwitchingEstimation/Debug.h"
 #include "dynamatic/Dialect/Handshake/HandshakeAttributes.h"
 #include "dynamatic/Support/CFG.h"
 #include "dynamatic/Transforms/BufferPlacement/CFDFC.h"
@@ -25,6 +26,7 @@
 using namespace llvm;
 using namespace mlir;
 using namespace dynamatic;
+using namespace dynamatic::experimental;
 using namespace dynamatic::handshake;
 using namespace dynamatic::buffer;
 
@@ -202,140 +204,140 @@ void AdjNode::totalDataSwitchingCounting(bool mapped) {
 // Define all printing functions to facilitate debugging
 void AdjNode::printNodeDetails() {
 
-  llvm::dbgs()
+  switchingDebugStream(SwitchingDebugCategory::Graph)
       << "[DEBUG] "
          "\t=============================================================\n";
-  llvm::dbgs() << "[DEBUG] \t[Node Info Start]\n";
+  switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t[Node Info Start]\n";
 
   //
-  llvm::dbgs() << "[DEBUG] \t\tNode Name: "
+  switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\tNode Name: "
                << op->getAttrOfType<StringAttr>("handshake.name").str() << "\n";
-  llvm::dbgs() << "[DEBUG] \t\tLatency: " << nodeLatency << ";\n";
-  llvm::dbgs() << "[DEBUG] \t\tPredecessors: [";
+  switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\tLatency: " << nodeLatency << ";\n";
+  switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\tPredecessors: [";
   for (const auto &p : pres) {
-    llvm::dbgs() << p << " ";
+    switchingDebugStream(SwitchingDebugCategory::Graph) << p << " ";
   }
-  llvm::dbgs() << "]\n[DEBUG] \t\tSuccessors: [";
+  switchingDebugStream(SwitchingDebugCategory::Graph) << "]\n[DEBUG] \t\tSuccessors: [";
   for (const auto &s : sucs) {
-    llvm::dbgs() << s << " ";
+    switchingDebugStream(SwitchingDebugCategory::Graph) << s << " ";
   }
-  llvm::dbgs() << "]\n";
+  switchingDebugStream(SwitchingDebugCategory::Graph) << "]\n";
 
-  llvm::dbgs() << "[DEBUG] \t\tSuccessor Channel DataWidth: \n";
+  switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\tSuccessor Channel DataWidth: \n";
   for (const auto &[s, width] : sucsDataWidthMap) {
-    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s << ", Data_width: " << width
+    switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\t\tNode: " << s << ", Data_width: " << width
                  << "\n";
   }
 
-  llvm::dbgs() << "[DEBUG] \t\tSuccessor Channel Data Value\n";
+  switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\tSuccessor Channel Data Value\n";
   for (const auto &[s, valueVec] : dataOut) {
-    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s << ", Output Value Vector: \n";
+    switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\t\tNode: " << s << ", Output Value Vector: \n";
     int counter = 0;
     for (const auto &val : valueVec) {
-      llvm::dbgs() << "[" << counter++ << "] : " << val << "; ";
+      switchingDebugStream(SwitchingDebugCategory::Graph) << "[" << counter++ << "] : " << val << "; ";
     }
-    llvm::dbgs() << "\n";
+    switchingDebugStream(SwitchingDebugCategory::Graph) << "\n";
   }
 
-  llvm::dbgs() << "[DEBUG] \t\tValid Channel Switching: \n";
+  switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\tValid Channel Switching: \n";
   for (const auto &[s, numSwitches] : validSignal) {
-    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s
+    switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\t\tNode: " << s
                  << ", Data_width: " << numSwitches << "\n";
   }
 
-  llvm::dbgs() << "[DEBUG] \t\tReady Channel Switching: \n";
+  switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\tReady Channel Switching: \n";
   for (const auto &[s, numSwitches] : readySignal) {
-    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s
+    switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\t\tNode: " << s
                  << ", Data_width: " << numSwitches << "\n";
   }
 
-  llvm::dbgs() << "[DEBUG] \t\tValid Active Range: \n";
+  switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\tValid Active Range: \n";
   for (const auto &[s, valueVec] : setV) {
-    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [";
+    switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [";
     for (unsigned i = 0, e = valueVec.size(); i < e; ++i)
-      llvm::dbgs() << (valueVec.test(i) ? 1 : 0) << " ";
-    llvm::dbgs() << "]\n";
+      switchingDebugStream(SwitchingDebugCategory::Graph) << (valueVec.test(i) ? 1 : 0) << " ";
+    switchingDebugStream(SwitchingDebugCategory::Graph) << "]\n";
   }
 
-  llvm::dbgs() << "[DEBUG] \t\tReady Active Range: \n";
+  switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\tReady Active Range: \n";
   for (const auto &[s, valueVec] : setR) {
-    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [";
+    switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [";
     for (unsigned i = 0, e = valueVec.size(); i < e; ++i)
-      llvm::dbgs() << (valueVec.test(i) ? 1 : 0) << " ";
-    llvm::dbgs() << "]\n";
+      switchingDebugStream(SwitchingDebugCategory::Graph) << (valueVec.test(i) ? 1 : 0) << " ";
+    switchingDebugStream(SwitchingDebugCategory::Graph) << "]\n";
   }
 }
 
 void AdjNode::printHandshakeSwitching() {
-  llvm::dbgs() << "[DEBUG] \t\tTotal Valid Switching Number: "
+  switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\tTotal Valid Switching Number: "
                << totalValidSwitching << "\n";
-  llvm::dbgs() << "[DEBUG] \t\tTotal Ready Switching Number: "
+  switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\tTotal Ready Switching Number: "
                << totalReadySwitching << "\n";
 
-  llvm::dbgs() << "[DEBUG] \t\tValid Channel Switching: \n";
+  switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\tValid Channel Switching: \n";
   for (const auto &[s, numSwitches] : validSignal) {
-    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s
+    switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\t\tNode: " << s
                  << ", Data_width: " << numSwitches << "\n";
   }
 
-  llvm::dbgs() << "[DEBUG] \t\tReady Channel Switching: \n";
+  switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\tReady Channel Switching: \n";
   for (const auto &[s, numSwitches] : readySignal) {
-    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s
+    switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\t\tNode: " << s
                  << ", Data_width: " << numSwitches << "\n";
   }
 
-  llvm::dbgs() << "[DEBUG] \t\tValid Active Range: \n";
+  switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\tValid Active Range: \n";
   for (const auto &[s, valueVec] : setV) {
-    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [";
+    switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [";
     for (unsigned i = 0, e = valueVec.size(); i < e; ++i)
-      llvm::dbgs() << (valueVec.test(i) ? 1 : 0) << " ";
-    llvm::dbgs() << "]\n";
+      switchingDebugStream(SwitchingDebugCategory::Graph) << (valueVec.test(i) ? 1 : 0) << " ";
+    switchingDebugStream(SwitchingDebugCategory::Graph) << "]\n";
   }
 
-  llvm::dbgs() << "[DEBUG] \t\tReady Active Range: \n";
+  switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\tReady Active Range: \n";
   for (const auto &[s, valueVec] : setR) {
-    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [";
+    switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\t\tNode: " << s << " ; Active Range: [";
     for (unsigned i = 0, e = valueVec.size(); i < e; ++i)
-      llvm::dbgs() << (valueVec.test(i) ? 1 : 0) << " ";
-    llvm::dbgs() << "]\n";
+      switchingDebugStream(SwitchingDebugCategory::Graph) << (valueVec.test(i) ? 1 : 0) << " ";
+    switchingDebugStream(SwitchingDebugCategory::Graph) << "]\n";
   }
 }
 
 void AdjNode::printDataChannelSwitching() {
 
-  llvm::dbgs() << "[DEBUG] \t\tTotal Number of Data Channel Switches: "
+  switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\tTotal Number of Data Channel Switches: "
                << totalDataSwitching << "\n";
 
   // Print per channel data switches
   for (const auto &[suc, value] : dataSwitches) {
-    llvm::dbgs() << "[DEBUG] \t\t\tChannel: " << suc
+    switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\t\tChannel: " << suc
                  << ", Num Switches: " << value << "\n";
   }
 }
 
 void AdjNode::printPerDataChannelPerBitToggleNumber() {
 
-  llvm::dbgs() << "[DEBUG] \t\tPer Data Channel Per Bit Toggle Number: \n";
+  switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\tPer Data Channel Per Bit Toggle Number: \n";
 
   for (const auto &[suc, valueVec] : perChannelToggle) {
-    llvm::dbgs() << "[DEBUG] \t\t Node: " << suc << "\n";
+    switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\t Node: " << suc << "\n";
 
     for (const auto &[selBit, value] : valueVec) {
-      llvm::dbgs() << "[DEBUG] \t\t\tBit " << selBit << ": " << value << "\n";
+      switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\t\tBit " << selBit << ": " << value << "\n";
     }
   }
 }
 
 void AdjNode::printPerHandshakeChannelToggleNumber() {
-  llvm::dbgs() << "[DEBUG] \t\t[VALID CHANNEL]\n";
+  switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\t[VALID CHANNEL]\n";
   for (const auto &[suc, validSwitch] : validSignal) {
-    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << suc
+    switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\t\tNode: " << suc
                  << ", Valid Switching: " << validSwitch << "\n";
   }
 
-  llvm::dbgs() << "[DEBUG] \t\t[READY CHANNEL]\n";
+  switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\t[READY CHANNEL]\n";
   for (const auto &[pre, readySwitching] : readySignal) {
-    llvm::dbgs() << "[DEBUG] \t\t\tNode: " << pre
+    switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\t\tNode: " << pre
                  << ", Ready Switching: " << readySwitching << "\n";
   }
 }
@@ -415,7 +417,7 @@ AdjGraph::AdjGraph(CFDFC *cfdfc, const TimingDatabase &timingDB,
     auto nodeBBIndexAttr = selNode->getAttrOfType<IntegerAttr>("handshake.bb");
     unsigned nodeBBIndex = 0;
     if (!nodeBBIndexAttr) {
-      llvm::dbgs()
+      switchingDebugStream(SwitchingDebugCategory::Graph)
           << "[WARNING] \t[AdjGraph] Cannot find the BB index for node: "
           << unitName << "\n";
     } else {
@@ -424,13 +426,13 @@ AdjGraph::AdjGraph(CFDFC *cfdfc, const TimingDatabase &timingDB,
 
     //! Testing
     //
-    //     llvm::dbgs()
+    //     switchingDebugStream(SwitchingDebugCategory::Graph)
     //     << "[DEBUG] "
     //        "\t=============================================================\n";
-    // llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n";
-    // llvm::dbgs() << "[DEBUG] \tNode Latency From DataBase: "
+    // switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \tNode Name: " << unitName << "\n";
+    // switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \tNode Latency From DataBase: "
     //                         << nodeLatency << "\n";
-    // llvm::dbgs()
+    // switchingDebugStream(SwitchingDebugCategory::Graph)
     //            << "[DEBUG] \tNode BB Index: " << nodeBBIndex << "\n";
 
     // Step 2.1: Construct the node storing structure
@@ -472,10 +474,10 @@ AdjGraph::AdjGraph(
 
     //! Testing
     //
-    //     llvm::dbgs()
+    //     switchingDebugStream(SwitchingDebugCategory::Graph)
     //     << "[DEBUG] "
     //        "\t=============================================================\n";
-    // llvm::dbgs() << "[DEBUG] \tNode Name: " << unitName << "\n";
+    // switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \tNode Name: " << unitName << "\n";
 
     std::vector<std::string> pres;
     std::vector<std::string> sucs;
@@ -547,7 +549,7 @@ AdjGraph::AdjGraph(
     if (!nodeBBIndexAttr) {
       // For now we just print a warning message and keep a large number for the
       // bbIndex
-      llvm::dbgs() << "[DEBUG] \tCan't get the BB index of the op: " << unitName
+      switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \tCan't get the BB index of the op: " << unitName
                    << "\n";
     } else {
       nodeBBIndex = nodeBBIndexAttr.getUInt();
@@ -1131,7 +1133,7 @@ void AdjGraph::obtainNodeGlobalOrder() {
 
       for (const auto &selStartNode : segStartNodes) {
         //! Testing
-        // llvm::dbgs() << "[DEBUG] \t\tNode: " << selStartNode << "\n";
+        // switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\tNode: " << selStartNode << "\n";
 
         auto [tmpPathLat, _skip] =
             getMaxLatency(selStartNode, name, true, false);
@@ -1144,7 +1146,7 @@ void AdjGraph::obtainNodeGlobalOrder() {
       graphGlobalOrder[name] = std::make_pair(finalStartNode, maxLatency);
 
       //! Testing
-      // llvm::dbgs() << "[DEBUG] \tNode: " << name << "; Global Order: ("
+      // switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \tNode: " << name << "; Global Order: ("
       //              << finalStartNode << ", " << maxLatency << ");\n";
     }
   }
@@ -1309,7 +1311,7 @@ void AdjGraph::buildSrcMaps() {
       if (!selBufferNode->dataInSrcNode.empty())
         dataSrcToOpaqueBufferMap[selBufferNode->dataInSrcNode] = selNode;
       //! Testing
-      llvm::dbgs() << "[DEBUG] \t\tBuffer Node: " << selNode
+      switchingDebugStream(SwitchingDebugCategory::Graph) << "[DEBUG] \t\tBuffer Node: " << selNode
                    << "; DataInSrcNode: " << selBufferNode->dataInSrcNode
                    << "\n";
 

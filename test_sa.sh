@@ -90,6 +90,61 @@ F_HANDSHAKE_SWITCH="$OUTPUT_DIR/handshake_switch_test.mlir"
 TARGET_CP=8
 MILP_SOLVER="gurobi"
 
+# ---------------------------------------------------------------------------- #
+# Switching-estimation debug flags (environment-overridable)
+# ---------------------------------------------------------------------------- #
+# SWITCH_DEBUG:
+#   - false: disable structured debug stream (default)
+#   - true : enable structured debug stream
+# SWITCH_DEBUG_CATEGORIES:
+#   - Comma-separated list of categories to print when SWITCH_DEBUG=true
+#   - Available categories:
+#       pipeline, cfdfc, profiling, data, mux, handshake, node, graph, dump, all
+#   - Note: category "dump" enables both detailed dump files automatically.
+# SWITCH_DUMP_DATA_CHANNELS:
+#   - false: do not dump per-node data-channel detail file (default)
+#   - true : dump "<switching_estimation>_data_channels.txt"
+# SWITCH_DUMP_MG_HANDSHAKE:
+#   - false: do not dump per-MG handshake detail file (default)
+#   - true : dump "<switching_estimation>_mg_handshake.txt"
+# Example:
+#   SWITCH_DEBUG=true \
+#   SWITCH_DEBUG_CATEGORIES=data,mux \
+#   SWITCH_DUMP_DATA_CHANNELS=true \
+#   SWITCH_DUMP_MG_HANDSHAKE=true \
+#   ./test_sa.sh matvec
+SWITCH_DEBUG="${SWITCH_DEBUG:-false}"
+SWITCH_DEBUG_CATEGORIES="${SWITCH_DEBUG_CATEGORIES:-pipeline}"
+SWITCH_DUMP_DATA_CHANNELS="${SWITCH_DUMP_DATA_CHANNELS:-false}"
+SWITCH_DUMP_MG_HANDSHAKE="${SWITCH_DUMP_MG_HANDSHAKE:-false}"
+
+# ---------------------------------------------------------------------------- #
+# Comparison/report options (environment-overridable)
+# ---------------------------------------------------------------------------- #
+# WINDOW_MODE:
+#   - full       : compare all simulated cycles (default in this script)
+#   - post-reset : compare cycles after reset deassertion
+# RESET_SIGNAL:
+#   - empty string: auto-detect reset signal (default)
+#   - explicit signal name: force a specific reset signal
+# REL_ERROR_THRESHOLD:
+#   - Relative error limit for channels with golden > 0
+# ZERO_ABS_THRESHOLD:
+#   - Absolute error limit for channels with golden = 0
+# IGNORE_BOTH_BELOW:
+#   - Ignore a channel if both est/golden are strictly below this value
+# MAX_VIOLATION_REPORT:
+#   - Max detailed violations printed by switching_testing/test.py
+# DEBUG_TOP_K:
+#   - Top failing entries printed by switching_testing/debug_switching.py
+WINDOW_MODE="${WINDOW_MODE:-full}"
+RESET_SIGNAL="${RESET_SIGNAL:-}"
+REL_ERROR_THRESHOLD="${REL_ERROR_THRESHOLD:-0.10}"
+ZERO_ABS_THRESHOLD="${ZERO_ABS_THRESHOLD:-5}"
+IGNORE_BOTH_BELOW="${IGNORE_BOTH_BELOW:-50}"
+MAX_VIOLATION_REPORT="${MAX_VIOLATION_REPORT:-40}"
+DEBUG_TOP_K="${DEBUG_TOP_K:-20}"
+
 # ============================================================================ #
 # Switching Estimation Flow
 # ============================================================================ #
@@ -112,6 +167,7 @@ echo_info "Profiling Finished"
 
 # Run the switching estimation pass
 echo_section "[Step 2] Running Buffer Placement and Switching Estimation Pass for ${KERNEL_NAME}"
+echo_info "Switching debug flags: debug=${SWITCH_DEBUG}, categories=${SWITCH_DEBUG_CATEGORIES}, dump-data-channels=${SWITCH_DUMP_DATA_CHANNELS}, dump-mg-handshake=${SWITCH_DUMP_MG_HANDSHAKE}"
 cd "$OUTPUT_DIR"
 export LSAN_OPTIONS=verbosity=1:log_threads=1
 export UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
@@ -120,7 +176,7 @@ if ! /usr/bin/time -v "$DYNAMATIC_OPT_BIN" "$F_HANDSHAKE_TRANSFORMED" \
     --handshake-set-buffering-properties="version=fpga20" \
     --handshake-place-buffers="algorithm=fpga20 solver=$MILP_SOLVER frequencies=$F_FREQUENCIES timing-models=$SCRIPT_DIR/data/components.json target-period=$TARGET_CP timeout=300 dump-logs \
     blif-files=$DYNAMATIC_DIR/data/aig/ lut-delay=0.55 lut-size=6 acyclic-type" \
-    --switching-estimation="data-trace=$TRACE_LOG timing-models=$DYNAMATIC_DIR/data/components.json target-period=$TARGET_CP dump-file=$SWITCHING_LOG" \
+    --switching-estimation="data-trace=$TRACE_LOG timing-models=$DYNAMATIC_DIR/data/components.json target-period=$TARGET_CP dump-file=$SWITCHING_LOG debug=$SWITCH_DEBUG debug-categories=$SWITCH_DEBUG_CATEGORIES dump-data-channels=$SWITCH_DUMP_DATA_CHANNELS dump-mg-handshake=$SWITCH_DUMP_MG_HANDSHAKE" \
     2>&1 | tee "$F_HANDSHAKE_SWITCH"; then
     echo_fatal "Failed to place smart buffers and estimate switches"
     exit 1
@@ -138,10 +194,12 @@ if [[ -t 1 ]]; then
     if ! python3 "$COMPARE_SCRIPT" \
         --vcd "$VCD_GOLDEN" \
         --est-csv "$SWITCHING_LOG" \
-        --window full \
-        --rel-error-threshold 0.10 \
-        --zero-abs-threshold 5 \
-        --ignore-both-below 50 \
+        --window "$WINDOW_MODE" \
+        --reset-signal "$RESET_SIGNAL" \
+        --rel-error-threshold "$REL_ERROR_THRESHOLD" \
+        --zero-abs-threshold "$ZERO_ABS_THRESHOLD" \
+        --ignore-both-below "$IGNORE_BOTH_BELOW" \
+        --max-violation-report "$MAX_VIOLATION_REPORT" \
         2>&1 | tee "$COMPARE_LOG" | awk \
             -v red="$(printf '%b' "$RED")" \
             -v nc="$(printf '%b' "$NC")" \
@@ -152,10 +210,12 @@ else
     if ! python3 "$COMPARE_SCRIPT" \
         --vcd "$VCD_GOLDEN" \
         --est-csv "$SWITCHING_LOG" \
-        --window full \
-        --rel-error-threshold 0.10 \
-        --zero-abs-threshold 5 \
-        --ignore-both-below 50 \
+        --window "$WINDOW_MODE" \
+        --reset-signal "$RESET_SIGNAL" \
+        --rel-error-threshold "$REL_ERROR_THRESHOLD" \
+        --zero-abs-threshold "$ZERO_ABS_THRESHOLD" \
+        --ignore-both-below "$IGNORE_BOTH_BELOW" \
+        --max-violation-report "$MAX_VIOLATION_REPORT" \
         2>&1 | tee "$COMPARE_LOG"; then
         COMPARE_EXIT=1
     fi
@@ -165,10 +225,12 @@ if [[ -f "$DEBUG_SCRIPT" ]]; then
     python3 "$DEBUG_SCRIPT" \
         --repo-root "$SCRIPT_DIR" \
         --kernel "$KERNEL_NAME" \
-        --window full \
-        --rel-error-threshold 0.10 \
-        --zero-abs-threshold 5 \
-        --ignore-both-below 50 \
+        --window "$WINDOW_MODE" \
+        --reset-signal "$RESET_SIGNAL" \
+        --rel-error-threshold "$REL_ERROR_THRESHOLD" \
+        --zero-abs-threshold "$ZERO_ABS_THRESHOLD" \
+        --ignore-both-below "$IGNORE_BOTH_BELOW" \
+        --top-k "$DEBUG_TOP_K" \
         2>&1 | tee "$DEBUG_LOG" || true
 fi
 

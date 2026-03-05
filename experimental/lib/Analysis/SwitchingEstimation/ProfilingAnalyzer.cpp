@@ -6,6 +6,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "experimental/Analysis/SwitchingEstimation/ProfilingAnalyzer.h"
+#include "experimental/Analysis/SwitchingEstimation/Debug.h"
 
 #include <cassert>
 #include <cctype>
@@ -16,6 +17,7 @@
 using namespace llvm;
 using namespace mlir;
 using namespace dynamatic;
+using namespace dynamatic::experimental;
 using namespace dynamatic::handshake;
 
 // Constructor for the SCF parsing class
@@ -25,11 +27,11 @@ SCFProfilingResult::SCFProfilingResult(StringRef dataTrace,
   std::filesystem::path pathObj(dataTrace.str());
   std::string resultDir = pathObj.parent_path().string();
   std::string scfFilePath = resultDir + "/cf_dyn_transformed.mlir";
-  llvm::dbgs() << "[DEBUG] \tResult Dir : " << resultDir << "\n";
+  switchingDebugStream(SwitchingDebugCategory::Profiling) << "[DEBUG] \tResult Dir : " << resultDir << "\n";
 
   // Step 1: Parse the actual data log file
   parseUnifiedLogFile(dataTrace, switchInfo);
-  llvm::dbgs() << "[DEBUG] \t\tDONE\n";
+  switchingDebugStream(SwitchingDebugCategory::Profiling) << "[DEBUG] \t\tDONE\n";
 
   // Step 2: Construct the map for seg execution count
   constructSegExeCount();
@@ -49,8 +51,8 @@ void SCFProfilingResult::insertValuePair(int opValue, unsigned iterIndex,
 
 void SCFProfilingResult::parseUnifiedLogFile(StringRef tracePath,
                                              SwitchingInfo &switchInfo) {
-  
-      llvm::dbgs() << "[DEBUG] [Step 1] [PARSING UNIFIED TRACE LOG FILE]\n";
+  switchingDebugStream(SwitchingDebugCategory::Profiling)
+      << "[DEBUG] [Step 1] [PARSING UNIFIED TRACE LOG FILE]\n";
 
   // STEP 0: Initialize structures
   segmentEndEdgeIndices.clear();
@@ -334,19 +336,19 @@ void SCFProfilingResult::parseUnifiedLogFile(StringRef tracePath,
   switchInfo.staticInfo.segToBBs["E"] = filterToTransitionBBs(endBBs);
 
   {
-    llvm::dbgs() << "[DEBUG] [Profiling] segToBBs summary:\n";
+    switchingDebugStream(SwitchingDebugCategory::Profiling) << "[DEBUG] [Profiling] segToBBs summary:\n";
     for (const auto &[segLabelRef, bbList] : switchInfo.staticInfo.segToBBs) {
       std::set<unsigned> uniq(bbList.begin(), bbList.end());
-      llvm::dbgs() << "[DEBUG]   seg=" << segLabelRef
+      switchingDebugStream(SwitchingDebugCategory::Profiling) << "[DEBUG]   seg=" << segLabelRef
                    << " bb_count=" << bbList.size() << " bb_unique={";
       bool first = true;
       for (unsigned bb : uniq) {
         if (!first)
-          llvm::dbgs() << ",";
-        llvm::dbgs() << bb;
+          switchingDebugStream(SwitchingDebugCategory::Profiling) << ",";
+        switchingDebugStream(SwitchingDebugCategory::Profiling) << bb;
         first = false;
       }
-      llvm::dbgs() << "}\n";
+      switchingDebugStream(SwitchingDebugCategory::Profiling) << "}\n";
     }
   };
 
@@ -470,16 +472,16 @@ void SCFProfilingResult::constructSegExeCount() {
   executionPhaseToSegmentExecCount[numExecPhase] = std::make_pair(prevSeg, segCounter);
 
   {
-    llvm::dbgs() << "[DEBUG] [Profiling] executedSegmentTrace size: "
+    switchingDebugStream(SwitchingDebugCategory::Profiling) << "[DEBUG] [Profiling] executedSegmentTrace size: "
                  << executedSegmentTrace.size() << "\n";
-    llvm::dbgs() << "[DEBUG] [Profiling] exec phases:\n";
+    switchingDebugStream(SwitchingDebugCategory::Profiling) << "[DEBUG] [Profiling] exec phases:\n";
     for (const auto &[phase, segExec] : executionPhaseToSegmentExecCount) {
-      llvm::dbgs() << "[DEBUG]   phase=" << phase << " seg=" << segExec.first
+      switchingDebugStream(SwitchingDebugCategory::Profiling) << "[DEBUG]   phase=" << phase << " seg=" << segExec.first
                    << " count=" << segExec.second << "\n";
     }
-    llvm::dbgs() << "[DEBUG] [Profiling] segmentToFirstIteration:\n";
+    switchingDebugStream(SwitchingDebugCategory::Profiling) << "[DEBUG] [Profiling] segmentToFirstIteration:\n";
     for (const auto &[seg, idx] : segmentToFirstIteration)
-      llvm::dbgs() << "[DEBUG]   seg=" << seg << " firstIter=" << idx << "\n";
+      switchingDebugStream(SwitchingDebugCategory::Profiling) << "[DEBUG]   seg=" << seg << " firstIter=" << idx << "\n";
   };
 }
 

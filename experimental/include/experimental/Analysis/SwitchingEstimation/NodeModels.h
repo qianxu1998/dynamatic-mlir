@@ -48,11 +48,13 @@ inline IISet fullSet(unsigned II) { return IISet(II, true); }
 // Normalize a cycle index into [0, II) even when intermediate arithmetic
 // produces negative values in start-time calculations.
 inline unsigned normalizeCycleIndex(int cycle, unsigned II) {
+  using ::dynamatic::experimental::SwitchingDebugCategory;
+  using ::dynamatic::experimental::switchingDebugStream;
   if (II == 0)
     return 0;
   int idx = cycle % static_cast<int>(II);
   if (idx < 0)
-    LLVM_DEBUG(llvm::dbgs()
+    LLVM_DEBUG(switchingDebugStream(SwitchingDebugCategory::Node)
                << "[ERROR]: Negative cycle index before normalization: " << idx
                << "\n");
   // idx += static_cast<int>(II);

@@ -9,6 +9,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "experimental/Analysis/SwitchingEstimation/NodeModels.h"
+#include "experimental/Analysis/SwitchingEstimation/Debug.h"
+
+using namespace dynamatic::experimental;
 
 namespace {
 inline unsigned switchingFromSet(const IISet &set) {
@@ -70,12 +73,12 @@ void BufferNode::printNodeDetails() {
   // Call base class's printNodeDetails()
   AdjNode::printNodeDetails();
 
-  llvm::dbgs() << "[DEBUG] \t\tSTART: " << START << ";\n";
-  llvm::dbgs() << "[DEBUG] \t\tOccupancy: " << occupancy << ";\n";
-  llvm::dbgs() << "[DEBUG] \t\tNumSlots: " << numSlots << ";\n";
-  llvm::dbgs() << "[DEBUG] \t\ttransparent: " << transparent
+  switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\tSTART: " << START << ";\n";
+  switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\tOccupancy: " << occupancy << ";\n";
+  switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\tNumSlots: " << numSlots << ";\n";
+  switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\ttransparent: " << transparent
                           << ";\n";
-  llvm::dbgs() << "[DEBUG] \t\tBufferType: "
+  switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\tBufferType: "
                           << static_cast<int>(buffType) << ";\n";
 }
 
@@ -370,11 +373,11 @@ void MuxNode::calReadySet(const std::string &preNodeName, const IISet *setCond,
 void MuxNode::printNodeDetails() {
   AdjNode::printNodeDetails();
 
-  llvm::dbgs() << "[DEBUG] \t\tCon_pre_node_name: " << conPreNodeName
+  switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\tCon_pre_node_name: " << conPreNodeName
                           << "\n";
-  llvm::dbgs() << "[DEBUG] \t\tInput Port Mapping: \n";
+  switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\tInput Port Mapping: \n";
   for (const auto &[selName, portIdx] : preNameToPortIdxMap) {
-    llvm::dbgs() << "[DEBUG] \t\t\tNode Name: " << selName
+    switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\t\tNode Name: " << selName
                             << "; Port Index: " << portIdx << ";\n";
   }
 }
@@ -442,7 +445,7 @@ void ForkNode::calValidSwitching(
   for (auto &entry : setRDict) {
     if (entry.first != sucNodeName) {
       //! Testing
-      llvm::dbgs() << "selSuc " << nodeSteadyStart << "\n";
+      switchingDebugStream(SwitchingDebugCategory::Node) << "selSuc " << nodeSteadyStart << "\n";
       IISet *s = entry.second;
       // In our design, an empty set is equivalent to None.
       if (!s) {
@@ -455,16 +458,16 @@ void ForkNode::calValidSwitching(
   }
 
   //! Testing
-  llvm::dbgs() << "Node Steady Start: " << nodeSteadyStart << "\n";
-  llvm::dbgs() << "Sel Start Point: " << selStartPoint << "\n";
-  llvm::dbgs() << "Exist Flag: " << existFlag << "\n";
+  switchingDebugStream(SwitchingDebugCategory::Node) << "Node Steady Start: " << nodeSteadyStart << "\n";
+  switchingDebugStream(SwitchingDebugCategory::Node) << "Sel Start Point: " << selStartPoint << "\n";
+  switchingDebugStream(SwitchingDebugCategory::Node) << "Exist Flag: " << existFlag << "\n";
 
   if (flag && existFlag) {
     validSignal[sucNodeName] = 0;
     return;
   } else {
     //! Testing
-    llvm::dbgs() << "Hit Valid Switching Calculation Case III\n";
+    switchingDebugStream(SwitchingDebugCategory::Node) << "Hit Valid Switching Calculation Case III\n";
     if (existFlag) {
       // Case 3: Compute desired cycle time
       // TODO: Verify the following desired criteria
@@ -679,9 +682,9 @@ void CMergeNode::updateDataout(int inputData) {
 void CMergeNode::printNodeDetails() {
   AdjNode::printNodeDetails();
 
-  llvm::dbgs() << "[DEBUG] \t\tCon_suc_node_name: " << conSucNodeName
+  switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\tCon_suc_node_name: " << conSucNodeName
                           << "\n";
-  llvm::dbgs() << "[DEBUG] \t\tData_suc_node_name: "
+  switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\tData_suc_node_name: "
                           << dataSucNodeName << "\n";
 }
 
@@ -837,25 +840,25 @@ void CBrNode::updateDataout(int inputData, unsigned condValue) {
 void CBrNode::printNodeDetails() {
   AdjNode::printNodeDetails();
 
-  llvm::dbgs() << "[DEBUG] \t\tCond_pre_node_name: "
+  switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\tCond_pre_node_name: "
                           << condPreNodeName << "\n";
-  llvm::dbgs() << "[DEBUG] \t\tData_pre_node_name: "
+  switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\tData_pre_node_name: "
                           << dataPreNodeName << "\n";
-  llvm::dbgs() << "[DEBUG] \t\tTrue_suc_node_name: "
+  switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\tTrue_suc_node_name: "
                           << trueSucNodeName << "\n";
-  llvm::dbgs() << "[DEBUG] \t\tFalse_suc_node_name: "
+  switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\tFalse_suc_node_name: "
                           << falseSucNodeName << "\n";
-  llvm::dbgs() << "[DEBUG] \t\tOut Channel Name to Index Map:\n";
+  switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\tOut Channel Name to Index Map:\n";
   for (const auto &[outName, portIdx] : outChannelNameToIndexMap) {
-    llvm::dbgs() << "[DEBUG] \t\t\tOutput Node: " << outName
+    switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\t\tOutput Node: " << outName
                             << "; Port Idx: " << portIdx << "\n";
   }
-  llvm::dbgs() << "[DEBUG] \t\tPer_channel_dataout:\n";
+  switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\tPer_channel_dataout:\n";
   for (const auto &entry : per_channel_dataout) {
-    llvm::dbgs() << "[DEBUG] \t\t\tChannel " << entry.first << ": ";
+    switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\t\tChannel " << entry.first << ": ";
     for (int v : entry.second)
-      llvm::dbgs() << v << " ";
-    llvm::dbgs() << "\n";
+      switchingDebugStream(SwitchingDebugCategory::Node) << v << " ";
+    switchingDebugStream(SwitchingDebugCategory::Node) << "\n";
   }
 }
 
@@ -978,11 +981,11 @@ void DLoadNode::printNodeDetails() {
   // Call base class's printNodeDetails()
   AdjNode::printNodeDetails();
 
-  llvm::dbgs() << "[DEBUG] \t\tAddress input node: "
+  switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\tAddress input node: "
                           << addressInNodeName << ";\n";
-  llvm::dbgs() << "[DEBUG] \t\tAddress output node: "
+  switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\tAddress output node: "
                           << addressOutNodeName << ";\n";
-  llvm::dbgs() << "[DEBUG] \t\tData output node: " << dataOutNodeName
+  switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\tData output node: " << dataOutNodeName
                           << ";\n";
 }
 
@@ -1135,13 +1138,13 @@ void DStoreNode::printNodeDetails() {
   // Call the base class printNodeDetails for common node info.
   AdjNode::printNodeDetails();
 
-  llvm::dbgs() << "[DEBUG] \t\tAddress input node: " << addressInNode
+  switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\tAddress input node: " << addressInNode
                           << "\n";
-  llvm::dbgs() << "[DEBUG] \t\tSrc address input node: "
+  switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\tSrc address input node: "
                           << addressInSrcNode << "\n";
-  llvm::dbgs() << "[DEBUG] \t\tData input node: " << dataInNode
+  switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\tData input node: " << dataInNode
                           << "\n";
-  llvm::dbgs() << "[DEBUG] \t\tSrc data input node: "
+  switchingDebugStream(SwitchingDebugCategory::Node) << "[DEBUG] \t\tSrc data input node: "
                           << dataInSrcNode << "\n";
 }
 

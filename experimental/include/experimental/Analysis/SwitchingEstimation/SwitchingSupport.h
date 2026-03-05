@@ -17,6 +17,7 @@
 #include "dynamatic/Dialect/Handshake/HandshakeAttributes.h"
 #include "dynamatic/Support/TimingModels.h"
 #include "dynamatic/Transforms/BufferPlacement/CFDFC.h"
+#include "experimental/Analysis/SwitchingEstimation/Debug.h"
 #include "experimental/Analysis/SwitchingEstimation/GraphModel.h"
 #include "mlir/IR/Attributes.h"
 #include "llvm/ADT/DenseMap.h"
@@ -262,6 +263,13 @@ public:
   // For control merge node, we need to store the controlDataOut info as well
   std::map<unsigned, IterationValue> controlDataOut;
 
+  // For mux node, we store the output when it's in the inactive state, which is
+  // used for glitch handling
+  std::map<unsigned, IterationValue> inactiveDataOut;
+
+  // For mux updates, we keep a vector of active + inactive value.
+  std::vector<int> originalDataOutVec;
+
   // Support LLVM node casting
   enum class NodeKind { DataBaseKind, CMergeDataKind };
 
@@ -337,17 +345,22 @@ std::string getNodeType(const std::string &nodeName);
 // This function prints all values in a vector
 template <typename T>
 inline void printVector(const T &selVec) {
+  using ::dynamatic::experimental::SwitchingDebugCategory;
+  using ::dynamatic::experimental::switchingDebugStream;
+
   int counter = 0;
 
-  dbgs() << "[DEBUG] Vector Contents: ";
+  switchingDebugStream(SwitchingDebugCategory::Data)
+      << "[DEBUG] Vector Contents: ";
 
   for (auto &selVal : selVec) {
-    dbgs() << "[" << counter << "] : " << selVal << "; ";
+    switchingDebugStream(SwitchingDebugCategory::Data)
+        << "[" << counter << "] : " << selVal << "; ";
 
     counter++;
   }
 
-  dbgs() << ";\n";
+  switchingDebugStream(SwitchingDebugCategory::Data) << ";\n";
 }
 
 // This function remove the digits in the given string and keep the rest

@@ -1,4 +1,5 @@
 add_dynamatic_library(DynamaticSwitchingEstimation
+  Debug.cpp
   SwitchingEstimation.cpp
   GraphModel.cpp
   SwitchingSupport.cpp
@@ -20,4 +21,3 @@ add_dynamatic_library(DynamaticSwitchingEstimation
   DynamaticSupport
   DynamaticExperimentalSupport
   )
-

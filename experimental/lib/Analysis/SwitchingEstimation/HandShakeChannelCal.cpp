@@ -6,6 +6,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "experimental/Analysis/SwitchingEstimation/HandShakeChannelCal.h"
+#include "experimental/Analysis/SwitchingEstimation/Debug.h"
 #include "experimental/Analysis/SwitchingEstimation/DFSKernel.h"
 #include "experimental/Analysis/SwitchingEstimation/DataChannelCal.h"
 #include "experimental/Analysis/SwitchingEstimation/SwitchingSupport.h"
@@ -27,6 +28,8 @@
 #include <cctype>
 #include <cmath>
 
+using namespace dynamatic::experimental;
+
 void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
                              bool debug) {
   // Get the corresponding graph
@@ -40,10 +43,10 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
 
   //! Testing
   if (debug) {
-    llvm::dbgs() << "[DEBUG] [MG " << selMG << "]\n";
-    llvm::dbgs() << "[DEBUG] [MG INFO] Throughput: " << selMgThroughput << "\n";
-    llvm::dbgs() << "[DEBUG] [MG INFO] II: " << selMGII << "\n";
-    llvm::dbgs() << "[DEBUG] [MG INFO] Base Node: " << baseNode << "\n";
+    switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] [MG " << selMG << "]\n";
+    switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] [MG INFO] Throughput: " << selMgThroughput << "\n";
+    switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] [MG INFO] II: " << selMGII << "\n";
+    switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] [MG INFO] Base Node: " << baseNode << "\n";
   }
 
   // Create the "universe" set: set of all cycle indices from 0..selCfdfcII-1
@@ -52,10 +55,10 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
   for (const auto &selBuffName : selAdjGraph->orderedNodeName) {
     if (contains(selBuffName, "buffer")) {
       if (debug) {
-        llvm::dbgs() << "[DEBUG] 	"
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	"
                         "======================================================"
                         "=======\n";
-        llvm::dbgs() << "[DEBUG] \t[" << selBuffName << "]\n";
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] \t[" << selBuffName << "]\n";
       }
 
       // Get the buffer node
@@ -70,13 +73,13 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
           selLongestPath(switchInfo, selBuffName, selMG);
 
       if (debug) {
-        llvm::dbgs() << "[DEBUG] \t\tStarting node: "
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] \t\tStarting node: "
                      << tmpLongPath.selStartNode << "\n";
-        llvm::dbgs() << "[DEBUG] \t\tPath Latency: " << tmpLongPath.maxLatency
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] \t\tPath Latency: " << tmpLongPath.maxLatency
                      << "\n";
-        llvm::dbgs() << "[DEBUG] \t\tPath Last second buffer: "
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] \t\tPath Last second buffer: "
                      << tmpLongPath.lastSecondBuffer << "\n";
-        llvm::dbgs()
+        switchingDebugStream(SwitchingDebugCategory::Handshake)
             << "[DEBUG] \t\tStart Node Shift: "
             << selAdjGraph->startBaseNodeShiftMap[tmpLongPath.selStartNode]
             << "\n";
@@ -94,9 +97,9 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
       unsigned finStartPointNorm = normalizeCycleIndex(finStartPoint, selMGII);
 
       if (debug) {
-        llvm::dbgs() << "[DEBUG] \t\tpathLatencyMod: " << pathLatencyMod
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] \t\tpathLatencyMod: " << pathLatencyMod
                      << "\n";
-        llvm::dbgs() << "[DEBUG] \t\tD : " << finStartPointNorm
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] \t\tD : " << finStartPointNorm
                      << " regarding the start of " << baseNode << "\n";
       }
 
@@ -134,7 +137,7 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
         //   tmpPreBuffOcc = 0;
 
         //   if (debug) {
-        //     llvm::dbgs() << "[DEBUG] \t\tThe last opaque buffer "
+        //     switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] \t\tThe last opaque buffer "
         //                  << tmpLongPath.lastSecondBuffer
         //                  << " is directly preceding the current buffer "
         //                  << selBuffName << "\n";
@@ -167,7 +170,7 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
       IISet tmpBufferValidSet(selMGII, false);
       const bool oneSlotBuffer = selBufSlots == 1;
       if (tmpNumCycles < 0.0f) {
-        llvm::dbgs() << "[WARNING] \t\tNegative active cycles for buffer "
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "[WARNING] \t\tNegative active cycles for buffer "
                      << selBuffName << ", set to 0\n";
         tmpNumCycles = 0.0f;
       }
@@ -186,10 +189,10 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
 
       //! Testing
       if (debug) {
-        llvm::dbgs() << "[DEBUG] \t\tSET_V: { ";
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] \t\tSET_V: { ";
         for (auto x : tmpBufferValidSet.set_bits())
-          llvm::dbgs() << x << " ";
-        llvm::dbgs() << "}\n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << x << " ";
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "}\n";
       }
       selBuffNode->calValidSet(selBuffNode->sucs[0], tmpBufferValidSet);
 
@@ -213,7 +216,7 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
             selBuffNode->buffType == BufferType::FIFO_BREAK_DV) {
           //* Legacy Buffer Type: OEHB
           if (debug) {
-            llvm::dbgs()
+            switchingDebugStream(SwitchingDebugCategory::Handshake)
                 << "[DEBUG] \t\tBuffer Type: OEHB Or elastic_fifo_inner\n";
           }
 
@@ -222,7 +225,7 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
               selMgThroughput);
 
           if (tmpMissingCycles < 0) {
-            llvm::dbgs() << "[WARNING] Negative missing cycles for buffer "
+            switchingDebugStream(SwitchingDebugCategory::Handshake) << "[WARNING] Negative missing cycles for buffer "
                          << selBuffName << ", set to 0\n";
             tmpMissingCycles = 0;
           }
@@ -236,7 +239,7 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
         } else if (selBuffNode->buffType == BufferType::FIFO_BREAK_NONE) {
           //* Legacy Buffer Type: TFIFO
           if (debug) {
-            llvm::dbgs() << "[DEBUG] \t\tBuffer Type: TFIFO\n";
+            switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] \t\tBuffer Type: TFIFO\n";
           }
 
           // TFIFO ready behavior (from Verilog):
@@ -251,7 +254,7 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
               selMgThroughput);
 
           if (tmpMissingCycles < 0) {
-            llvm::dbgs() << "[WARNING] Negative missing cycles for buffer "
+            switchingDebugStream(SwitchingDebugCategory::Handshake) << "[WARNING] Negative missing cycles for buffer "
                          << selBuffName << ", set to 0\n";
             tmpMissingCycles = 0;
           }
@@ -263,7 +266,7 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
         } else if (selBuffNode->buffType == BufferType::ONE_SLOT_BREAK_R) {
           //* Legacy Buffer Type: TEHB
           if (debug) {
-            llvm::dbgs() << "[DEBUG] \t\tBuffer Type: TEHB\n";
+            switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] \t\tBuffer Type: TEHB\n";
           }
 
           float_t tmpTransparentOffset = 0;
@@ -273,7 +276,7 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
             tmpTransparentOffset =
                 selLastSecondBuff->occupancy / selMgThroughput;
           } else {
-            llvm::dbgs() << "[WARNING] Transparent Buffer " << selBuffName
+            switchingDebugStream(SwitchingDebugCategory::Handshake) << "[WARNING] Transparent Buffer " << selBuffName
                          << " has no preceding opaque buffer!\n";
             tmpTransparentOffset = 0;
           }
@@ -295,7 +298,7 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
           }
 
           if (tmpMissingCycles < 0) {
-            llvm::dbgs() << "[WARNING] Negative missing cycles for buffer "
+            switchingDebugStream(SwitchingDebugCategory::Handshake) << "[WARNING] Negative missing cycles for buffer "
                          << selBuffName << ", set to 0\n";
             tmpMissingCycles = 0;
           }
@@ -324,18 +327,18 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
 
       //! Testing
       if (debug) {
-        llvm::dbgs() << "[DEBUG] \t\tSET_R: { ";
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] \t\tSET_R: { ";
         for (auto x : tmpBufferReadySet.set_bits())
-          llvm::dbgs() << x << " ";
-        llvm::dbgs() << "}\n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << x << " ";
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "}\n";
       }
       selBuffNode->calReadySet(selBuffNode->pres[0], tmpBufferReadySet);
 
       // Store the other data
       if (debug) {
-        llvm::dbgs() << "[DEBUG] \t\tOccupancy: " << selBuffOcc << "\n";
-        llvm::dbgs() << "[DEBUG] \t\tNum Slots: " << selBufSlots << "\n";
-        llvm::dbgs() << "[DEBUG] \t\tTransparent: " << selBuffTransparent
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] \t\tOccupancy: " << selBuffOcc << "\n";
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] \t\tNum Slots: " << selBufSlots << "\n";
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] \t\tTransparent: " << selBuffTransparent
                      << "\n";
       }
 
@@ -385,10 +388,10 @@ void mgHandshakeSwitchingCounting(SwitchingInfo &switchInfo, std::string selMG,
   unsigned listLength = pendingList.size();
 
   //! Testing
-  llvm::dbgs()
+  switchingDebugStream(SwitchingDebugCategory::Handshake)
       << "[DEBUG] "
          "==============================================================\n";
-  llvm::dbgs() << "[DEBUG] [Step 6.2] Event-driven iterative update for MG "
+  switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] [Step 6.2] Event-driven iterative update for MG "
                << selMG << "\n";
 
   while (pendingList.size() > 0) {
@@ -398,11 +401,11 @@ void mgHandshakeSwitchingCounting(SwitchingInfo &switchInfo, std::string selMG,
     // Status
     numIter++;
     if (debug) {
-      llvm::dbgs() << "Iter: " << numIter << "\n";
-      llvm::dbgs() << "Pending: \n\t[";
+      switchingDebugStream(SwitchingDebugCategory::Handshake) << "Iter: " << numIter << "\n";
+      switchingDebugStream(SwitchingDebugCategory::Handshake) << "Pending: \n\t[";
       for (const auto &selNode : pendingList)
-        llvm::dbgs() << selNode << ", ";
-      llvm::dbgs() << "]\n";
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << selNode << ", ";
+      switchingDebugStream(SwitchingDebugCategory::Handshake) << "]\n";
     }
 
     // Calculate switching
@@ -418,7 +421,7 @@ void mgHandshakeSwitchingCounting(SwitchingInfo &switchInfo, std::string selMG,
         selAdjGraph->nodes[selNode]->totalHandshakeSwitchingCounting();
 
         if (debug) {
-          llvm::dbgs() << "[DEBUG] 	Finished node: " << selNode << "\n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	Finished node: " << selNode << "\n";
           selAdjGraph->nodes[selNode]->printHandshakeSwitching();
         }
       }
@@ -435,16 +438,16 @@ void mgHandshakeSwitchingCounting(SwitchingInfo &switchInfo, std::string selMG,
     // Check the nodes in the pending list
     if (pendingList.size() == listLength) {
       if (debug) {
-        llvm::dbgs() << "[WARNING] No Node Gets Updated\n";
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "[WARNING] No Node Gets Updated\n";
       }
       if (deadlockCounter > 2) {
         if (debug) {
-          llvm::dbgs() << "[Ending] # Iter: " << numIter << "\n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[Ending] # Iter: " << numIter << "\n";
         }
 
         for (auto &pendingNode : pendingList) {
           if (!selAdjGraph->nodes[pendingNode]->handshakeSwitchingChecking()) {
-            llvm::dbgs() << "[Unsolved] " << pendingNode << "\n";
+            switchingDebugStream(SwitchingDebugCategory::Handshake) << "[Unsolved] " << pendingNode << "\n";
           } else {
             selAdjGraph->nodes[pendingNode]->totalHandshakeSwitchingCounting();
           }
@@ -484,12 +487,12 @@ void mgHandshakeSwitchingCounting(SwitchingInfo &switchInfo, std::string selMG,
 
   //! Testing
   if (debug) {
-    llvm::dbgs() << "[DEBUG] [HANDSHAKE CHANNEL SWITCHING SUMMARY]\n";
+    switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] [HANDSHAKE CHANNEL SWITCHING SUMMARY]\n";
     for (const auto &selNode : selAdjGraph->nodes) {
-      llvm::dbgs() << "[DEBUG] "
+      switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] "
                       "\t======================================================"
                       "=======\n";
-      llvm::dbgs() << "[DEBUG] \tNode Name: " << selNode.first() << "\n";
+      switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] \tNode Name: " << selNode.first() << "\n";
       selNode.second->printNodeDetails();
     }
   }
@@ -572,79 +575,79 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
 
   //! Testing
   if (debug) {
-    llvm::dbgs()
+    switchingDebugStream(SwitchingDebugCategory::Handshake)
         << "[DEBUG] 	"
            "============================================================= \n";
-    llvm::dbgs() << "[DEBUG] 	CURRENT NODE: " << selNode << "\n";
-    llvm::dbgs() << "[DEBUG] 	\tpValid List: ";
+    switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	CURRENT NODE: " << selNode << "\n";
+    switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	\tpValid List: ";
     for (int v : tmpPValidList)
-      llvm::dbgs() << v << " ";
-    llvm::dbgs() << "\n";
-    llvm::dbgs() << "[DEBUG] 	\tpValid Dict: ";
+      switchingDebugStream(SwitchingDebugCategory::Handshake) << v << " ";
+    switchingDebugStream(SwitchingDebugCategory::Handshake) << "\n";
+    switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	\tpValid Dict: ";
     for (const auto &p : tmpPValidDict)
-      llvm::dbgs() << "{" << p.first << ": " << p.second << "} ";
-    llvm::dbgs() << "\n";
-    llvm::dbgs() << "[DEBUG] 	\tpValid Set List: ";
+      switchingDebugStream(SwitchingDebugCategory::Handshake) << "{" << p.first << ": " << p.second << "} ";
+    switchingDebugStream(SwitchingDebugCategory::Handshake) << "\n";
+    switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	\tpValid Set List: ";
     for (auto ptr : tmpPValidSetList) {
       if (ptr) {
-        llvm::dbgs() << "{";
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "{";
         for (int x : ptr->set_bits())
-          llvm::dbgs() << x << ",";
-        llvm::dbgs() << "} ";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << x << ",";
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "} ";
       } else {
-        llvm::dbgs() << "None ";
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "None ";
       }
     }
-    llvm::dbgs() << "\n";
-    llvm::dbgs() << "[DEBUG] 	\tpValid Set Dict: ";
+    switchingDebugStream(SwitchingDebugCategory::Handshake) << "\n";
+    switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	\tpValid Set Dict: ";
     for (const auto &p : tmpPValidSetDict) {
-      llvm::dbgs() << "{" << p.first << ": ";
+      switchingDebugStream(SwitchingDebugCategory::Handshake) << "{" << p.first << ": ";
       if (p.second) {
-        llvm::dbgs() << "{";
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "{";
         for (int x : p.second->set_bits())
-          llvm::dbgs() << x << ",";
-        llvm::dbgs() << "}";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << x << ",";
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "}";
       } else {
-        llvm::dbgs() << "None";
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "None";
       }
-      llvm::dbgs() << "} ";
+      switchingDebugStream(SwitchingDebugCategory::Handshake) << "} ";
     }
-    llvm::dbgs() << "\n";
-    llvm::dbgs() << "[DEBUG] 	\tnReady List: ";
+    switchingDebugStream(SwitchingDebugCategory::Handshake) << "\n";
+    switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	\tnReady List: ";
     for (int v : tmpNReadyList)
-      llvm::dbgs() << v << " ";
-    llvm::dbgs() << "\n";
-    llvm::dbgs() << "[DEBUG] 	\tnReady Dict: ";
+      switchingDebugStream(SwitchingDebugCategory::Handshake) << v << " ";
+    switchingDebugStream(SwitchingDebugCategory::Handshake) << "\n";
+    switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	\tnReady Dict: ";
     for (const auto &p : tmpNReadyDict)
-      llvm::dbgs() << "{" << p.first << ": " << p.second << "} ";
-    llvm::dbgs() << "\n";
-    llvm::dbgs() << "[DEBUG] 	\tnReady Set List: ";
+      switchingDebugStream(SwitchingDebugCategory::Handshake) << "{" << p.first << ": " << p.second << "} ";
+    switchingDebugStream(SwitchingDebugCategory::Handshake) << "\n";
+    switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	\tnReady Set List: ";
     for (auto ptr : tmpNReadySetList) {
       if (ptr) {
-        llvm::dbgs() << "{";
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "{";
         for (int x : ptr->set_bits())
-          llvm::dbgs() << x << ",";
-        llvm::dbgs() << "} ";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << x << ",";
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "} ";
       } else {
-        llvm::dbgs() << "None ";
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "None ";
       }
     }
-    llvm::dbgs() << "\n";
-    llvm::dbgs() << "[DEBUG] 	\tnReady Set Dict: ";
+    switchingDebugStream(SwitchingDebugCategory::Handshake) << "\n";
+    switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	\tnReady Set Dict: ";
     for (const auto &p : tmpNReadySetDict) {
-      llvm::dbgs() << "{" << p.first << ": ";
+      switchingDebugStream(SwitchingDebugCategory::Handshake) << "{" << p.first << ": ";
       if (p.second) {
-        llvm::dbgs() << "{";
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "{";
         for (int x : p.second->set_bits())
-          llvm::dbgs() << x << ",";
-        llvm::dbgs() << "}";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << x << ",";
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "}";
       } else {
-        llvm::dbgs() << "None";
+        switchingDebugStream(SwitchingDebugCategory::Handshake) << "None";
       }
-      llvm::dbgs() << "} ";
+      switchingDebugStream(SwitchingDebugCategory::Handshake) << "} ";
     }
-    llvm::dbgs() << "\n";
-    llvm::dbgs() << "[DEBUG] 	Steady State Start Cycle: " << tmpNodeSSStart
+    switchingDebugStream(SwitchingDebugCategory::Handshake) << "\n";
+    switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	Steady State Start Cycle: " << tmpNodeSSStart
                  << "\n";
   }
 
@@ -653,7 +656,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
   auto nodePtr = selNodeStoringDict[selNode];
   if (nodePtr->sucs.size() == 0) {
     if (debug) {
-      llvm::dbgs() << "[DEBUG] Leaf node " << selNode
+      switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] Leaf node " << selNode
                    << ": no successors, marking all ready to 1.\n";
     }
     for (const auto &pre : nodePtr->pres) {
@@ -669,7 +672,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // CMPI Node
         //! Testing
         if (debug)
-          llvm::dbgs() << "[DEBUG] 	[CMPI] NODE \n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	[CMPI] NODE \n";
         // Valid Signal
         for (const auto &selSuc : cmpi->sucs) {
           // Calculate the number of switching
@@ -697,7 +700,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
       .Case<AddiNode>([&](AddiNode *addi) {
         // ADDI NODE
         if (debug)
-          llvm::dbgs() << "[DEBUG] 	[ADDI NODE] \n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	[ADDI NODE] \n";
         // Valid Signal
         for (const auto &selSuc : addi->sucs) {
           // Calculate the number of switching
@@ -724,7 +727,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
       .Case<OriNode>([&](OriNode *ori) {
         // ORI NODE
         if (debug)
-          llvm::dbgs() << "[DEBUG] 	[ORI NODE] \n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	[ORI NODE] \n";
         // Valid Signal
         for (const auto &selSuc : ori->sucs) {
           // Calculate the number of switching
@@ -751,7 +754,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
       .Case<AndiNode>([&](AndiNode *andi) {
         // ANDI NODE
         if (debug)
-          llvm::dbgs() << "[DEBUG] 	[ANDI NODE] \n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	[ANDI NODE] \n";
         // Valid Signal
         for (const auto &selSuc : andi->sucs) {
           // Calculate the number of switching
@@ -778,7 +781,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
       .Case<SubiNode>([&](SubiNode *subi) {
         // SUBI NODE
         if (debug)
-          llvm::dbgs() << "[DEBUG] 	[SUBI NODE] \n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	[SUBI NODE] \n";
         // Valid Signal
         for (const auto &selSuc : subi->sucs) {
           // Calculate the number of switching
@@ -806,7 +809,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // MULI Node
         //! Testing
         if (debug)
-          llvm::dbgs() << "[DEBUG] 	[MULI NODE] \n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	[MULI NODE] \n";
         // Valid Signal
         for (const auto &selSuc : muli->sucs) {
           // Calculate the number of switching
@@ -835,7 +838,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // EXTSI NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[DEBUG] 	[EXTSI NODE] \n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	[EXTSI NODE] \n";
         // Valid Signal
         for (const auto &selSuc : ext->sucs) {
           // Number of switching
@@ -864,7 +867,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // EXTUI NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[DEBUG] 	[EXTUI NODE] \n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	[EXTUI NODE] \n";
         // Valid Signal
         for (const auto &selSuc : ext->sucs) {
           // Number of switching
@@ -893,7 +896,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // connections to mem_con ignored
         //! Testing
         if (debug)
-          llvm::dbgs() << "[DEBUG] 	[DLoad NODE] \n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	[DLoad NODE] \n";
         // Valid Signal
         for (const auto &selSuc : load->sucs) {
           // Number of switching
@@ -926,7 +929,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // DStoreNode NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[DEBUG] 	[DStore NODE] \n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	[DStore NODE] \n";
         // Valid Signal: This node will not have any successors in the extracted
         // CFDFC, but we still model the switching of MC
         store->calValidSwitching(tmpPValidList[0], tmpPValidList[1]);
@@ -944,7 +947,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // ForkNode NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[DEBUG] 	[Fork NODE] \n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	[Fork NODE] \n";
         // Valid Signal
         for (auto &selSuc : fork->sucs) {
           // Get Suc Node Start
@@ -958,7 +961,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
                             tmpNReadySetDict, selMGII);
 
           //! Testing
-          llvm::dbgs() << "[DEBUG] 	Updating Value for Suc: " << selSuc
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	Updating Value for Suc: " << selSuc
                        << "\n";
         }
 
@@ -974,7 +977,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // MuxNode NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[DEBUG] 	[Mux NODE] \n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	[Mux NODE] \n";
         // Get the cond input port name
         std::string condPortName = "";
         std::string dataInputPortName = "";
@@ -1022,7 +1025,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // TrunciNode NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[DEBUG] 	[Trunci NODE] \n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	[Trunci NODE] \n";
         // Valid Signal
         for (const auto &selSuc : trunci->sucs) {
           trunci->calValidSwitching(selSuc, tmpPValidList[0]);
@@ -1040,7 +1043,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // CMergeNode NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[DEBUG] 	[CMerge NODE] \n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	[CMerge NODE] \n";
         // Get node starting time in steady state
         int nodeStartTime = mgGetNodeStartingPoint(switchInfo, selNode, selMG);
 
@@ -1065,7 +1068,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // CBrNode NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[DEBUG] 	[CBr NODE] \n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	[CBr NODE] \n";
         // Get the conditional value
         std::string condPortName = cbr->condPreNodeName;
 
@@ -1078,8 +1081,8 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         //! Testing
         // TODO: Calibrate the cond value with the simulation
         if (debug) {
-          llvm::dbgs() << "[DEBUG] 	Node: " << selNode << "\n";
-          llvm::dbgs() << "[DEBUG] 	\tCond_input Port: " << condPortName
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	Node: " << selNode << "\n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	\tCond_input Port: " << condPortName
                        << "\n";
         }
 
@@ -1100,7 +1103,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
 
         //! Testing
         if (debug) {
-          llvm::dbgs() << "[DEBUG] 	\tCond_value: " << condValue << "\n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	\tCond_value: " << condValue << "\n";
         }
 
         std::string selOutputPort = "";
@@ -1114,7 +1117,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
 
         //! Testing
         if (debug) {
-          llvm::dbgs() << "[DEBUG] 	\tSelected Suc Node: " << selOutputPort
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	\tSelected Suc Node: " << selOutputPort
                        << "\n";
         }
 
@@ -1176,7 +1179,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // Source node: Normally no pre node
         //! Testing
         if (debug)
-          llvm::dbgs() << "[DEBUG] 	[Source NODE] \n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	[Source NODE] \n";
         // Valid Signals
         for (auto &selSuc : source->sucs) {
           // Number of Switching
@@ -1189,7 +1192,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // ConstantNode NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[DEBUG] 	[Constant NODE] \n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	[Constant NODE] \n";
         // Valid Signal
         for (const auto &selSuc : constant->sucs) {
           constant->calValidSwitching(selSuc, tmpPValidList[0]);
@@ -1207,7 +1210,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // ShliNode NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[DEBUG] 	[Shli NODE] \n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	[Shli NODE] \n";
         // Valid Signal
         for (const auto &selSuc : shli->sucs) {
           // Calculate the number of switching
@@ -1236,7 +1239,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // ShrsiNode NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[DEBUG] 	[Shrsi NODE] \n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	[Shrsi NODE] \n";
         // Valid Signal
         for (const auto &selSuc : shrsi->sucs) {
           // Calculate the number of switching
@@ -1265,7 +1268,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // ShruiNode NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[DEBUG] 	[Shrui NODE] \n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	[Shrui NODE] \n";
         // Valid Signal
         for (const auto &selSuc : shrui->sucs) {
           // Calculate the number of switching
@@ -1293,7 +1296,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
       .Case<PassNode>([&](PassNode *pass) {
         // Generic pass-through node (e.g., canonicalized br/merge in graph model)
         if (debug)
-          llvm::dbgs() << "[DEBUG] 	[Pass NODE] \n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	[Pass NODE] \n";
 
         // Merge-like pass nodes may have multiple predecessors; propagate valid
         // if any predecessor is active.
@@ -1318,7 +1321,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // SinkNode NODE
         //! Testing
         if (debug)
-          llvm::dbgs() << "[DEBUG] 	[Sink NODE] \n";
+          switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] 	[Sink NODE] \n";
         // Ready Signal
         for (auto &selPre : sink->pres) {
           sink->calReadySwitching(selPre);
@@ -1330,7 +1333,7 @@ void nodeHandshakeUpdate(SwitchingInfo &switchInfo, std::string &selNode,
         // nodes that are not matched by a specific model in this dispatch).
         if (n->pres.size() == 1 && n->sucs.size() == 1) {
           if (debug)
-            llvm::dbgs() << "[DEBUG] \t[Fallback Pass-through NODE] \n";
+            switchingDebugStream(SwitchingDebugCategory::Handshake) << "[DEBUG] \t[Fallback Pass-through NODE] \n";
 
           const std::string &selPre = n->pres[0];
           const std::string &selSuc = n->sucs[0];

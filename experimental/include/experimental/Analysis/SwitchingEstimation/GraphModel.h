@@ -17,6 +17,7 @@
 #include "dynamatic/Support/LLVM.h"
 #include "dynamatic/Support/TimingModels.h"
 #include "dynamatic/Transforms/BufferPlacement/CFDFC.h"
+#include "experimental/Analysis/SwitchingEstimation/Debug.h"
 #include "llvm/ADT/SmallBitVector.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Support/Debug.h"
@@ -57,22 +58,29 @@ public:
 
   // Printing
   void printDetail() {
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t[Path] \n[DEBUG] \t\t[ ");
+    using ::dynamatic::experimental::SwitchingDebugCategory;
+    using ::dynamatic::experimental::switchingDebugStream;
+    LLVM_DEBUG(switchingDebugStream(SwitchingDebugCategory::Graph)
+               << "[DEBUG] \t[Path] \n[DEBUG] \t\t[ ");
     for (const auto &selNode : nodeList) {
-      LLVM_DEBUG(llvm::dbgs() << selNode << ", ");
+      LLVM_DEBUG(
+          switchingDebugStream(SwitchingDebugCategory::Graph) << selNode << ", ");
     }
-    llvm::dbgs() << "]\n";
+    switchingDebugStream(SwitchingDebugCategory::Graph) << "]\n";
 
     //
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tBackedges: ");
+    LLVM_DEBUG(switchingDebugStream(SwitchingDebugCategory::Graph)
+               << "[DEBUG] \t\tBackedges: ");
     for (const auto &selPair : backedges) {
-      LLVM_DEBUG(llvm::dbgs()
-                 << "( " << selPair.first << ", " << selPair.second << " ); ");
+      LLVM_DEBUG(switchingDebugStream(SwitchingDebugCategory::Graph)
+                 << "( " << selPair.first << ", " << selPair.second
+                 << " ); ");
     }
-    LLVM_DEBUG(llvm::dbgs() << "\n");
+    LLVM_DEBUG(switchingDebugStream(SwitchingDebugCategory::Graph) << "\n");
 
     //
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG] \t\tPath Latency: " << latency << "\n");
+    LLVM_DEBUG(switchingDebugStream(SwitchingDebugCategory::Graph)
+               << "[DEBUG] \t\tPath Latency: " << latency << "\n");
   }
 
   std::vector<std::string> nodeList;
