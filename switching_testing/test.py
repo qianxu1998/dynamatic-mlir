@@ -3,7 +3,8 @@ import csv
 import re
 import statistics
 import sys
-from typing import Dict, Iterable, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from vcd_parser import VcdParser
 
@@ -13,6 +14,76 @@ except ModuleNotFoundError:
     tabulate = None
 
 SwitchTriple = Tuple[int, int, int]
+MaybeSwitchTriple = Tuple[Optional[int], Optional[int], Optional[int]]
+
+NODE_TYPES = {
+    "cmpi",
+    "addi",
+    "subi",
+    "muli",
+    "extsi",
+    "extui",
+    "trunci",
+    "buffer",
+    "mc_load",
+    "mc_store",
+    "lsq_load",
+    "lsq_store",
+    "merge",
+    "control_merge",
+    "fork",
+    "d_return",
+    "cond_br",
+    "br",
+    "end",
+    "andi",
+    "ori",
+    "xori",
+    "shli",
+    "shrsi",
+    "shrui",
+    "select",
+    "mux",
+    "source",
+    "sink",
+    "constant",
+    "load",
+    "store",
+}
+
+
+@dataclass(frozen=True)
+class AggregateSpec:
+    label: str
+    macro_family: str
+    channel: str
+    channel_index: int
+
+
+@dataclass(frozen=True)
+class AggregateResult:
+    spec: AggregateSpec
+    est_total: int
+    golden_total: int
+    contributing_nodes: int
+    missing_vcd_nodes: Tuple[str, ...]
+    violation: Optional[str]
+
+
+AGGREGATE_SPECS = (
+    AggregateSpec(
+        label="sum_toggle_density__macro_family__compute__role__payload_other",
+        macro_family="compute",
+        channel="data",
+        channel_index=0,
+    ),
+    AggregateSpec(
+        label="sum_toggle_density__macro_family__control__role__valid",
+        macro_family="control",
+        channel="valid",
+        channel_index=1,
+    ),
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -65,6 +136,22 @@ def parse_args() -> argparse.Namespace:
             "Ignore channel when both estimator and golden values are strictly "
             "below this threshold."
         ),
+    )
+    parser.add_argument(
+        "--comparison-mode",
+        choices=("node", "aggregate", "both"),
+        default="node",
+        help=(
+            "Rendered output mode. 'aggregate' reports the real_workload/synth "
+            "two-feature proxy totals, 'node' shows the legacy node-by-node table, "
+            "and 'both' prints both reports."
+        ),
+    )
+    parser.add_argument(
+        "--acceptance-mode",
+        choices=("node", "aggregate"),
+        default="node",
+        help="Select which comparison controls the exit code.",
     )
     parser.add_argument(
         "--no-enforce-thresholds",
@@ -354,53 +441,58 @@ def channel_ignored_small(
     return est < ignore_both_below and golden < ignore_both_below
 
 
-def main() -> None:
-    args = parse_args()
+def extract_node_family_token(node_name: str) -> str:
+    token = str(node_name).strip().lower()
+    token = re.sub(r"\d+$", "", token)
+    token = token.rstrip("_")
+    return token
 
-    estimator = read_estimator_csv(args.est_csv)
-    vcd = VcdParser(args.vcd)
-    start_time, end_time, start_exclusive, end_inclusive, window_desc = get_vcd_window(vcd, args)
 
-    node_types = {
-        "cmpi",
-        "addi",
-        "subi",
-        "muli",
-        "extsi",
-        "extui",
-        "trunci",
-        "buffer",
-        "mc_load",
-        "mc_store",
-        "lsq_load",
-        "lsq_store",
-        "merge",
-        "control_merge",
-        "fork",
-        "d_return",
-        "cond_br",
-        "br",
-        "end",
-        "andi",
-        "ori",
-        "xori",
-        "shli",
-        "shrsi",
-        "shrui",
-        "select",
-        "mux",
-        "source",
-        "sink",
-        "constant",
-        "load",
-        "store",
-    }
+def classify_node_macro_family(node_name: str) -> str:
+    # Keep this mapping in lock-step with
+    # power_estimation/training_v2/scripts/circuit_context/common.py.
+    text = extract_node_family_token(node_name)
 
-    nodes = set(estimator.keys())
-    if args.include_vcd_only:
-        nodes.update(extract_node_names(vcd.unique_signal_names, node_types))
-    nodes_sorted = sorted(nodes)
+    if any(part in text for part in ["mem_controller", "load", "store"]):
+        return "memory"
+    if any(part in text for part in ["tehb", "oehb", "tfifo", "buffer", "fifo"]):
+        return "buffer"
+    if any(part in text for part in ["fork", "cond_br", "control_merge", "selector", "mux", "source", "sink"]):
+        return "control"
+    if any(part in text for part in ["addi", "subi", "muli", "andi", "ori", "shli", "shrsi", "cmpi", "ext", "trunc", "select"]):
+        return "compute"
+    return "other"
 
+
+def collect_golden_switching(
+    vcd: VcdParser,
+    nodes: Sequence[str],
+    start_time: Optional[int],
+    end_time: Optional[int],
+    start_exclusive: bool,
+    end_inclusive: bool,
+) -> Dict[str, MaybeSwitchTriple]:
+    out: Dict[str, MaybeSwitchTriple] = {}
+    for node_name in nodes:
+        if has_node_signal(node_name, vcd.unique_signal_names):
+            out[node_name] = get_vcd_switching(
+                vcd,
+                node_name,
+                start_time=start_time,
+                end_time=end_time,
+                start_exclusive=start_exclusive,
+                end_inclusive=end_inclusive,
+            )
+        else:
+            out[node_name] = (None, None, None)
+    return out
+
+
+def compare_nodes(
+    estimator: Dict[str, SwitchTriple],
+    golden_by_node: Dict[str, MaybeSwitchTriple],
+    args: argparse.Namespace,
+) -> dict[str, object]:
     headers = [
         "Node",
         "Data Est",
@@ -446,24 +538,9 @@ def main() -> None:
         },
     }
 
-    for node_name in nodes_sorted:
-        est_switching = estimator.get(node_name)
-        if est_switching is None:
-            continue
-        est_data, est_valid, est_ready = est_switching
-
-        node_visible_in_vcd = has_node_signal(node_name, vcd.unique_signal_names)
-        if node_visible_in_vcd:
-            vcd_data, vcd_valid, vcd_ready = get_vcd_switching(
-                vcd,
-                node_name,
-                start_time=start_time,
-                end_time=end_time,
-                start_exclusive=start_exclusive,
-                end_inclusive=end_inclusive,
-            )
-        else:
-            vcd_data, vcd_valid, vcd_ready = (None, None, None)
+    for node_name in sorted(estimator):
+        est_data, est_valid, est_ready = estimator[node_name]
+        vcd_data, vcd_valid, vcd_ready = golden_by_node.get(node_name, (None, None, None))
 
         node_status = "N/A"
         node_has_compared = False
@@ -524,15 +601,138 @@ def main() -> None:
             ]
         )
 
-    print(f"[INFO] Window: {window_desc}")
-    print(
-        f"[INFO] Thresholds: rel<={args.rel_error_threshold:.4f} for golden>0, "
-        f"abs<={args.zero_abs_threshold} for golden=0"
-    )
-    print(
-        "[INFO] Ignore rule: skip channel when both est and golden are < "
-        f"{args.ignore_both_below}"
-    )
+    return {
+        "headers": headers,
+        "rows": rows,
+        "violations": violations,
+        "compared_channels": compared_channels,
+        "ignored_small_channels": ignored_small_channels,
+        "channel_stats": channel_stats,
+    }
+
+
+def evaluate_aggregate_proxy(
+    estimator: Dict[str, SwitchTriple],
+    golden_by_node: Dict[str, MaybeSwitchTriple],
+    rel_threshold: float,
+    zero_abs_threshold: int,
+) -> List[AggregateResult]:
+    results: List[AggregateResult] = []
+
+    for spec in AGGREGATE_SPECS:
+        est_total = 0
+        golden_total = 0
+        contributing_nodes = 0
+        missing_vcd_nodes: List[str] = []
+
+        for node_name, est_vals in estimator.items():
+            if classify_node_macro_family(node_name) != spec.macro_family:
+                continue
+
+            contributing_nodes += 1
+            est_total += est_vals[spec.channel_index]
+            golden_vals = golden_by_node.get(node_name, (None, None, None))
+            golden_value = golden_vals[spec.channel_index]
+            if golden_value is None:
+                missing_vcd_nodes.append(node_name)
+                continue
+            golden_total += golden_value
+
+        violation = None
+        if missing_vcd_nodes:
+            violation = f"missing_vcd_nodes={len(missing_vcd_nodes)}"
+        else:
+            violation = channel_violation(
+                est=est_total,
+                golden=golden_total,
+                rel_threshold=rel_threshold,
+                zero_abs_threshold=zero_abs_threshold,
+            )
+
+        results.append(
+            AggregateResult(
+                spec=spec,
+                est_total=est_total,
+                golden_total=golden_total,
+                contributing_nodes=contributing_nodes,
+                missing_vcd_nodes=tuple(missing_vcd_nodes),
+                violation=violation,
+            )
+        )
+
+    return results
+
+
+def format_missing_nodes(missing_nodes: Sequence[str], limit: int = 5) -> str:
+    if not missing_nodes:
+        return "0"
+    if len(missing_nodes) <= limit:
+        return ", ".join(missing_nodes)
+    shown = ", ".join(missing_nodes[:limit])
+    return f"{shown}, ... (+{len(missing_nodes) - limit})"
+
+
+def print_aggregate_report(results: Sequence[AggregateResult]) -> None:
+    headers = [
+        "Feature Proxy",
+        "Family",
+        "Channel",
+        "Est Total",
+        "Golden Total",
+        "Diff (E-G)",
+        "Error",
+        "Nodes",
+        "Missing VCD Nodes",
+        "Status",
+    ]
+    rows: List[List[str]] = []
+    for result in results:
+        rows.append(
+            [
+                result.spec.label,
+                result.spec.macro_family,
+                result.spec.channel,
+                str(result.est_total),
+                str(result.golden_total),
+                str(result.est_total - result.golden_total),
+                (
+                    "N/A"
+                    if result.missing_vcd_nodes
+                    else format_error_rate(result.est_total, result.golden_total)
+                ),
+                str(result.contributing_nodes),
+                format_missing_nodes(result.missing_vcd_nodes),
+                "FAIL" if result.violation is not None else "PASS",
+            ]
+        )
+
+    print("[AGGREGATE] real_workload/synth no_handshake-only proxy totals:")
+    print(build_pretty_table(headers, rows))
+    failures = [result for result in results if result.violation is not None]
+    print(f"[AGGREGATE] Compared proxy metrics: {len(results)}")
+    print(f"[AGGREGATE] Violating proxy metrics: {len(failures)}")
+    for result in failures:
+        if result.missing_vcd_nodes:
+            print(
+                f"[AGGREGATE] {result.spec.label}: missing VCD visibility for "
+                f"{format_missing_nodes(result.missing_vcd_nodes)}"
+            )
+        else:
+            print(
+                f"[AGGREGATE] {result.spec.label}: "
+                f"est={result.est_total}, golden={result.golden_total}, {result.violation}"
+            )
+
+
+def print_node_report(node_report: dict[str, object], args: argparse.Namespace) -> None:
+    headers = node_report["headers"]
+    rows = node_report["rows"]
+    violations = node_report["violations"]
+    compared_channels = node_report["compared_channels"]
+    ignored_small_channels = node_report["ignored_small_channels"]
+    channel_stats = node_report["channel_stats"]
+
+    print("[NODE] Per-node switching comparison:")
     print(build_pretty_table(headers, rows))
 
     total_nodes = len(rows)
@@ -569,9 +769,7 @@ def main() -> None:
         max_rel = max(rel_errors) if rel_errors else 0.0
         mean_abs = statistics.fmean(abs_errors) if abs_errors else 0.0
         max_abs = max(abs_errors) if abs_errors else 0
-        mean_zero_abs = (
-            statistics.fmean(zero_abs_errors) if zero_abs_errors else 0.0
-        )
+        mean_zero_abs = statistics.fmean(zero_abs_errors) if zero_abs_errors else 0.0
         max_zero_abs = max(zero_abs_errors) if zero_abs_errors else 0
 
         channel_rows.append(
@@ -604,7 +802,72 @@ def main() -> None:
         if len(violations) > args.max_violation_report:
             print(f"  ... and {len(violations) - args.max_violation_report} more violations")
 
-    if not args.no_enforce_thresholds and violations:
+
+def main() -> None:
+    args = parse_args()
+
+    estimator = read_estimator_csv(args.est_csv)
+    vcd = VcdParser(args.vcd)
+    start_time, end_time, start_exclusive, end_inclusive, window_desc = get_vcd_window(vcd, args)
+
+    nodes = set(estimator.keys())
+    if args.include_vcd_only:
+        nodes.update(extract_node_names(vcd.unique_signal_names, NODE_TYPES))
+    nodes_sorted = sorted(nodes)
+    golden_by_node = collect_golden_switching(
+        vcd,
+        nodes_sorted,
+        start_time=start_time,
+        end_time=end_time,
+        start_exclusive=start_exclusive,
+        end_inclusive=end_inclusive,
+    )
+
+    print(f"[INFO] Window: {window_desc}")
+    print(
+        f"[INFO] Thresholds: rel<={args.rel_error_threshold:.4f} for golden>0, "
+        f"abs<={args.zero_abs_threshold} for golden=0"
+    )
+    print(
+        "[INFO] Ignore rule: skip channel when both est and golden are < "
+        f"{args.ignore_both_below}"
+    )
+    print(
+        f"[INFO] Comparison mode: {args.comparison_mode} "
+        f"(acceptance={args.acceptance_mode})"
+    )
+    print("[INFO] Clock signals are excluded from VCD-side switching counts.")
+
+    need_aggregate = args.comparison_mode in ("aggregate", "both") or args.acceptance_mode == "aggregate"
+    need_node = args.comparison_mode in ("node", "both") or args.acceptance_mode == "node"
+
+    aggregate_results: List[AggregateResult] = []
+    node_report: Optional[dict[str, object]] = None
+
+    if need_aggregate:
+        aggregate_results = evaluate_aggregate_proxy(
+            estimator,
+            golden_by_node,
+            rel_threshold=args.rel_error_threshold,
+            zero_abs_threshold=args.zero_abs_threshold,
+        )
+        if args.comparison_mode in ("aggregate", "both"):
+            print_aggregate_report(aggregate_results)
+
+    if need_node:
+        node_report = compare_nodes(estimator, golden_by_node, args)
+        if args.comparison_mode in ("node", "both"):
+            print_node_report(node_report, args)
+
+    aggregate_failures = any(result.violation is not None for result in aggregate_results)
+    node_failures = bool(node_report and node_report["violations"])
+
+    if args.no_enforce_thresholds:
+        return
+
+    if args.acceptance_mode == "aggregate" and aggregate_failures:
+        sys.exit(1)
+    if args.acceptance_mode == "node" and node_failures:
         sys.exit(1)
 
 

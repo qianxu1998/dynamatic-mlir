@@ -227,6 +227,12 @@ class VcdParser(object):
         'R'
     ))
 
+    @staticmethod
+    def is_clock_signal_name(signal_name):
+        leaf_name = str(signal_name).rsplit(".", 1)[-1]
+        leaf_name = re.sub(r"\[[0-9]+\]$", "", leaf_name)
+        return leaf_name.lower() in ("clk", "clock")
+
     def __init__(self, 
         vcd_path = None, 
         only_signal_names = False, 
@@ -540,6 +546,9 @@ class VcdParser(object):
         matched_ready_signal_list = []
         
         for signal_name in self.unique_signal_names:
+            if self.is_clock_signal_name(signal_name):
+                continue
+
             if (valid_signal_pattern.search(signal_name)):
                 matched_valid_signal_list.append(signal_name)
 
@@ -613,6 +622,9 @@ class VcdParser(object):
         unique_vector_name_set = set()
         
         for signal_name in self.unique_signal_names:
+            if self.is_clock_signal_name(signal_name):
+                continue
+
             if (dataout_signal_pattern.search(signal_name)):
                 self.node_switching_info[node_name].dataout_channel_list.append(signal_name)
                 # Remove the square bracket
