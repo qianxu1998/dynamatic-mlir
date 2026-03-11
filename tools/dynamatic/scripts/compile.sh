@@ -53,6 +53,7 @@ F_PROFILER_INPUTS="$COMP_DIR/profiler-inputs.txt"
 F_HANDSHAKE="$COMP_DIR/handshake.mlir"
 F_HANDSHAKE_TRANSFORMED="$COMP_DIR/handshake_transformed.mlir"
 F_HANDSHAKE_BUFFERED="$COMP_DIR/handshake_buffered.mlir"
+F_CFDFC_CACHE_JSON="$COMP_DIR/cfdfc_cache.json"
 F_HANDSHAKE_GATED="$COMP_DIR/handshake_gated.mlir"
 F_HANDSHAKE_EXPORT="$COMP_DIR/handshake_export.mlir"
 F_HANDSHAKE_RIGIDIFIED="$COMP_DIR/handshake_rigidified.mlir"
@@ -303,7 +304,7 @@ if [[ "$BUFFER_ALGORITHM" == "on-merges" ]]; then
   "$DYNAMATIC_OPT_BIN" "$F_HANDSHAKE_TRANSFORMED" \
     --handshake-mark-fpu-impl="impl=$FPUNITS_GEN" \
     --handshake-set-buffering-properties="version=fpga20" \
-    --handshake-place-buffers="algorithm=$BUFFER_ALGORITHM solver=$MILP_SOLVER timing-models=$DYNAMATIC_DIR/data/components.json" \
+    --handshake-place-buffers="algorithm=$BUFFER_ALGORITHM solver=$MILP_SOLVER timing-models=$DYNAMATIC_DIR/data/components.json cfdfc-cache-out=$F_CFDFC_CACHE_JSON" \
     ${SHARING_PASS:+"$SHARING_PASS"} \
     > "$F_HANDSHAKE_BUFFERED"
   exit_on_fail "Failed to place simple buffers" "Placed simple buffers"
@@ -332,11 +333,15 @@ else
     --handshake-mark-fpu-impl="impl=$FPUNITS_GEN" \
     --handshake-set-buffering-properties="version=fpga20" \
     --handshake-place-buffers="algorithm=$BUFFER_ALGORITHM solver=$MILP_SOLVER frequencies=$F_FREQUENCIES timing-models=$DYNAMATIC_DIR/data/components.json target-period=$TARGET_CP timeout=300 dump-logs \
-    blif-files=$DYNAMATIC_DIR/data/aig/ lut-delay=0.55 lut-size=6 acyclic-type" \
+    blif-files=$DYNAMATIC_DIR/data/aig/ lut-delay=0.55 lut-size=6 acyclic-type cfdfc-cache-out=$F_CFDFC_CACHE_JSON" \
     ${SHARING_PASS:+"$SHARING_PASS"} \
     > "$F_HANDSHAKE_BUFFERED"
   exit_on_fail "Failed to place smart buffers" "Placed smart buffers"
   cd - > /dev/null
+fi
+
+if [[ -f "$F_CFDFC_CACHE_JSON" ]]; then
+  echo_info "Emitted CFDFC cache JSON to $F_CFDFC_CACHE_JSON"
 fi
 
 F_HANDSHAKE_FOR_CANONICALIZE="$F_HANDSHAKE_BUFFERED"

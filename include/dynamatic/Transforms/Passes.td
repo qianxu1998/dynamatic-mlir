@@ -288,7 +288,10 @@ def HandshakePlaceBuffers : Pass<"handshake-place-buffers"> {
     "Method for creating acyclic graphs from cyclic dataflow graph. Required by "
     "MapBuf to generate AIGs. If false, Cut Loopbacks method is used to cut backedges "
     "of the graph. If true, Minimum Feedback Arc Set (MFAS) method is used, which cuts the "
-    "minimum number of edges to create an acyclic graph. MFAS method requires Gurobi.">];
+    "minimum number of edges to create an acyclic graph. MFAS method requires Gurobi.">,
+    Option<"cfdfcCacheOut", "cfdfc-cache-out", "std::string", "",
+    "Path to a JSON-formatted file where finalized CFDFC membership, throughput, "
+    "and occupancy data will be cached for later switching-estimation runs.">];
 
   let dependentDialects = ["handshake::HandshakeDialect"];
 }

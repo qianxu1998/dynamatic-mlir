@@ -2,6 +2,7 @@ add_dynamatic_library(DynamaticBufferPlacement
   BufferingSupport.cpp
   BufferPlacementMILP.cpp
   CFDFC.cpp
+  CFDFCCache.cpp
   FPGA20Buffers.cpp
   FPL22Buffers.cpp
   LatencyAndOccupancyBalancingSupport.cpp
@@ -33,4 +34,3 @@ if (GUROBI_FOUND)
     ${GUROBI_LIBRARY}
   )
 endif()
-

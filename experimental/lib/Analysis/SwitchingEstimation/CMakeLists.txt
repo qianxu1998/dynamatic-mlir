@@ -18,6 +18,7 @@ add_dynamatic_library(DynamaticSwitchingEstimation
   MLIRSupport
   MLIRTransformUtils
   DynamaticHandshake
+  DynamaticBufferPlacement
   DynamaticSupport
   DynamaticExperimentalSupport
   )

@@ -36,6 +36,8 @@ using BBSet = mlir::SetVector<unsigned>;
 /// Represents a CFDFC i.e., a set of control-free units and channels from a
 /// dataflow circuit accompanied by the number of times it was executed.
 struct CFDFC {
+  CFDFC() = default;
+
   /// The list of basic blocks that make up the CFDFC.
   mlir::SetVector<unsigned> cycle;
   /// Units (i.e., MLIR operations) in the CFDFC.
@@ -45,10 +47,10 @@ struct CFDFC {
   /// Backedges in the CFDFC.
   mlir::SetVector<Value> backedges;
   /// Number of executions of the CFDFC.
-  unsigned numExecs;
+  unsigned numExecs = 0;
 
   /// (Available after placement) The achieved throughput after the placement
-  double throughput;
+  double throughput = 0.0;
   /// (Available after placement) The number of tokens per unit.
   mlir::DenseMap<Operation *, double> unitOccupancy;
   /// (Available after placement) The number of tokens per channel. After

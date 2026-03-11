@@ -25,6 +25,7 @@
 #include "dynamatic/Support/TimingModels.h"
 #include "dynamatic/Transforms/BufferPlacement/BufferingSupport.h"
 #include "dynamatic/Transforms/BufferPlacement/CFDFC.h"
+#include "dynamatic/Transforms/BufferPlacement/CFDFCCache.h"
 #include "dynamatic/Transforms/HandshakeMaterialize.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Path.h"
@@ -59,13 +60,14 @@ struct SwitchingEstimationPass
   // Define global storing structure for switching information
   //
   SwitchingInfo switchingInfo;
+  std::map<handshake::FuncOp, ListOfCFDFCs> cachedCFDFCs;
 
   //
   //  Information Extraction Related Functions
   //
   // This function extract all CFDFC related information from the CFDFC analysis
   LogicalResult parseCFDFCInfo(handshake::FuncOp &funcOp,
-                               CFDFCAnalysis &cfdfcAnalysis);
+                               ListOfCFDFCs &cfdfcs);
 
   // This function extracts and store the names of the ALU nodes in order
   void extractALUNodesInOrder(handshake::FuncOp &funcOp);
@@ -153,6 +155,8 @@ static std::string formatCycleMask(const IISet &set) {
 } // namespace
 
 void SwitchingEstimationPass::runOnOperation() {
+  switchingInfo = SwitchingInfo();
+  cachedCFDFCs.clear();
   configureSwitchingDebug(debug, debugCategories, dumpDataChannels,
                           dumpMGHandshake);
   switchingDebugStream(SwitchingDebugCategory::Pipeline) << "[DEBUG] Running switching estimation pass\n";
@@ -171,25 +175,55 @@ void SwitchingEstimationPass::runOnOperation() {
     return signalPassFailure();
   }
 
-  auto performanceAnalysis = getCachedAnalysis<CFDFCAnalysis>();
-  if (!performanceAnalysis.has_value()) {
-    topModule->emitError(
-        "CFDFCAnalysis not available; "
-        "run handshake-place-buffers (fpga20/fpl22/costaware/mapbuf) before "
-        "switching-estimation.");
-    switchingDebugStream(SwitchingDebugCategory::CFDFC)
-        << "[DEBUG] [Step 0] Failed to get CFDFC analysis\n";
+  NameAnalysis &nameAnalysis = getAnalysis<NameAnalysis>();
+  if (!nameAnalysis.isAnalysisValid())
     return signalPassFailure();
+  nameAnalysis.nameAllUnnamedOps();
+
+  if (!cfdfcCacheIn.empty()) {
+    switchingDebugStream(SwitchingDebugCategory::CFDFC)
+        << "[DEBUG] [Step 0] Loading CFDFC cache from " << cfdfcCacheIn
+        << "\n";
+    CFDFCCacheProvenance expected{std::string(timingModels), targetPeriod,
+                                  std::nullopt};
+    if (failed(readCFDFCCache(topModule, nameAnalysis, cfdfcCacheIn,
+                              cachedCFDFCs, expected))) {
+      switchingDebugStream(SwitchingDebugCategory::CFDFC)
+          << "[DEBUG] [Step 0] Failed to load CFDFC cache\n";
+      return signalPassFailure();
+    }
   }
 
-  // [STEP 0] Extract CFDFC info
-  auto analysis = performanceAnalysis.value();
   for (handshake::FuncOp funcOp : topModule.getOps<handshake::FuncOp>()) {
     switchingDebugStream(SwitchingDebugCategory::CFDFC)
         << "[DEBUG] [Step 0] Processing function: " << funcOp.getName()
         << "\n";
 
-    if (failed(parseCFDFCInfo(funcOp, analysis))) {
+    ListOfCFDFCs *cfdfcs = nullptr;
+    if (!cfdfcCacheIn.empty()) {
+      auto it = cachedCFDFCs.find(funcOp);
+      if (it == cachedCFDFCs.end()) {
+        funcOp.emitError() << "CFDFC cache does not contain the current "
+                              "function";
+        return signalPassFailure();
+      }
+      cfdfcs = &it->second;
+    } else {
+      auto performanceAnalysis = getCachedAnalysis<CFDFCAnalysis>();
+      if (!performanceAnalysis.has_value()) {
+        topModule->emitError(
+            "CFDFCAnalysis not available; run handshake-place-buffers "
+            "(fpga20/fpl22/costaware/mapbuf) before switching-estimation, or "
+            "provide --cfdfc-cache-in.");
+        switchingDebugStream(SwitchingDebugCategory::CFDFC)
+            << "[DEBUG] [Step 0] Failed to get CFDFC analysis\n";
+        return signalPassFailure();
+      }
+      auto &analysis = performanceAnalysis.value().get();
+      cfdfcs = &analysis.mapFuncOpToCFDFCs[funcOp];
+    }
+
+    if (failed(parseCFDFCInfo(funcOp, *cfdfcs))) {
       topModule->emitError()
           << "Failed to parse CFDFC info for switching estimation";
       return signalPassFailure();
@@ -387,7 +421,7 @@ void SwitchingEstimationPass::extractALUNodesInOrder(
 
 LogicalResult
 SwitchingEstimationPass::parseCFDFCInfo(handshake::FuncOp &funcOp,
-                                        CFDFCAnalysis &cfdfcAnalysis) {
+                                        ListOfCFDFCs &cfdfcs) {
   // Get all ALU names in the selected FuncOp
   extractALUNodesInOrder(funcOp);
 
@@ -398,7 +432,7 @@ SwitchingEstimationPass::parseCFDFCInfo(handshake::FuncOp &funcOp,
   unsigned cfdfcIndex = 0;
 
   // Iterate over cfdfcs in the function
-  for (auto &cfdfc : cfdfcAnalysis.mapFuncOpToCFDFCs[funcOp]) {
+  for (auto &cfdfc : cfdfcs) {
     // Note: here cfdfc must be a reference to the objects in the vector,
     // otherwise the copy that "&cfdfc" points to will immediately goes out of
     // scope after the loop.

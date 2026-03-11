@@ -23,6 +23,7 @@
 #include "dynamatic/Support/Logging.h"
 #include "dynamatic/Transforms/BufferPlacement/BufferingSupport.h"
 #include "dynamatic/Transforms/BufferPlacement/CFDFC.h"
+#include "dynamatic/Transforms/BufferPlacement/CFDFCCache.h"
 #include "dynamatic/Transforms/BufferPlacement/CostAwareBuffers.h"
 #include "dynamatic/Transforms/BufferPlacement/FPGA20Buffers.h"
 #include "dynamatic/Transforms/BufferPlacement/FPL22Buffers.h"
@@ -331,6 +332,15 @@ LogicalResult HandshakePlaceBuffersPass::placeUsingMILP() {
   for (handshake::FuncOp funcOp : modOp.getOps<handshake::FuncOp>()) {
     // Create an empty list of CFDFCs for funcOp
     if (failed(placeBuffers(funcToInfo[funcOp], timingDB, cfdfcAnalysis)))
+      return failure();
+  }
+
+  if (!cfdfcCacheOut.empty()) {
+    NameAnalysis &nameAnalysis = getAnalysis<NameAnalysis>();
+    CFDFCCacheProvenance provenance{
+        std::string(timingModels), targetCP, std::string(algorithm)};
+    if (failed(writeCFDFCCache(modOp, cfdfcAnalysis, nameAnalysis,
+                               cfdfcCacheOut, provenance)))
       return failure();
   }
 

@@ -44,6 +44,9 @@ def SwitchingEstimation : Pass<"switching-estimation"> {
            "Path to JSON-formatted file containing timing models for dataflow components.">,
     Option<"dumpFile", "dump-file", "std::string", "",
            "Path to the output file where the switching estimation results will be dumped.">,
+    Option<"cfdfcCacheIn", "cfdfc-cache-in", "std::string", "",
+           "Path to a JSON-formatted CFDFC cache emitted by handshake-place-buffers. "
+           "When provided, switching-estimation skips live CFDFCAnalysis and uses the cache instead.">,
     Option<"targetPeriod", "target-period", "double", "",
            "Target clock period to be used in the analysis.">,
     Option<"debug", "debug", "bool", "false",

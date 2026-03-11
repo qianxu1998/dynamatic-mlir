@@ -19,6 +19,12 @@ echo_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
 }
 
+# Prints a warning message to stdout.
+#   $1: the text to print
+echo_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
 # Prints a fatal error message to stdout.
 #   $1: the text to print
 echo_fatal() {
@@ -53,6 +59,12 @@ echo_section() {
     echo ""
 }
 
+warn_if_exists() {
+    if [[ -e "$1" ]]; then
+        echo_warn "Existing artifact will be overwritten: $1"
+    fi
+}
+
 # ============================================================================ #
 # Variable definitions
 # ============================================================================ #
@@ -74,21 +86,27 @@ TRACE_LOG="$OUTPUT_DIR/data_trace.log"
 SWITCHING_LOG="$OUTPUT_DIR/switching_estimation.csv"
 COMPARE_LOG="$OUTPUT_DIR/switching_compare.log"
 DEBUG_LOG="$OUTPUT_DIR/switching_debug.log"
+BUFFER_PLACEMENT_LOG="$OUTPUT_DIR/buffer_placement.log"
+SWITCHING_PASS_LOG="$OUTPUT_DIR/switching_estimation_pass.log"
 F_FREQUENCIES="$OUTPUT_DIR/frequencies.csv"
-DYNAMATIC_DIR="/home/jianliu/TCAD26/dynamatic-mlir"
 VCD_GOLDEN="$SRC_DIR/out/sim/HLS_VERIFY/trace.vcd"
 
 DYNAMATIC_PROFILER_BIN="$SCRIPT_DIR/bin/exp-frequency-profiler"
 DYNAMATIC_OPT_BIN="$SCRIPT_DIR/bin/dynamatic-opt"
 COMPARE_SCRIPT="$SCRIPT_DIR/switching_testing/test.py"
 DEBUG_SCRIPT="$SCRIPT_DIR/switching_testing/debug_switching.py"
+COMPONENTS_JSON="$SCRIPT_DIR/data/components.json"
+BLIF_DIR="$SCRIPT_DIR/data/aig/"
 
 F_CF_DYN_TRANSFORMED="$OUTPUT_DIR/cf_transformed_mem_interface_marked.mlir"
 F_HANDSHAKE_TRANSFORMED="$OUTPUT_DIR/handshake_transformed.mlir"
+F_HANDSHAKE_BUFFERED="$OUTPUT_DIR/handshake_buffered.mlir"
 F_HANDSHAKE_EXPORT="$OUTPUT_DIR/handshake_export.mlir"
 F_HANDSHAKE_SWITCH="$OUTPUT_DIR/handshake_switch_test.mlir"
+CFDFC_CACHE_JSON="$OUTPUT_DIR/cfdfc_cache.json"
 TARGET_CP=8
 MILP_SOLVER="gurobi"
+FORCE_BUFFER_PLACEMENT="${FORCE_BUFFER_PLACEMENT:-false}"
 
 # ---------------------------------------------------------------------------- #
 # Switching-estimation debug flags (environment-overridable)
@@ -157,12 +175,72 @@ DEBUG_TOP_K="${DEBUG_TOP_K:-20}"
 # ============================================================================ #
 # Switching Estimation Flow
 # ============================================================================ #
-# Check the existence of the handshake_transformed.mlir file
-if [ -e $F_HANDSHAKE_TRANSFORMED ]; then
-  echo "The handshake_transformed.mlir for $KERNEL_NAME exists"
-else
-  echo "[ERROR] The handshake_transformed.mlir file doesn't exist"
-  exit 1
+# Pre-flight checks
+if [[ ! -f "$F_HANDSHAKE_TRANSFORMED" ]]; then
+    echo_fatal "The handshake_transformed.mlir file doesn't exist: $F_HANDSHAKE_TRANSFORMED"
+    exit 1
+fi
+echo_info "Found handshake IR: $F_HANDSHAKE_TRANSFORMED"
+
+if [[ ! -f "$F_CF_DYN_TRANSFORMED" ]]; then
+    echo_fatal "The profiled CF IR file doesn't exist: $F_CF_DYN_TRANSFORMED"
+    exit 1
+fi
+
+if [[ ! -x "$DYNAMATIC_PROFILER_BIN" ]]; then
+    echo_fatal "Profiler binary is missing or not executable: $DYNAMATIC_PROFILER_BIN"
+    exit 1
+fi
+
+if [[ ! -x "$DYNAMATIC_OPT_BIN" ]]; then
+    echo_fatal "dynamatic-opt is missing or not executable: $DYNAMATIC_OPT_BIN"
+    exit 1
+fi
+
+if [[ ! -f "$COMPARE_SCRIPT" ]]; then
+    echo_fatal "Comparison script not found: $COMPARE_SCRIPT"
+    exit 1
+fi
+
+if [[ ! -f "$COMPONENTS_JSON" ]]; then
+    echo_fatal "Timing-model database not found: $COMPONENTS_JSON"
+    exit 1
+fi
+
+if [[ ! -d "$BLIF_DIR" ]]; then
+    echo_fatal "AIG/BLIF directory not found: $BLIF_DIR"
+    exit 1
+fi
+
+REUSE_BUFFER_PLACEMENT=false
+if [[ "$FORCE_BUFFER_PLACEMENT" == "true" ]]; then
+    echo_warn "FORCE_BUFFER_PLACEMENT=true, existing buffered IR and CFDFC cache will be ignored and regenerated"
+elif [[ -s "$CFDFC_CACHE_JSON" || -s "$F_HANDSHAKE_BUFFERED" ]]; then
+    if [[ -s "$CFDFC_CACHE_JSON" && -s "$F_HANDSHAKE_BUFFERED" ]]; then
+        REUSE_BUFFER_PLACEMENT=true
+        echo_info "Reusing existing buffered handshake IR and CFDFC cache; buffer placement will be skipped"
+    elif [[ -s "$CFDFC_CACHE_JSON" ]]; then
+        echo_fatal "CFDFC cache exists but buffered handshake IR is missing: $F_HANDSHAKE_BUFFERED"
+        echo_fatal "Either restore the buffered IR or rerun with FORCE_BUFFER_PLACEMENT=true"
+        exit 1
+    else
+        echo_fatal "Buffered handshake IR exists but CFDFC cache JSON is missing: $CFDFC_CACHE_JSON"
+        echo_fatal "Either restore the cache JSON or rerun with FORCE_BUFFER_PLACEMENT=true"
+        exit 1
+    fi
+fi
+
+warn_if_exists "$F_FREQUENCIES"
+warn_if_exists "$TRACE_LOG"
+warn_if_exists "$F_HANDSHAKE_SWITCH"
+warn_if_exists "$SWITCHING_LOG"
+warn_if_exists "$COMPARE_LOG"
+warn_if_exists "$DEBUG_LOG"
+warn_if_exists "$SWITCHING_PASS_LOG"
+if [[ "$REUSE_BUFFER_PLACEMENT" != "true" ]]; then
+    warn_if_exists "$F_HANDSHAKE_BUFFERED"
+    warn_if_exists "$CFDFC_CACHE_JSON"
+    warn_if_exists "$BUFFER_PLACEMENT_LOG"
 fi
 
 # Run the profiler
@@ -172,27 +250,72 @@ echo_section "[Step 1] Running Profiler for ${KERNEL_NAME}"
     --input-args-file="$OUTPUT_DIR/profiler-inputs.txt" \
     --trace-log-file="$TRACE_LOG" \
     --mode=both > "$F_FREQUENCIES"
+if [[ ! -s "$F_FREQUENCIES" ]]; then
+    echo_fatal "Profiler finished but did not produce a non-empty frequency CSV: $F_FREQUENCIES"
+    exit 1
+fi
+if [[ ! -s "$TRACE_LOG" ]]; then
+    echo_fatal "Profiler finished but did not produce a non-empty trace log: $TRACE_LOG"
+    exit 1
+fi
 echo_info "Profiling Finished"
 
-# Run the switching estimation pass
-echo_section "[Step 2] Running Buffer Placement and Switching Estimation Pass for ${KERNEL_NAME}"
-echo_info "Switching debug flags: debug=${SWITCH_DEBUG}, categories=${SWITCH_DEBUG_CATEGORIES}, dump-data-channels=${SWITCH_DUMP_DATA_CHANNELS}, dump-mg-handshake=${SWITCH_DUMP_MG_HANDSHAKE}"
 cd "$OUTPUT_DIR"
 export LSAN_OPTIONS=verbosity=1:log_threads=1
 export UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
-if ! /usr/bin/time -v "$DYNAMATIC_OPT_BIN" "$F_HANDSHAKE_TRANSFORMED" \
-    --handshake-mark-fpu-impl="impl=vivado" \
-    --handshake-set-buffering-properties="version=fpga20" \
-    --handshake-place-buffers="algorithm=fpga20 solver=$MILP_SOLVER frequencies=$F_FREQUENCIES timing-models=$SCRIPT_DIR/data/components.json target-period=$TARGET_CP timeout=300 dump-logs \
-    blif-files=$DYNAMATIC_DIR/data/aig/ lut-delay=0.55 lut-size=6 acyclic-type" \
-    --switching-estimation="data-trace=$TRACE_LOG timing-models=$DYNAMATIC_DIR/data/components.json target-period=$TARGET_CP dump-file=$SWITCHING_LOG debug=$SWITCH_DEBUG debug-categories=$SWITCH_DEBUG_CATEGORIES dump-data-channels=$SWITCH_DUMP_DATA_CHANNELS dump-mg-handshake=$SWITCH_DUMP_MG_HANDSHAKE" \
-    2>&1 | tee "$F_HANDSHAKE_SWITCH"; then
-    echo_fatal "Failed to place smart buffers and estimate switches"
+
+# Run buffer placement and emit the CFDFC cache that switching-estimation will
+# consume in a separate pass invocation, unless both artifacts already exist.
+if [[ "$REUSE_BUFFER_PLACEMENT" == "true" ]]; then
+    echo_section "[Step 2] Reusing Existing Buffer Placement Artifacts for ${KERNEL_NAME}"
+    echo_info "Using buffered handshake IR: $F_HANDSHAKE_BUFFERED"
+    echo_info "Using pre-extracted CFDFC cache JSON: $CFDFC_CACHE_JSON"
+else
+    echo_section "[Step 2] Running Buffer Placement for ${KERNEL_NAME}"
+    echo_info "Emitting buffered handshake IR to: $F_HANDSHAKE_BUFFERED"
+    echo_info "Emitting CFDFC cache JSON to: $CFDFC_CACHE_JSON"
+    if ! /usr/bin/time -v "$DYNAMATIC_OPT_BIN" "$F_HANDSHAKE_TRANSFORMED" \
+        --handshake-mark-fpu-impl="impl=vivado" \
+        --handshake-set-buffering-properties="version=fpga20" \
+        --handshake-place-buffers="algorithm=fpga20 solver=$MILP_SOLVER frequencies=$F_FREQUENCIES timing-models=$COMPONENTS_JSON target-period=$TARGET_CP timeout=300 dump-logs \
+        blif-files=$BLIF_DIR lut-delay=0.55 lut-size=6 acyclic-type cfdfc-cache-out=$CFDFC_CACHE_JSON" \
+        -o "$F_HANDSHAKE_BUFFERED" \
+        2>&1 | tee "$BUFFER_PLACEMENT_LOG"; then
+        echo_fatal "Failed to place smart buffers and emit the CFDFC cache JSON"
+        exit 1
+    fi
+    if [[ ! -s "$F_HANDSHAKE_BUFFERED" ]]; then
+        echo_fatal "Buffer placement completed but did not produce buffered handshake IR: $F_HANDSHAKE_BUFFERED"
+        exit 1
+    fi
+    if [[ ! -s "$CFDFC_CACHE_JSON" ]]; then
+        echo_fatal "Buffer placement completed but did not produce the CFDFC cache JSON: $CFDFC_CACHE_JSON"
+        exit 1
+    fi
+    echo_info "Placed smart buffers and emitted the CFDFC cache"
+fi
+
+echo_section "[Step 3] Running Switching Estimation from CFDFC Cache for ${KERNEL_NAME}"
+echo_info "Switching debug flags: debug=${SWITCH_DEBUG}, categories=${SWITCH_DEBUG_CATEGORIES}, dump-data-channels=${SWITCH_DUMP_DATA_CHANNELS}, dump-mg-handshake=${SWITCH_DUMP_MG_HANDSHAKE}"
+echo_info "Using buffered handshake IR: $F_HANDSHAKE_BUFFERED"
+echo_info "Using pre-extracted CFDFC cache: $CFDFC_CACHE_JSON"
+if ! /usr/bin/time -v "$DYNAMATIC_OPT_BIN" "$F_HANDSHAKE_BUFFERED" \
+    --switching-estimation="data-trace=$TRACE_LOG timing-models=$COMPONENTS_JSON target-period=$TARGET_CP cfdfc-cache-in=$CFDFC_CACHE_JSON dump-file=$SWITCHING_LOG debug=$SWITCH_DEBUG debug-categories=$SWITCH_DEBUG_CATEGORIES dump-data-channels=$SWITCH_DUMP_DATA_CHANNELS dump-mg-handshake=$SWITCH_DUMP_MG_HANDSHAKE" \
+    -o "$F_HANDSHAKE_SWITCH" \
+    2>&1 | tee "$SWITCHING_PASS_LOG"; then
+    echo_fatal "Failed to estimate switching from the buffered IR and CFDFC cache"
     exit 1
 fi
-echo_info "Placed smart buffers and estimated switching"
+if [[ ! -s "$SWITCHING_LOG" ]]; then
+    echo_fatal "Switching-estimation completed but did not produce a non-empty CSV: $SWITCHING_LOG"
+    exit 1
+fi
+if [[ ! -s "$F_HANDSHAKE_SWITCH" ]]; then
+    echo_warn "Switching-estimation did not leave behind the expected IR output: $F_HANDSHAKE_SWITCH"
+fi
+echo_info "Estimated switching using cached CFDFC data"
 
-echo_section "[Step 3] Comparing estimation and full-trace VCD for ${KERNEL_NAME}"
+echo_section "[Step 4] Comparing estimation and full-trace VCD for ${KERNEL_NAME}"
 echo_info "Comparison config: window=${WINDOW_MODE}, comparison-mode=${COMPARISON_MODE}, acceptance-mode=${ACCEPTANCE_MODE}, reset-signal=${RESET_SIGNAL:-auto}"
 if [[ ! -f "$VCD_GOLDEN" ]]; then
     echo_fatal "Golden VCD not found at $VCD_GOLDEN"
@@ -236,7 +359,7 @@ else
 fi
 
 if [[ -f "$DEBUG_SCRIPT" ]]; then
-    python3 "$DEBUG_SCRIPT" \
+    if ! python3 "$DEBUG_SCRIPT" \
         --repo-root "$SCRIPT_DIR" \
         --kernel "$KERNEL_NAME" \
         --window "$WINDOW_MODE" \
@@ -245,7 +368,11 @@ if [[ -f "$DEBUG_SCRIPT" ]]; then
         --zero-abs-threshold "$ZERO_ABS_THRESHOLD" \
         --ignore-both-below "$IGNORE_BOTH_BELOW" \
         --top-k "$DEBUG_TOP_K" \
-        2>&1 | tee "$DEBUG_LOG" || true
+        2>&1 | tee "$DEBUG_LOG"; then
+        echo_warn "Supplemental debug report generation failed; continuing because the main comparison already finished"
+    fi
+else
+    echo_warn "Debug helper script not found; skipping supplemental debug report generation: $DEBUG_SCRIPT"
 fi
 
 if [[ $COMPARE_EXIT -ne 0 ]]; then

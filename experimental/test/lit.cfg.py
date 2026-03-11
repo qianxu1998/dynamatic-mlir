@@ -34,6 +34,9 @@ llvm_config.use_default_substitutions()
 # excludes: A list of directories to exclude from the testsuite.
 config.excludes = ["CMakeLists.txt", "README.md"]
 
+if getattr(config, "dynamatic_has_gurobi", False):
+    config.available_features.add("gurobi")
+
 # Tweak the PATH to include the tools dir.
 llvm_config.with_environment("PATH", config.llvm_tools_dir, append_path=True)
 
