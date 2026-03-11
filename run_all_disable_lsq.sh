@@ -11,22 +11,16 @@ HDL="${HDL:-verilog}"
 CLOCK_PERIOD="${CLOCK_PERIOD:-8}"
 DISABLE_LSQ="--disable-lsq"
 
-# BENCHMARKS=(
-#   "kernel_3mm/kernel_3mm.c"
-#   "kernel_2mm/kernel_2mm.c"
-#   "gsum/gsum.c"
-#   "bicg/bicg.c"
-#   "gemver/gemver.c"
-#   "cnn/cnn.c"
-#   "matvec/matvec.c"
-#   "stencil_2d/stencil_2d.c"
-#   "matrix/matrix.c"
-#   "gcd/gcd.c"
-#   "fir/fir.c"
-# )
-
 BENCHMARKS=(
+  "kernel_3mm/kernel_3mm.c"
+  "gsum/gsum.c"
+  "bicg/bicg.c"
+  "cnn/cnn.c"
+  "matvec/matvec.c"
+  "stencil_2d/stencil_2d.c"
+  "matrix/matrix.c"
   "gcd/gcd.c"
+  "fir/fir.c"
 )
 
 DYNAMATIC_BIN="$DYNAMATIC_PATH/bin/dynamatic"

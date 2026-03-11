@@ -64,9 +64,11 @@ class AggregateSpec:
 class AggregateResult:
     spec: AggregateSpec
     est_total: int
+    est_compared_total: int
     golden_total: int
     contributing_nodes: int
     missing_vcd_nodes: Tuple[str, ...]
+    ignored_small_nodes: Tuple[str, ...]
     violation: Optional[str]
 
 
@@ -616,46 +618,55 @@ def evaluate_aggregate_proxy(
     golden_by_node: Dict[str, MaybeSwitchTriple],
     rel_threshold: float,
     zero_abs_threshold: int,
+    ignore_both_below: int,
 ) -> List[AggregateResult]:
     results: List[AggregateResult] = []
 
     for spec in AGGREGATE_SPECS:
         est_total = 0
+        est_compared_total = 0
         golden_total = 0
         contributing_nodes = 0
         missing_vcd_nodes: List[str] = []
+        ignored_small_nodes: List[str] = []
 
         for node_name, est_vals in estimator.items():
             if classify_node_macro_family(node_name) != spec.macro_family:
                 continue
 
             contributing_nodes += 1
-            est_total += est_vals[spec.channel_index]
+            est_value = est_vals[spec.channel_index]
             golden_vals = golden_by_node.get(node_name, (None, None, None))
             golden_value = golden_vals[spec.channel_index]
             if golden_value is None:
+                est_total += est_value
                 missing_vcd_nodes.append(node_name)
                 continue
+
+            if channel_ignored_small(est_value, golden_value, ignore_both_below):
+                ignored_small_nodes.append(node_name)
+                continue
+
+            est_total += est_value
+            est_compared_total += est_value
             golden_total += golden_value
 
-        violation = None
-        if missing_vcd_nodes:
-            violation = f"missing_vcd_nodes={len(missing_vcd_nodes)}"
-        else:
-            violation = channel_violation(
-                est=est_total,
-                golden=golden_total,
-                rel_threshold=rel_threshold,
-                zero_abs_threshold=zero_abs_threshold,
-            )
+        violation = channel_violation(
+            est=est_compared_total,
+            golden=golden_total,
+            rel_threshold=rel_threshold,
+            zero_abs_threshold=zero_abs_threshold,
+        )
 
         results.append(
             AggregateResult(
                 spec=spec,
                 est_total=est_total,
+                est_compared_total=est_compared_total,
                 golden_total=golden_total,
                 contributing_nodes=contributing_nodes,
                 missing_vcd_nodes=tuple(missing_vcd_nodes),
+                ignored_small_nodes=tuple(ignored_small_nodes),
                 violation=violation,
             )
         )
@@ -678,8 +689,9 @@ def print_aggregate_report(results: Sequence[AggregateResult]) -> None:
         "Family",
         "Channel",
         "Est Total",
-        "Golden Total",
-        "Diff (E-G)",
+        "Est Compared",
+        "Golden Compared",
+        "Diff (Cmp-G)",
         "Error",
         "Nodes",
         "Missing VCD Nodes",
@@ -693,13 +705,10 @@ def print_aggregate_report(results: Sequence[AggregateResult]) -> None:
                 result.spec.macro_family,
                 result.spec.channel,
                 str(result.est_total),
+                str(result.est_compared_total),
                 str(result.golden_total),
-                str(result.est_total - result.golden_total),
-                (
-                    "N/A"
-                    if result.missing_vcd_nodes
-                    else format_error_rate(result.est_total, result.golden_total)
-                ),
+                str(result.est_compared_total - result.golden_total),
+                format_error_rate(result.est_compared_total, result.golden_total),
                 str(result.contributing_nodes),
                 format_missing_nodes(result.missing_vcd_nodes),
                 "FAIL" if result.violation is not None else "PASS",
@@ -711,17 +720,22 @@ def print_aggregate_report(results: Sequence[AggregateResult]) -> None:
     failures = [result for result in results if result.violation is not None]
     print(f"[AGGREGATE] Compared proxy metrics: {len(results)}")
     print(f"[AGGREGATE] Violating proxy metrics: {len(failures)}")
-    for result in failures:
+    for result in results:
         if result.missing_vcd_nodes:
             print(
-                f"[AGGREGATE] {result.spec.label}: missing VCD visibility for "
-                f"{format_missing_nodes(result.missing_vcd_nodes)}"
+                f"[AGGREGATE] {result.spec.label}: Est Total includes estimator-only "
+                f"contributions from missing VCD nodes {format_missing_nodes(result.missing_vcd_nodes)}"
             )
-        else:
+        if result.ignored_small_nodes:
             print(
-                f"[AGGREGATE] {result.spec.label}: "
-                f"est={result.est_total}, golden={result.golden_total}, {result.violation}"
+                f"[AGGREGATE] {result.spec.label}: ignored low-switch visible nodes "
+                f"{format_missing_nodes(result.ignored_small_nodes)}"
             )
+    for result in failures:
+        print(
+            f"[AGGREGATE] {result.spec.label}: "
+            f"est_compared={result.est_compared_total}, golden={result.golden_total}, {result.violation}"
+        )
 
 
 def print_node_report(node_report: dict[str, object], args: argparse.Namespace) -> None:
@@ -833,6 +847,10 @@ def main() -> None:
         f"{args.ignore_both_below}"
     )
     print(
+        "[INFO] Aggregate mode ignores visible channels below the same threshold, "
+        "but still reports estimator-only contributions from VCD-missing nodes."
+    )
+    print(
         f"[INFO] Comparison mode: {args.comparison_mode} "
         f"(acceptance={args.acceptance_mode})"
     )
@@ -850,6 +868,7 @@ def main() -> None:
             golden_by_node,
             rel_threshold=args.rel_error_threshold,
             zero_abs_threshold=args.zero_abs_threshold,
+            ignore_both_below=args.ignore_both_below,
         )
         if args.comparison_mode in ("aggregate", "both"):
             print_aggregate_report(aggregate_results)

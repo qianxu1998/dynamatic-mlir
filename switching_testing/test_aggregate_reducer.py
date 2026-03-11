@@ -55,46 +55,83 @@ class SwitchingAggregateReducerTest(unittest.TestCase):
             golden,
             rel_threshold=0.30,
             zero_abs_threshold=5,
+            ignore_both_below=0,
         )
         by_label = {result.spec.label: result for result in results}
 
         compute_data = by_label["sum_toggle_density__macro_family__compute__role__payload_other"]
         self.assertEqual(compute_data.est_total, 18)
+        self.assertEqual(compute_data.est_compared_total, 18)
         self.assertEqual(compute_data.golden_total, 16)
         self.assertEqual(compute_data.contributing_nodes, 2)
         self.assertEqual(compute_data.missing_vcd_nodes, ())
+        self.assertEqual(compute_data.ignored_small_nodes, ())
         self.assertIsNone(compute_data.violation)
 
         control_valid = by_label["sum_toggle_density__macro_family__control__role__valid"]
         self.assertEqual(control_valid.est_total, 18)
+        self.assertEqual(control_valid.est_compared_total, 18)
         self.assertEqual(control_valid.golden_total, 14)
         self.assertEqual(control_valid.contributing_nodes, 2)
         self.assertEqual(control_valid.missing_vcd_nodes, ())
+        self.assertEqual(control_valid.ignored_small_nodes, ())
         self.assertIsNone(control_valid.violation)
 
-    def test_evaluate_aggregate_proxy_flags_missing_vcd_nodes(self) -> None:
+    def test_evaluate_aggregate_proxy_reports_missing_vcd_nodes_in_est_total_only(self) -> None:
         estimator = {
-            "addi0": (11, 1, 0),
+            "fork1": (3, 5, 0),
             "cond_br4": (9, 13, 2),
         }
         golden = {
-            "addi0": (10, 1, 0),
+            "fork1": (3, 4, 0),
             "cond_br4": (9, None, 2),
         }
 
         results = MODULE.evaluate_aggregate_proxy(
             estimator,
             golden,
-            rel_threshold=0.10,
+            rel_threshold=0.30,
             zero_abs_threshold=5,
+            ignore_both_below=0,
         )
         by_label = {result.spec.label: result for result in results}
 
         control_valid = by_label["sum_toggle_density__macro_family__control__role__valid"]
-        self.assertEqual(control_valid.est_total, 13)
-        self.assertEqual(control_valid.golden_total, 0)
+        self.assertEqual(control_valid.est_total, 18)
+        self.assertEqual(control_valid.est_compared_total, 5)
+        self.assertEqual(control_valid.golden_total, 4)
         self.assertEqual(control_valid.missing_vcd_nodes, ("cond_br4",))
-        self.assertEqual(control_valid.violation, "missing_vcd_nodes=1")
+        self.assertEqual(control_valid.ignored_small_nodes, ())
+        self.assertIsNone(control_valid.violation)
+
+    def test_evaluate_aggregate_proxy_ignores_low_switch_visible_nodes(self) -> None:
+        estimator = {
+            "fork1": (3, 5, 0),
+            "cond_br4": (9, 80, 2),
+            "mux0": (1, 40, 0),
+        }
+        golden = {
+            "fork1": (3, 4, 0),
+            "cond_br4": (9, 100, 2),
+            "mux0": (1, 45, 0),
+        }
+
+        results = MODULE.evaluate_aggregate_proxy(
+            estimator,
+            golden,
+            rel_threshold=0.30,
+            zero_abs_threshold=5,
+            ignore_both_below=50,
+        )
+        by_label = {result.spec.label: result for result in results}
+
+        control_valid = by_label["sum_toggle_density__macro_family__control__role__valid"]
+        self.assertEqual(control_valid.est_total, 80)
+        self.assertEqual(control_valid.est_compared_total, 80)
+        self.assertEqual(control_valid.golden_total, 100)
+        self.assertEqual(control_valid.missing_vcd_nodes, ())
+        self.assertEqual(control_valid.ignored_small_nodes, ("fork1", "mux0"))
+        self.assertIsNone(control_valid.violation)
 
 
 if __name__ == "__main__":

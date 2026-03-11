@@ -2367,16 +2367,19 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
                            << " not found in nodeToDataState at iteration " << i
                            << "\n";
               selValue = 0; // Default value
-            } else if (!contains(switchInfo.dataInfo.nodeToDataState[selNode]
-                                     ->originalDataOut,
-                                 i)) {
-              llvm::errs() << "[ERROR] Warning: No data found for node "
-                           << selNode << " at iteration " << i << "\n";
-              selValue = 0; // Default value
             } else {
-              selValue = switchInfo.dataInfo.nodeToDataState[selNode]
-                             ->originalDataOut[i]
-                             .value;
+              auto nodeState = switchInfo.dataInfo.nodeToDataState[selNode];
+              if (contains(selNode, "buffer")) {
+                // Buffer traces are sparse/event-based. Use the latest known
+                // value at-or-before this iteration.
+                selValue = getDataOutValueAtOrBefore(nodeState, i, 0);
+              } else if (!contains(nodeState->originalDataOut, i)) {
+                llvm::errs() << "[ERROR] Warning: No data found for node "
+                             << selNode << " at iteration " << i << "\n";
+                selValue = 0; // Default value
+              } else {
+                selValue = nodeState->originalDataOut[i].value;
+              }
             }
           }
 
