@@ -1300,7 +1300,7 @@ updateALUGlitchValuesForSegment(SwitchingInfo &switchInfo,
               auto &glitchvec = switchInfo.dataInfo.nodeToDataState[fasterNode]
                                     ->glitchDataOutByIter[iter];
               // ! If the list is smaller than 2, something is wrong
-              int op1 = 0;
+              op1 = 0;
               if (glitchvec.size() >= 2) {
                 op1 = glitchvec[glitchvec.size() - 2];
               } else if (!glitchvec.empty()) {
@@ -1856,7 +1856,6 @@ int getCondBrNodeCondValue(SwitchingInfo &switchInfo, unsigned iterIndex,
 
   std::string condSrcNode =
       switchInfo.staticInfo.dataflowGraph->condBrToConSrcMap[nodeName];
-  int condValue = 1;
 
   // Defensive check for nodeToDataState
   if (!contains(switchInfo.dataInfo.nodeToDataState, condSrcNode)) {
@@ -2797,7 +2796,6 @@ LongestPathResult selLongestPath(SwitchingInfo &switchInfo, std::string dstNode,
   std::string lastSecondBuff = "";
   LongestPathResult returnValue;
   auto selGraph = switchInfo.staticInfo.segToGraph[mgLabel];
-  auto selMGII = switchInfo.staticInfo.cfdfcIIs[std::stoul(mgLabel)];
 
   // Get the list of buffers
   std::vector<std::string> selBuffList;

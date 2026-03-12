@@ -933,10 +933,6 @@ std::vector<Path> AdjGraph::findPaths(const std::string &srcNode,
       mainStack.pop_back();
     }
 
-    //! Testing
-    // printMainStack(mainStack);
-    // printAdjStack(adjStack);
-
     // Found a path
     if (!mainStack.empty() && mainStack.back() == dstNode) {
       std::vector<std::string> pathList = mainStack;

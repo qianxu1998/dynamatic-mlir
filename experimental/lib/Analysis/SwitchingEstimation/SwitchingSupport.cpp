@@ -37,25 +37,6 @@ using namespace dynamatic::experimental;
 using namespace dynamatic::handshake;
 using namespace dynamatic::buffer;
 
-// Function definition for SwitchingInfo
-void SwitchingInfo::insertBE(unsigned srcBB, unsigned dstBB,
-                             StringRef mgLabel) {
-  std::pair<unsigned, unsigned> backedgePair = {srcBB, dstBB};
-
-  // Update the seg label to Backedge pair list
-  segToBackedgePairMap[mgLabel.str()] = backedgePair;
-
-  // Check the existence of the backedge pair
-  if (contains(staticInfo.backEdgeToCFDFC, backedgePair)) {
-    staticInfo.backEdgeToCFDFC[backedgePair].push_back(
-        static_cast<unsigned>(std::stoul(mgLabel.str())));
-  } else {
-    std::vector<unsigned> tmpVector{
-        static_cast<unsigned>(std::stoul(mgLabel.str()))};
-    staticInfo.backEdgeToCFDFC[std::make_pair(srcBB, dstBB)] = tmpVector;
-  }
-}
-
 //===----------------------------------------------------------------------===//
 //
 // Helper Functions
@@ -72,47 +53,6 @@ std::string getHandshakeNodeName(mlir::Value &selRes) {
   }
 
   return "";
-}
-
-void printBEToCFDFCMap(const std::map<std::pair<unsigned, unsigned>,
-                                      std::vector<unsigned>> &selMap) {
-  for (const auto &selPair : selMap) {
-    const std::pair<unsigned, unsigned> &key = selPair.first;
-    const std::vector<unsigned> mgList = selPair.second;
-
-    switchingDebugStream(SwitchingDebugCategory::Data) << "[DEBUG] \tBackEdge Pair: (" << key.first << ", "
-                            << key.second << ") : [";
-
-    for (const auto &selMG : mgList) {
-      switchingDebugStream(SwitchingDebugCategory::Data) << selMG << ", ";
-    }
-
-    switchingDebugStream(SwitchingDebugCategory::Data) << "]\n";
-  }
-}
-
-void printSegToBBListMap(
-    const std::map<std::string, mlir::SetVector<unsigned>> &selMap) {
-  for (const auto &selPair : selMap) {
-    const std::string segLabel = selPair.first;
-    const mlir::SetVector<unsigned> BBList = selPair.second;
-
-    switchingDebugStream(SwitchingDebugCategory::Data) << "[DEBUG] \tSeg Label: " << segLabel << " : [";
-
-    for (const auto &selBB : BBList) {
-      switchingDebugStream(SwitchingDebugCategory::Data) << selBB << ", ";
-    }
-
-    switchingDebugStream(SwitchingDebugCategory::Data) << "]\n";
-  }
-}
-
-std::string removeDigits(const std::string &inStr) {
-  std::regex digitsRegex("\\d");
-
-  std::string outStr = std::regex_replace(inStr, digitsRegex, "");
-
-  return outStr;
 }
 
 unsigned getUnsigned(float_t inputValue) {

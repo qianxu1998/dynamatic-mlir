@@ -24,15 +24,7 @@
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Debug.h"
 
-#include <algorithm>
-#include <cctype>
-#include <cmath>
-#include <optional>
-#include <regex>
-#include <set>
 #include <string>
-#include <typeinfo>
-#include <unordered_set>
 #include <vector>
 
 using namespace llvm;

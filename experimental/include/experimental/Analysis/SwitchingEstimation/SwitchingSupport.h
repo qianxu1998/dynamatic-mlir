@@ -29,10 +29,7 @@
 #include <cctype>
 #include <cmath>
 #include <optional>
-#include <regex>
-#include <set>
 #include <string>
-#include <typeinfo>
 #include <unordered_set>
 #include <vector>
 
@@ -94,9 +91,6 @@ struct StaticInfo {
   StringMap<std::string> transToSucMGMap;
   // Map storing the subgraph of different segments in the dataflow circuit
   StringMap<std::shared_ptr<AdjGraph>> segToGraph;
-  // Set of nodes that are expected to appear during scf profiling
-  // Used to retrieve the date from SCF level profiling
-  std::vector<std::string> traceOpNames;
   // dataflow graph
   // Below has to be a shared pointer, otherwise need to override the
   // clonePass() implementation in MLIR
@@ -162,10 +156,6 @@ struct SwitchingInfo {
   StaticInfo staticInfo;
   DataInfo dataInfo;
   //  HandshakeInfo hs; not sure wherher to put it
-  // This function insert (backedge pair, mgLabel) to the backEdgeToCFDFC
-  void insertBE(unsigned srcBB, unsigned dstBB, StringRef mgLabel);
-  // Map from segLabel to the corresponding backedge pair
-  StringMap<std::pair<unsigned, unsigned>> segToBackedgePairMap; // TODO delete
   // Map from segment label to the vector of invalid backedges
   StringMap<std::vector<std::pair<std::string, std::string>>>
       segInvalidBackedgesMap;
@@ -183,13 +173,6 @@ struct SwitchingInfo {
 // Unique Sets for the parsing process
 //
 //===----------------------------------------------------------------------===//
-// Define the constant name sensitive list used for parsing the profiling
-// results
-// TODO: Add support for more node types
-const std::set<std::string> NAME_SENSE_LIST = {
-    "muli",     "addi",     "subi",      "ori",  "andi",  "cmpi", "mc_load",
-    "mc_store", "lsq_load", "lsq_store", "load", "store", "shli", "shrsi"};
-
 // Define the set of node types that potentially have glitches
 const std::unordered_set<std::string> GLITCH_NODE = {
     "addi",  "subi",  "muli", "addf", "subf", "mulf",
@@ -331,51 +314,10 @@ public:
 // Get the operation name
 std::string getHandshakeNodeName(mlir::Value &selRes);
 
-// The following function prints the backEdgeToCFDFCMap
-void printBEToCFDFCMap(const std::map<std::pair<unsigned, unsigned>,
-                                      std::vector<unsigned>> &selMap);
-
-// This function prints the Segment ID to BBlist map
-void printSegToBBListMap(
-    const std::map<std::string, mlir::SetVector<unsigned>> &selMap);
-
 // Helper function: extracts the initial alphabetic portion from a node name.
 std::string getNodeType(const std::string &nodeName);
 
-// This function prints all values in a vector
-template <typename T>
-inline void printVector(const T &selVec) {
-  using ::dynamatic::experimental::SwitchingDebugCategory;
-  using ::dynamatic::experimental::switchingDebugStream;
-
-  int counter = 0;
-
-  switchingDebugStream(SwitchingDebugCategory::Data)
-      << "[DEBUG] Vector Contents: ";
-
-  for (auto &selVal : selVec) {
-    switchingDebugStream(SwitchingDebugCategory::Data)
-        << "[" << counter << "] : " << selVal << "; ";
-
-    counter++;
-  }
-
-  switchingDebugStream(SwitchingDebugCategory::Data) << ";\n";
-}
-
-// This function remove the digits in the given string and keep the rest
-std::string removeDigits(const std::string &inStr);
-
 // Get unsigned number from a float
 unsigned getUnsigned(float_t inputValue);
-
-// This function prints the node succ list info
-void printSegmentSuccessorInfo(const SegmentSuccessorInfo &info);
-
-// Function to print a vector of strings (mainStack)
-void printMainStack(const std::vector<std::string> &mainStack);
-
-// Function to print a vector of vector of strings (adjStack)
-void printAdjStack(const std::vector<std::vector<std::string>> &adjStack);
 
 #endif // EXPERIMENTAL_ANALYSIS_SWITCHINGESTIMATION_SWITCHINGSUPPORT_H

@@ -114,7 +114,6 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
       // TODO: Need to add support for different types of buffers, currently we
       // only support OEHB and TEHB, which are the most common types of buffers
       // used in the dataflow circuit
-      const auto buffType = selBuffNode->buffType;
 
       // Store occupancy of direct preceding buffer, if exist
       float_t tmpPreBuffOcc = 0;
@@ -168,7 +167,6 @@ void updateMGBufferSwitching(SwitchingInfo &switchInfo, std::string selMG,
       }
 
       IISet tmpBufferValidSet(selMGII, false);
-      const bool oneSlotBuffer = selBufSlots == 1;
       if (tmpNumCycles < 0.0f) {
         switchingDebugStream(SwitchingDebugCategory::Handshake) << "[WARNING] \t\tNegative active cycles for buffer "
                      << selBuffName << ", set to 0\n";
@@ -362,9 +360,6 @@ void mgHandshakeSwitchingCounting(SwitchingInfo &switchInfo, std::string selMG,
                                   bool debug) {
   // Get the corresponding graph
   auto selAdjGraph = switchInfo.staticInfo.segToGraph[selMG];
-  double_t selMgThroughput =
-      switchInfo.staticInfo.cfdfcThroughput[std::stoi(selMG)];
-
   unsigned selMGII = selAdjGraph->cfdfcII;
 
   // Create lists of pending update nodes

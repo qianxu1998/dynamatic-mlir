@@ -13,6 +13,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <limits>
+#include <regex>
 
 using namespace llvm;
 using namespace mlir;
@@ -26,7 +27,6 @@ SCFProfilingResult::SCFProfilingResult(StringRef dataTrace,
   // Step 0: Get the directory path
   std::filesystem::path pathObj(dataTrace.str());
   std::string resultDir = pathObj.parent_path().string();
-  std::string scfFilePath = resultDir + "/cf_dyn_transformed.mlir";
   switchingDebugStream(SwitchingDebugCategory::Profiling) << "[DEBUG] \tResult Dir : " << resultDir << "\n";
 
   // Step 1: Parse the actual data log file

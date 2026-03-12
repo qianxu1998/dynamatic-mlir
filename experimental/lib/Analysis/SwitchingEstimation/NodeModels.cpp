@@ -469,10 +469,6 @@ void ForkNode::calValidSwitching(
     //! Testing
     switchingDebugStream(SwitchingDebugCategory::Node) << "Hit Valid Switching Calculation Case III\n";
     if (existFlag) {
-      // Case 3: Compute desired cycle time
-      // TODO: Verify the following desired criteria
-      unsigned desiredCycleTime =
-          (nodeSteadyStart != 0) ? (nodeSteadyStart - 1) : (II - 1);
       if (selStartPoint == 0) {
         validSignal[sucNodeName] = 0;
       } else {
@@ -1109,25 +1105,20 @@ void DStoreNode::updateDataout(int inputData, const std::string &srcInputNode) {
   assert(!dataInSrcNode.empty());
   assert(!addressInSrcNode.empty());
 
-  int valueDiff = 0;
   if (srcInputNode == addressInSrcNode) {
     // Update the address output channel (use key "address_out")
     if (dataOut.find("address_out") != dataOut.end() &&
         !dataOut["address_out"].empty()) {
-      valueDiff = dataOut["address_out"].back() ^ inputData;
       dataOut["address_out"].push_back(inputData);
     } else {
-      valueDiff = inputData;
       dataOut["address_out"] = {inputData};
     }
   } else if (srcInputNode == dataInSrcNode) {
     // Update the actual data output channel (use key "data_out")
     if (dataOut.find("data_out") != dataOut.end() &&
         !dataOut["data_out"].empty()) {
-      valueDiff = dataOut["data_out"].back() ^ inputData;
       dataOut["data_out"].push_back(inputData);
     } else {
-      valueDiff = inputData;
       dataOut["data_out"] = {inputData};
     }
   }

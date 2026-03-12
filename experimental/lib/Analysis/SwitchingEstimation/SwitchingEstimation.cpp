@@ -66,11 +66,7 @@ struct SwitchingEstimationPass
   //  Information Extraction Related Functions
   //
   // This function extract all CFDFC related information from the CFDFC analysis
-  LogicalResult parseCFDFCInfo(handshake::FuncOp &funcOp,
-                               ListOfCFDFCs &cfdfcs);
-
-  // This function extracts and store the names of the ALU nodes in order
-  void extractALUNodesInOrder(handshake::FuncOp &funcOp);
+  LogicalResult parseCFDFCInfo(ListOfCFDFCs &cfdfcs);
 
   // Dump the switching information
   void dumpSwitchingResults(const SwitchingInfo &switchInfo,
@@ -87,19 +83,16 @@ struct SwitchingEstimationPass
   //
   // This function calculates the data channel switching number based on the
   // profiling results
-  void calDataChannelSwitching(mlir::ModuleOp &topModule,
-                               SCFProfilingResult &profileResults);
+  void calDataChannelSwitching(SCFProfilingResult &profileResults);
 
   //
   //  Handshake Channel Switching Calculation
   //
-  void computeSteadyStateHandshakeSwitching(mlir::ModuleOp &topModule,
-                                            SCFProfilingResult &profileResults);
+  void computeSteadyStateHandshakeSwitching();
 
   // This function calculates the handshake channel switching for the entire
   // circuit simulation
-  void computeTotalHandshakeSwitching(mlir::ModuleOp &topModule,
-                                      SCFProfilingResult &profileResults);
+  void computeTotalHandshakeSwitching(SCFProfilingResult &profileResults);
 };
 
 namespace {
@@ -223,7 +216,7 @@ void SwitchingEstimationPass::runOnOperation() {
       cfdfcs = &analysis.mapFuncOpToCFDFCs[funcOp];
     }
 
-    if (failed(parseCFDFCInfo(funcOp, *cfdfcs))) {
+    if (failed(parseCFDFCInfo(*cfdfcs))) {
       topModule->emitError()
           << "Failed to parse CFDFC info for switching estimation";
       return signalPassFailure();
@@ -300,18 +293,6 @@ void SwitchingEstimationPass::runOnOperation() {
     }
   }
 
-  //! Testing
-  // switchingDebugStream(SwitchingDebugCategory::Pipeline) << "[DEBUG] \tInvalid Backedge list map:\n";
-  // for (const auto &[segLabel, edgeList] :
-  //      switchingInfo.segInvalidBackedgesMap) {
-  //   switchingDebugStream(SwitchingDebugCategory::Pipeline) << "[DEBUG] \t\tsegLabel: " << segLabel << " :
-  //   "; for (const auto &selPair : edgeList) {
-  //     switchingDebugStream(SwitchingDebugCategory::Pipeline)
-  //                << "(" << selPair.first << ", " << selPair.second << "), ";
-  //   }
-  //   switchingDebugStream(SwitchingDebugCategory::Pipeline) << "\n";
-  // }
-
   // [STEP 3.2] Create the storing structure for the entire dataflow graph
   for (handshake::FuncOp funcOp : topModule.getOps<handshake::FuncOp>()) {
     // Contruct the Adj graph for the entire dataflow circuit
@@ -332,7 +313,6 @@ void SwitchingEstimationPass::runOnOperation() {
     // [STEP 4.2] Determine the shifting for each start node in the cfdfc
     selCFDFC->computeStartNodeShifts();
 
-    //! Testing
     switchingDebugStream(SwitchingDebugCategory::Pipeline) << "[DEBUG] [Step 4] CFDFC index: " << mgIndex << "\n";
     switchingDebugStream(SwitchingDebugCategory::Pipeline) << "[DEBUG]    Base Node: " << selCFDFC->baseNode << "\n";
     for (const auto &[selNode, selShift] : selCFDFC->startBaseNodeShiftMap) {
@@ -348,7 +328,7 @@ void SwitchingEstimationPass::runOnOperation() {
   //=======================================================================//
   switchingDebugStream(SwitchingDebugCategory::Data)
       << "[DEBUG] [Step 5] Calculating data channel switching\n";
-  calDataChannelSwitching(topModule, profilingResults);
+  calDataChannelSwitching(profilingResults);
 
   //=======================================================================//
   // [STEP 6] Calculate Steady State Handshake channel switching
@@ -356,7 +336,7 @@ void SwitchingEstimationPass::runOnOperation() {
   switchingDebugStream(SwitchingDebugCategory::Handshake)
       << "[DEBUG] [Step 6] Calculating steady state "
          "handshake channel switching\n";
-  computeSteadyStateHandshakeSwitching(topModule, profilingResults);
+  computeSteadyStateHandshakeSwitching();
 
   //=======================================================================//
   // [Step 7] Propagate handshake switching to the entire dataflow graph
@@ -364,7 +344,7 @@ void SwitchingEstimationPass::runOnOperation() {
   switchingDebugStream(SwitchingDebugCategory::Handshake)
       << "[DEBUG] [Step 7] Propagating handshake switching "
          "to the entire dataflow graph\n";
-  computeTotalHandshakeSwitching(topModule, profilingResults);
+  computeTotalHandshakeSwitching(profilingResults);
 
   //=======================================================================//
   // [Step 8] Dump the switching estimation results
@@ -402,29 +382,7 @@ void SwitchingEstimationPass::runOnOperation() {
 //
 //===----------------------------------------------------------------------===//
 
-void SwitchingEstimationPass::extractALUNodesInOrder(
-    handshake::FuncOp &funcOp) {
-  for (Operation &op : funcOp.getOps()) {
-    // TODO: Maybe we can get rid of the name extraction process after revising
-    // the data channel estimation method, 18/09/2025 Get the handshake.name
-    // attribute
-    std::string opName = op.getAttrOfType<StringAttr>("handshake.name").str();
-    std::string opType = removeDigits(opName);
-
-    if (NAME_SENSE_LIST.find(opType) != NAME_SENSE_LIST.end()) {
-      // If the operation type is found in the name sense list, add it to the
-      // ALU node list
-      switchingInfo.staticInfo.traceOpNames.push_back(opName);
-    }
-  }
-}
-
-LogicalResult
-SwitchingEstimationPass::parseCFDFCInfo(handshake::FuncOp &funcOp,
-                                        ListOfCFDFCs &cfdfcs) {
-  // Get all ALU names in the selected FuncOp
-  extractALUNodesInOrder(funcOp);
-
+LogicalResult SwitchingEstimationPass::parseCFDFCInfo(ListOfCFDFCs &cfdfcs) {
   // Get the CFDFC info from the analysis result
   switchingDebugStream(SwitchingDebugCategory::CFDFC)
       << "[DEBUG] [Step 0] Extracting CFDFC info\n";
@@ -438,7 +396,6 @@ SwitchingEstimationPass::parseCFDFCInfo(handshake::FuncOp &funcOp,
     // scope after the loop.
     switchingInfo.staticInfo.cfdfcInfoMap[cfdfcIndex] = &cfdfc;
 
-    //! Testing
     switchingDebugStream(SwitchingDebugCategory::CFDFC)
         << "[DEBUG] [Step 0] Processing CFDFC index: " << cfdfcIndex << "\n";
 
@@ -463,7 +420,6 @@ SwitchingEstimationPass::parseCFDFCInfo(handshake::FuncOp &funcOp,
         std::vector<unsigned> tmpBEToCfdfc{cfdfcIndex};
         switchingInfo.staticInfo.backEdgeToCFDFC[bbPair] = tmpBEToCfdfc;
 
-        //! Testing
         switchingDebugStream(SwitchingDebugCategory::CFDFC)
             << "[DEBUG] [Step 0]\tAdded new BE Pair: ("
                      << srcBB.value() << ", " << dstBB.value()
@@ -478,7 +434,6 @@ SwitchingEstimationPass::parseCFDFCInfo(handshake::FuncOp &funcOp,
           switchingInfo.staticInfo.backEdgeToCFDFC[bbPair].push_back(
               cfdfcIndex);
 
-          //! Testing
           switchingDebugStream(SwitchingDebugCategory::CFDFC)
               << "[DEBUG] [Step 0]\tUpdated BE Pair: (" << bbPair.first << ", "
               << bbPair.second << ") with CFDFC index: " << cfdfcIndex
@@ -498,7 +453,6 @@ SwitchingEstimationPass::parseCFDFCInfo(handshake::FuncOp &funcOp,
     std::vector<unsigned> bbVector(cfdfc.cycle.begin(), cfdfc.cycle.end());
     switchingInfo.staticInfo.segToBBs[std::to_string(cfdfcIndex)] = bbVector;
 
-    //! Testing
     switchingDebugStream(SwitchingDebugCategory::CFDFC)
         << "[DEBUG] [Step 0]\tCFDFC index: " << cfdfcIndex
         << ", Throughput: " << throughput << ", II: " << II << "\n";
@@ -739,7 +693,7 @@ void SwitchingEstimationPass::dumpPerMGHandshakeDetails(
 //===----------------------------------------------------------------------===//
 
 void SwitchingEstimationPass::calDataChannelSwitching(
-    mlir::ModuleOp &topModule, SCFProfilingResult &profileResults) {
+    SCFProfilingResult &profileResults) {
   // [SS 0] Construct the execution map
 
   switchingDebugStream(SwitchingDebugCategory::Data)
@@ -762,7 +716,6 @@ void SwitchingEstimationPass::calDataChannelSwitching(
       << "[DEBUG] [Step 5.1] Get the BB Pair to Control Merge Output Map\n";
   mapBBPairToControlMerge(switchingInfo);
 
-  //! Testing
   if (isSwitchingDebugEnabled(SwitchingDebugCategory::Data)) {
     for (const auto &[pair1, cmVec] :
          switchingInfo.dataInfo.bbPairToControlMergeOutputs) {
@@ -781,7 +734,6 @@ void SwitchingEstimationPass::calDataChannelSwitching(
                   "data source nodes from scf-level profiling\n";
   getDataBaseNodes(switchingInfo, profileResults);
 
-  //! Testing
   if (isSwitchingDebugEnabled(SwitchingDebugCategory::Data)) {
     for (auto &[segLabel, selDB] :
          switchingInfo.dataInfo.segmentToDataSourceNodes) {
@@ -796,7 +748,6 @@ void SwitchingEstimationPass::calDataChannelSwitching(
                   "info of mux, condbr and mem node and opaque buffers\n";
   switchingInfo.staticInfo.dataflowGraph->buildSrcMaps();
 
-  //! Testing
   if (isSwitchingDebugEnabled(SwitchingDebugCategory::Data)) {
     printMuxToSrcNodeMap(
         switchingInfo.staticInfo.dataflowGraph->muxToSrcNodeMap);
@@ -852,16 +803,6 @@ void SwitchingEstimationPass::calDataChannelSwitching(
 
     auto *node = entry.second.get();
     node->totalDataSwitchingCounting(false);
-    // switchingDebugStream(SwitchingDebugCategory::Pipeline) << "[DEBUG] \t[Node] " << nodeName << "\n";
-    // switchingDebugStream(SwitchingDebugCategory::Pipeline) << "[DEBUG] \t\tData Switching: " <<
-    // node->totalDataSwitching
-    //              << "\n";
-    // switchingDebugStream(SwitchingDebugCategory::Pipeline) << "[DEBUG] \t\tValid Switching: " <<
-    // node->totalValidSwitching
-    //              << "\n";
-    // switchingDebugStream(SwitchingDebugCategory::Pipeline) << "[DEBUG] \t\tReady Switching: " <<
-    // node->totalReadySwitching
-    //              << "\n";
   }
 }
 
@@ -870,8 +811,7 @@ void SwitchingEstimationPass::calDataChannelSwitching(
 // Handshake Channel Switching
 //
 //===----------------------------------------------------------------------===//
-void SwitchingEstimationPass::computeSteadyStateHandshakeSwitching(
-    mlir::ModuleOp &topModule, SCFProfilingResult &profileResults) {
+void SwitchingEstimationPass::computeSteadyStateHandshakeSwitching() {
   // For each MG, we do the following two steps
   //  Step 1: Update buffer information
   //  Step 2: Calculate the steady state handshake channel switching
@@ -908,7 +848,7 @@ void SwitchingEstimationPass::computeSteadyStateHandshakeSwitching(
 }
 
 void SwitchingEstimationPass::computeTotalHandshakeSwitching(
-    mlir::ModuleOp &topModule, SCFProfilingResult &profileResults) {
+    SCFProfilingResult &profileResults) {
   /* -----------------------------------------------------------------------
      Assumptions
        • For nodes that belong to an MG segment we re-use the steady-state
