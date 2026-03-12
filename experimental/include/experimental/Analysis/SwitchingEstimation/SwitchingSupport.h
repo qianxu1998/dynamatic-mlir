@@ -277,9 +277,12 @@ public:
 
   void printDetail();
 
-  // This function gets the desired control dataout from the control_dataout
-  // dict During MG transitions, the control dataout value doesn't exist, we
-  // directly give it a 0
+  // Return the control output value for an iteration when an index token is
+  // present. Mux modeling must distinguish "select 0" from "no select token".
+  std::optional<int> getControlOutputIfPresent(unsigned selIter) const;
+
+  // Legacy helper that maps "no control event" to 0. Keep this for non-mux
+  // callers that still use the older event-based convention.
   int getControlOutput(unsigned selIter);
 
   // LLVM casting support

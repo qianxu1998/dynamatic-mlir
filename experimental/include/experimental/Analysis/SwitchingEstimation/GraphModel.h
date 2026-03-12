@@ -357,6 +357,12 @@ public:
   // Format: {"mux_node_name" : {"control" : control_src_node_name, 0 :
   // src_node_name_0, 1 : src_node_name_1}}
   llvm::StringMap<std::map<std::string, std::string>> muxToSrcNodeMap;
+  // mux node to immediate input producer map before any graph backtracking.
+  // This preserves whether an input comes directly from a cond_br, which is
+  // required to model the selected input's valid gating in mux data semantics.
+  // Format: {"mux_node_name" : {"control" : pre_node_name, 0 :
+  // pre_node_name_0, 1 : pre_node_name_1}}
+  llvm::StringMap<std::map<std::string, std::string>> muxToImmediateInputMap;
   // Source node to vector of mux and port pair map
   // Format: {"src_node_name" : [(mux_node_name, corresponding_input_port_id)]}.
   llvm::StringMap<std::vector<std::pair<std::string, unsigned>>>

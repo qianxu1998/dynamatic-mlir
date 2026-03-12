@@ -1178,12 +1178,10 @@ void AdjGraph::buildSrcMaps() {
         return src.empty() ? preNode : src;
       };
 
-      // Get the source node for all three ports
-      // TODO: Need to check the following logic for backnode tracking
+      // Get the source node for all three ports.
       std::string ctrlSrc = resolveSrc(ctrlPreNodeName);
       std::string dataSrc0 = resolveSrc(
           dataPre0NodeName.empty() ? ctrlPreNodeName : dataPre0NodeName);
-
       std::string dataSrc1 = resolveSrc(
           dataPre1NodeName.empty() ? dataPre0NodeName : dataPre1NodeName);
       fail(ctrlSrc);
@@ -1227,8 +1225,14 @@ void AdjGraph::buildSrcMaps() {
                                                        {"control", ctrlSrc},
                                                        {"0", dataSrc0},
                                                        {"1", dataSrc1}};
+      std::map<std::string, std::string> tmpMuxImmediateMap{
+          {"control", ctrlPreNodeName},
+          {"0", dataPre0NodeName},
+          {"1", dataPre1NodeName},
+      };
       // Update the global map
       muxToSrcNodeMap[selNode] = tmpMuxPortMap;
+      muxToImmediateInputMap[selNode] = tmpMuxImmediateMap;
 
       // Update the src to mux map
       if (!dataSrc0.empty() && contains(srcNodeToMuxMap, dataSrc0)) {

@@ -34,18 +34,6 @@
 using namespace dynamatic::experimental;
 
 namespace {
-bool getLatestKnownValue(const std::map<unsigned, IterationValue> &omap,
-                         unsigned iterIndex, int &valueOut) {
-  if (omap.empty())
-    return false;
-  auto it = omap.upper_bound(iterIndex);
-  if (it == omap.begin())
-    return false;
-  --it;
-  valueOut = it->second.value;
-  return true;
-}
-
 // Keep meaningful toggles while removing adjacent duplicates
 // (e.g. [0,0,1,1,0] -> [0,1,0]).
 void dedupConsecutiveValues(std::vector<int> &values) {
@@ -93,6 +81,92 @@ int getDataOutValueAtOrBefore(const std::shared_ptr<DataBase> &nodeData,
   return upper->second.value;
 }
 
+// For mux token semantics we must distinguish "a source produced this value on
+// this iteration" from "this was the latest value seen earlier".
+std::optional<int> getDataOutValueIfPresent(const std::shared_ptr<DataBase> &nodeData,
+                                            unsigned iter) {
+  if (!nodeData)
+    return std::nullopt;
+
+  auto it = nodeData->originalDataOut.find(iter);
+  if (it == nodeData->originalDataOut.end())
+    return std::nullopt;
+  return it->second.value;
+}
+
+// Read the estimator's current driven value for `iter`. If a glitch waveform
+// has already been materialized for this iteration, it represents the bus
+// value seen by downstream nodes and must win over the token payload stored in
+// `originalDataOut`.
+std::optional<int>
+getCurrentDataOutValueIfPresent(const std::shared_ptr<DataBase> &nodeData,
+                                unsigned iter) {
+  if (!nodeData)
+    return std::nullopt;
+
+  auto glitchIt = nodeData->glitchDataOutByIter.find(iter);
+  if (glitchIt != nodeData->glitchDataOutByIter.end() &&
+      !glitchIt->second.empty())
+    return glitchIt->second.back();
+
+  return getDataOutValueIfPresent(nodeData, iter);
+}
+
+// Read the latest value the estimator believes is being driven at or before
+// `iter`. Unlike getCurrentDataOutValueAtOrBefore(), this never pulls in a
+// future value when the source has not produced anything yet.
+std::optional<int>
+getCurrentDataOutValueAtOrBeforeStrict(
+    const std::shared_ptr<DataBase> &nodeData, unsigned iter) {
+  if (!nodeData)
+    return std::nullopt;
+
+  std::optional<std::pair<unsigned, int>> bestValue;
+
+  auto originalUpper = nodeData->originalDataOut.upper_bound(iter);
+  if (originalUpper != nodeData->originalDataOut.begin()) {
+    --originalUpper;
+    bestValue = std::make_pair(originalUpper->first,
+                               originalUpper->second.value);
+  }
+
+  auto glitchUpper = nodeData->glitchDataOutByIter.upper_bound(iter);
+  while (glitchUpper != nodeData->glitchDataOutByIter.begin()) {
+    --glitchUpper;
+    if (glitchUpper->second.empty())
+      continue;
+
+    if (!bestValue.has_value() || glitchUpper->first >= bestValue->first)
+      bestValue =
+          std::make_pair(glitchUpper->first, glitchUpper->second.back());
+    break;
+  }
+
+  if (!bestValue.has_value())
+    return std::nullopt;
+  return bestValue->second;
+}
+
+int getCurrentDataOutValueAtOrBefore(const std::shared_ptr<DataBase> &nodeData,
+                                     unsigned iter, int fallback = 0) {
+  if (!nodeData)
+    return fallback;
+
+  if (std::optional<int> exact = getCurrentDataOutValueIfPresent(nodeData, iter))
+    return *exact;
+
+  const auto &outMap = nodeData->originalDataOut;
+  if (outMap.empty())
+    return fallback;
+
+  auto upper = outMap.upper_bound(iter);
+  if (upper == outMap.begin())
+    return upper->second.value;
+
+  --upper;
+  return upper->second.value;
+}
+
 unsigned getSegmentII(const SwitchingInfo &switchInfo,
                       const std::string &segLabel) {
   if (segLabel.empty())
@@ -126,6 +200,253 @@ bool isOpaqueBuffer(const SwitchingInfo &switchInfo, const std::string &node) {
 
   // Keep legacy conservative behavior if we cannot classify this node.
   return false;
+}
+
+std::optional<std::string>
+findNearestMuxReplaySource(const SwitchingInfo &switchInfo,
+                           std::string current) {
+  std::set<std::string> visited;
+
+  while (!current.empty() && visited.insert(current).second) {
+    auto stateIt = switchInfo.dataInfo.nodeToDataState.find(current);
+    if (stateIt != switchInfo.dataInfo.nodeToDataState.end() && stateIt->second)
+      return current;
+
+    auto graphIt = switchInfo.staticInfo.dataflowGraph->nodes.find(current);
+    if (graphIt == switchInfo.staticInfo.dataflowGraph->nodes.end() ||
+        !graphIt->second)
+      break;
+
+    if (auto *bufferNode = dyn_cast<BufferNode>(graphIt->second.get())) {
+      current = bufferNode->pres.empty() ? "" : bufferNode->pres.front();
+      continue;
+    }
+
+    if (auto *cbrNode = dyn_cast<CBrNode>(graphIt->second.get())) {
+      current = cbrNode->dataPreNodeName.empty() ? cbrNode->condPreNodeName
+                                                 : cbrNode->dataPreNodeName;
+      continue;
+    }
+
+    if (graphIt->second->pres.size() == 1) {
+      current = graphIt->second->pres.front();
+      continue;
+    }
+
+    break;
+  }
+
+  return std::nullopt;
+}
+
+std::string getMuxReplayDataSrcNode(const SwitchingInfo &switchInfo,
+                                    const std::string &selMuxNode,
+                                    int resolvedCond) {
+  auto immediateMuxIt =
+      switchInfo.staticInfo.dataflowGraph->muxToImmediateInputMap.find(
+          selMuxNode);
+  if (immediateMuxIt !=
+      switchInfo.staticInfo.dataflowGraph->muxToImmediateInputMap.end()) {
+    auto preIt = immediateMuxIt->second.find(std::to_string(resolvedCond));
+    if (preIt != immediateMuxIt->second.end() && !preIt->second.empty()) {
+      if (std::optional<std::string> replaySrc =
+              findNearestMuxReplaySource(switchInfo, preIt->second))
+        return *replaySrc;
+      return preIt->second;
+    }
+  }
+
+  auto muxIt =
+      switchInfo.staticInfo.dataflowGraph->muxToSrcNodeMap.find(selMuxNode);
+  if (muxIt == switchInfo.staticInfo.dataflowGraph->muxToSrcNodeMap.end())
+    return "";
+
+  auto srcIt = muxIt->second.find(std::to_string(resolvedCond));
+  if (srcIt == muxIt->second.end())
+    return "";
+
+  return srcIt->second;
+}
+
+std::string getMuxImmediateInputNode(const SwitchingInfo &switchInfo,
+                                     const std::string &selMuxNode,
+                                     int resolvedCond) {
+  auto immediateMuxIt =
+      switchInfo.staticInfo.dataflowGraph->muxToImmediateInputMap.find(
+          selMuxNode);
+  if (immediateMuxIt ==
+      switchInfo.staticInfo.dataflowGraph->muxToImmediateInputMap.end())
+    return "";
+
+  auto preIt = immediateMuxIt->second.find(std::to_string(resolvedCond));
+  if (preIt == immediateMuxIt->second.end())
+    return "";
+  return preIt->second;
+}
+
+static bool bufferAllowsHeldMuxReplay(const BufferNode &bufferNode) {
+  switch (bufferNode.buffType) {
+  case BufferType::ONE_SLOT_BREAK_R:
+    return false;
+  case BufferType::ONE_SLOT_BREAK_DV:
+  case BufferType::ONE_SLOT_BREAK_DVR:
+  case BufferType::FIFO_BREAK_DV:
+  case BufferType::FIFO_BREAK_NONE:
+  case BufferType::SHIFT_REG_BREAK_DV:
+    return true;
+  }
+  return false;
+}
+
+static bool immediateInputPathHasCurrentEventImpl(
+    const SwitchingInfo &switchInfo, const std::string &nodeName, unsigned iter,
+    std::set<std::string> &visited) {
+  if (nodeName.empty() || !visited.insert(nodeName).second)
+    return false;
+
+  auto dataIt = switchInfo.dataInfo.nodeToDataState.find(nodeName);
+  if (dataIt != switchInfo.dataInfo.nodeToDataState.end() && dataIt->second) {
+    if (contains(dataIt->second->originalDataOut, iter))
+      return true;
+    auto glitchIt = dataIt->second->glitchDataOutByIter.find(iter);
+    if (glitchIt != dataIt->second->glitchDataOutByIter.end() &&
+        !glitchIt->second.empty())
+      return true;
+  }
+
+  auto nodeIt = switchInfo.staticInfo.dataflowGraph->nodes.find(nodeName);
+  if (nodeIt == switchInfo.staticInfo.dataflowGraph->nodes.end() ||
+      !nodeIt->second)
+    return false;
+
+  if (auto *cbrNode = dyn_cast<CBrNode>(nodeIt->second.get()))
+    return immediateInputPathHasCurrentEventImpl(
+        switchInfo, cbrNode->dataPreNodeName, iter, visited);
+
+  if (auto *bufferNode = dyn_cast<BufferNode>(nodeIt->second.get())) {
+    if (bufferNode->transparent && !bufferNode->pres.empty())
+      return immediateInputPathHasCurrentEventImpl(
+          switchInfo, bufferNode->pres.front(), iter, visited);
+    return false;
+  }
+
+  if (nodeIt->second->pres.size() == 1)
+    return immediateInputPathHasCurrentEventImpl(
+        switchInfo, nodeIt->second->pres.front(), iter, visited);
+
+  return false;
+}
+
+static bool immediateInputPathAllowsHeldTokenImpl(
+    const SwitchingInfo &switchInfo, const std::string &nodeName,
+    std::set<std::string> &visited) {
+  if (nodeName.empty() || !visited.insert(nodeName).second)
+    return false;
+
+  if (contains(nodeName, "constant") || contains(nodeName, "source") ||
+      contains(nodeName, "start"))
+    return true;
+
+  auto nodeIt = switchInfo.staticInfo.dataflowGraph->nodes.find(nodeName);
+  if (nodeIt == switchInfo.staticInfo.dataflowGraph->nodes.end() ||
+      !nodeIt->second)
+    return false;
+
+  if (auto *cbrNode = dyn_cast<CBrNode>(nodeIt->second.get()))
+    return immediateInputPathAllowsHeldTokenImpl(
+        switchInfo, cbrNode->dataPreNodeName, visited);
+
+  if (auto *bufferNode = dyn_cast<BufferNode>(nodeIt->second.get()))
+    return bufferAllowsHeldMuxReplay(*bufferNode);
+
+  if (nodeIt->second->pres.size() == 1)
+    return immediateInputPathAllowsHeldTokenImpl(
+        switchInfo, nodeIt->second->pres.front(), visited);
+
+  return false;
+}
+
+bool muxImmediateInputHasCurrentEvent(const SwitchingInfo &switchInfo,
+                                      const std::string &selMuxNode,
+                                      int resolvedCond, unsigned iter) {
+  std::set<std::string> visited;
+  return immediateInputPathHasCurrentEventImpl(
+      switchInfo, getMuxImmediateInputNode(switchInfo, selMuxNode, resolvedCond),
+      iter, visited);
+}
+
+bool muxImmediateInputAllowsHeldToken(const SwitchingInfo &switchInfo,
+                                      const std::string &selMuxNode,
+                                      int resolvedCond) {
+  std::set<std::string> visited;
+  return immediateInputPathAllowsHeldTokenImpl(
+      switchInfo, getMuxImmediateInputNode(switchInfo, selMuxNode, resolvedCond),
+      visited);
+}
+
+bool muxSourceAllowsHeldFallback(const SwitchingInfo &switchInfo,
+                                 const std::string &selMuxNode,
+                                 int resolvedCond,
+                                 const std::string &selDataSrcNode) {
+  if (selDataSrcNode.empty())
+    return false;
+
+  return muxImmediateInputAllowsHeldToken(switchInfo, selMuxNode,
+                                          resolvedCond);
+}
+
+bool muxSelectedInputIsValid(SwitchingInfo &switchInfo,
+                             const std::string &selMuxNode,
+                             int resolvedCond, unsigned iter) {
+  auto immediateMuxIt =
+      switchInfo.staticInfo.dataflowGraph->muxToImmediateInputMap.find(
+          selMuxNode);
+  if (immediateMuxIt ==
+      switchInfo.staticInfo.dataflowGraph->muxToImmediateInputMap.end())
+    return true;
+
+  const std::string portKey = std::to_string(resolvedCond);
+  auto preIt = immediateMuxIt->second.find(portKey);
+  if (preIt == immediateMuxIt->second.end())
+    return true;
+
+  const std::string &immediatePreNode = preIt->second;
+  if (immediatePreNode.empty() || !contains(immediatePreNode, "cond_br"))
+    return true;
+
+  auto condBrIt =
+      switchInfo.staticInfo.dataflowGraph->nodes.find(immediatePreNode);
+  if (condBrIt == switchInfo.staticInfo.dataflowGraph->nodes.end() ||
+      !condBrIt->second)
+    return true;
+
+  auto *condBrNode = dyn_cast<CBrNode>(condBrIt->second.get());
+  if (!condBrNode)
+    return true;
+
+  auto sucIt = condBrNode->outChannelNameToIndexMap.find(selMuxNode);
+  if (sucIt == condBrNode->outChannelNameToIndexMap.end())
+    return true;
+
+  if (!contains(switchInfo.staticInfo.dataflowGraph->condBrToConSrcMap,
+                immediatePreNode))
+    return true;
+
+  const std::string &condSrcNode =
+      switchInfo.staticInfo.dataflowGraph->condBrToConSrcMap[immediatePreNode];
+  auto condStateIt = switchInfo.dataInfo.nodeToDataState.find(condSrcNode);
+  if (condStateIt == switchInfo.dataInfo.nodeToDataState.end() ||
+      !condStateIt->second)
+    return false;
+
+  std::optional<int> condValue =
+      getCurrentDataOutValueIfPresent(condStateIt->second, iter);
+  if (!condValue.has_value())
+    return false;
+
+  const unsigned selectedBranch = sucIt->second;
+  const unsigned activeBranch = (*condValue != 0) ? 0U : 1U;
+  return selectedBranch == activeBranch;
 }
 } // namespace
 
@@ -316,9 +637,25 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
     return true;
   };
   auto updateBufferFromSource = [&](const std::string &srcNode, int value,
-                                    unsigned iterIndex) {
+                                    unsigned iterIndex,
+                                    bool tokenPresent = true) {
     auto writeSingleBuffer = [&](const std::string &bufferNode,
-                                 unsigned targetIter, int newValue) {
+                                 unsigned targetIter, int newValue,
+                                 bool bufferTokenPresent) {
+      auto nodeIt = switchInfo.staticInfo.dataflowGraph->nodes.find(bufferNode);
+      if (nodeIt != switchInfo.staticInfo.dataflowGraph->nodes.end() &&
+          nodeIt->second) {
+        if (auto *bufferNodeModel =
+                dyn_cast<BufferNode>(nodeIt->second.get())) {
+          const bool holdsLastValidData =
+              bufferNodeModel->buffType == BufferType::ONE_SLOT_BREAK_DV ||
+              bufferNodeModel->buffType == BufferType::FIFO_BREAK_DV ||
+              bufferNodeModel->buffType == BufferType::SHIFT_REG_BREAK_DV ||
+              bufferNodeModel->buffType == BufferType::ONE_SLOT_BREAK_DVR;
+          if (!bufferTokenPresent && holdsLastValidData)
+            return;
+        }
+      }
       setOriginalDataOut(bufferNode, targetIter, newValue, /*overwrite=*/false);
     };
 
@@ -350,7 +687,7 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
       }
       visited.insert(bufferNode);
 
-      writeSingleBuffer(bufferNode, targetIter, value);
+      writeSingleBuffer(bufferNode, targetIter, value, tokenPresent);
 
       auto nextIt =
           switchInfo.staticInfo.dataflowGraph->dataSrcToOpaqueBufferMap.find(
@@ -444,6 +781,7 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
 
   // Define temporary storing structure
   std::map<std::string, int> tmpMuxOutputMap;
+  std::map<std::string, bool> tmpMuxTokenPresentMap;
   std::vector<std::string> allMuxNodes;
   allMuxNodes.reserve(
       switchInfo.staticInfo.dataflowGraph->muxToSrcNodeMap.size());
@@ -534,17 +872,10 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
           // Only update muxes this control-merge actually influences
           if (!containsValue(selMuxVec, selMuxNode))
             continue;
-          std::string selMuxDataSrcNode;
-          if (auto muxIt =
-                  switchInfo.staticInfo.dataflowGraph->muxToSrcNodeMap.find(
-                      selMuxNode);
-              muxIt !=
-              switchInfo.staticInfo.dataflowGraph->muxToSrcNodeMap.end()) {
-            auto srcIt = muxIt->second.find(std::to_string(outValue));
-            if (srcIt != muxIt->second.end())
-              selMuxDataSrcNode = srcIt->second;
-          }
+          std::string selMuxDataSrcNode =
+              getMuxReplayDataSrcNode(switchInfo, selMuxNode, outValue);
           int tmpMuxOutput = 0;
+          bool muxOutputHasToken = false;
           std::string resolveCase = "unresolved";
 
           //! Testing
@@ -552,13 +883,19 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
           // "\n"; switchingDebugStream(SwitchingDebugCategory::Data) << "[DEBUG] \t\t\t\tSel Data Src Node: " <<
           // selMuxDataSrcNode << "\n";
 
-          if (contains(selMuxDataSrcNode, "constant") ||
-              contains(selMuxDataSrcNode, "source")) {
+          if (!muxSelectedInputIsValid(switchInfo, selMuxNode, outValue,
+                                       iterIndex)) {
+            tmpMuxOutput = 0;
+            resolveCase = "selected_input_invalid_default_0";
+          } else if (contains(selMuxDataSrcNode, "constant") ||
+              contains(selMuxDataSrcNode, "source") ||
+              contains(selMuxDataSrcNode, "start")) {
             auto srcDb = getNodeDataBase(selMuxDataSrcNode);
             if (srcDb && !srcDb->originalDataOut.empty())
               tmpMuxOutput = getDataOutValueAtOrBefore(srcDb, 0, 0);
             else
               tmpMuxOutput = 0;
+            muxOutputHasToken = true;
             resolveCase = "const_or_source";
           } else {
             auto srcDb = getNodeDataBase(selMuxDataSrcNode);
@@ -591,6 +928,7 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
                 // Use the previous value
                 if (contains(tmpMuxOutputMap, selMuxDataSrcNode)) {
                   tmpMuxOutput = tmpMuxOutputMap[selMuxDataSrcNode];
+                  muxOutputHasToken = tmpMuxTokenPresentMap[selMuxDataSrcNode];
                   resolveCase = "self_feedback_tmp_map";
                 } else {
                   llvm::errs()
@@ -603,24 +941,18 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
                 // switchingDebugStream(SwitchingDebugCategory::Data) << "[MUX_DEBUG][BASE]     "
                 //                 "resolve_case=SRC_HAS_ITER_VALUE\n";
                 tmpMuxOutput = srcDb->originalDataOut[iterIndex].value;
+                muxOutputHasToken = true;
                 resolveCase = "mux_src_has_iter_value";
               } else if (contains(tmpMuxOutputMap, selMuxDataSrcNode)) {
                 //! Testing
                 // switchingDebugStream(SwitchingDebugCategory::Data)
                 //     << "[MUX_DEBUG][BASE] resolve_case=SRC_FROM_TMP_MAP\n";
                 tmpMuxOutput = tmpMuxOutputMap[selMuxDataSrcNode];
+                muxOutputHasToken = tmpMuxTokenPresentMap[selMuxDataSrcNode];
                 resolveCase = "mux_src_tmp_map";
               } else {
-                //! Testing
-                // switchingDebugStream(SwitchingDebugCategory::Data) << "[MUX_DEBUG][BASE]     "
-                //                 "resolve_case=DEFERRED_FROM_PREV_ITER\n";
-                // TODO: Check the following update logic
-                unsigned fallbackIter = (iterIndex == 0) ? 0 : iterIndex - 1;
-                setOriginalDataOut(selMuxDataSrcNode, fallbackIter,
-                                   tmpMuxOutput,
-                                   /*overwrite=*/false);
                 tmpUnUpdatedMux.push_back(selMuxNode);
-                resolveCase = "mux_src_deferred_prev_iter";
+                resolveCase = "mux_src_deferred_same_iter";
                 switchingDebugStream(SwitchingDebugCategory::Mux)
                     << "[MUX_TRACE][BASE]     mux=" << selMuxNode
                     << " iter=" << iterIndex << " ctrl=" << outValue << " src="
@@ -642,38 +974,25 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
                 auto &omap = srcDb->originalDataOut;
                 if (omap.find(iterIndex) != omap.end()) {
                   tmpMuxOutput = omap[iterIndex].value;
+                  muxOutputHasToken = true;
                   resolveCase = "src_has_iter_value";
+                } else if (std::optional<int> heldValue =
+                               muxSourceAllowsHeldFallback(
+                                   switchInfo, selMuxNode, outValue,
+                                   selMuxDataSrcNode)
+                                   ? getCurrentDataOutValueAtOrBeforeStrict(
+                                         srcDb, iterIndex)
+                                   : std::nullopt) {
+                  tmpMuxOutput = *heldValue;
+                  muxOutputHasToken = true;
+                  resolveCase = "src_held_value";
                 } else if (contains(tmpMuxOutputMap, selMuxDataSrcNode)) {
                   tmpMuxOutput = tmpMuxOutputMap[selMuxDataSrcNode];
+                  muxOutputHasToken = tmpMuxTokenPresentMap[selMuxDataSrcNode];
                   resolveCase = "src_tmp_map";
-                } else if (getLatestKnownValue(omap, iterIndex, tmpMuxOutput)) {
-                  //! Testing
-                  // switchingDebugStream(SwitchingDebugCategory::Data) << "[DEBUG] The value for src node " <<
-                  // selMuxDataSrcNode << " not found at iteration " <<
-                  // iterIndex
-                  //              << ", fallback to latest known value\n";
-                  resolveCase = "src_latest_known";
-                } else if (contains(selMuxDataSrcNode, "buffer")) {
-                  auto srcBufDb = getNodeDataBase(selMuxDataSrcNode);
-                  if (srcBufDb &&
-                      getLatestKnownValue(srcBufDb->originalDataOut, iterIndex,
-                                          tmpMuxOutput)) {
-                    // switchingDebugStream(SwitchingDebugCategory::Data)
-                    //     << "[DEBUG] The value for buffer source node "
-                    //        "not found at iteration "
-                    //     << iterIndex << ", fallback to latest known value\n";
-                    resolveCase = "buffer_src_latest_known";
-                  } else {
-                    // If no value is found, we use 0 for the buffer source.
-                    tmpMuxOutput = 0;
-                    resolveCase = "buffer_src_default_0";
-                  }
                 } else {
-                  llvm::errs()
-                      << "[ERROR] Data src(" << selMuxDataSrcNode
-                      << ") of Mux Node: " << selMuxNode << ", not found.\n";
                   tmpMuxOutput = 0;
-                  resolveCase = "src_not_found_default_0";
+                  resolveCase = "src_no_event_default_0";
                 }
               }
             }
@@ -687,7 +1006,9 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
           bool wroteOriginal = setOriginalDataOut(
               selMuxNode, iterIndex, tmpMuxOutput, /*overwrite=*/false);
           tmpMuxOutputMap[selMuxNode] = tmpMuxOutput;
-          updateBufferFromSource(selMuxNode, tmpMuxOutput, iterIndex);
+          tmpMuxTokenPresentMap[selMuxNode] = muxOutputHasToken;
+          updateBufferFromSource(selMuxNode, tmpMuxOutput, iterIndex,
+                                 muxOutputHasToken);
           switchingDebugStream(SwitchingDebugCategory::Mux) << "[MUX_TRACE][BASE]     mux=" << selMuxNode
                        << " iter=" << iterIndex << " ctrl=" << outValue
                        << " src="
@@ -702,24 +1023,19 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
         // Update all remaining mux nodes
         // TODO: This maybe useless, check it out
         for (const auto &leftMuxNode : tmpUnUpdatedMux) {
-          std::string selMuxDataSrcNode;
-          if (auto muxIt =
-                  switchInfo.staticInfo.dataflowGraph->muxToSrcNodeMap.find(
-                      leftMuxNode);
-              muxIt !=
-              switchInfo.staticInfo.dataflowGraph->muxToSrcNodeMap.end()) {
-            auto srcIt = muxIt->second.find(std::to_string(outValue));
-            if (srcIt != muxIt->second.end())
-              selMuxDataSrcNode = srcIt->second;
-          } else {
+          std::string selMuxDataSrcNode =
+              getMuxReplayDataSrcNode(switchInfo, leftMuxNode, outValue);
+          if (selMuxDataSrcNode.empty())
             llvm::errs() << "[ERROR] Mux node " << leftMuxNode
-                         << " not found in muxToSrcNodeMap\n";
-          }
+                         << " has no replay data source for control value "
+                         << outValue << "\n";
           int tmpMuxOutput = 0;
+          bool muxOutputHasToken = false;
           std::string resolveCase = "deferred_unresolved";
 
           if (contains(tmpMuxOutputMap, selMuxDataSrcNode)) {
             tmpMuxOutput = tmpMuxOutputMap[selMuxDataSrcNode];
+            muxOutputHasToken = tmpMuxTokenPresentMap[selMuxDataSrcNode];
             resolveCase = "deferred_tmp_map";
           } else {
             llvm::errs() << "[ERROR] Data src(" << selMuxDataSrcNode
@@ -730,7 +1046,9 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
 
           bool wroteOriginal = setOriginalDataOut(
               leftMuxNode, iterIndex, tmpMuxOutput, /*overwrite=*/false);
-          updateBufferFromSource(leftMuxNode, tmpMuxOutput, iterIndex);
+          tmpMuxTokenPresentMap[leftMuxNode] = muxOutputHasToken;
+          updateBufferFromSource(leftMuxNode, tmpMuxOutput, iterIndex,
+                                 muxOutputHasToken);
           switchingDebugStream(SwitchingDebugCategory::Mux) << "[MUX_TRACE][BASE]     mux=" << leftMuxNode
                        << " iter=" << iterIndex << " ctrl=" << outValue
                        << " src="
@@ -753,18 +1071,10 @@ void dataChannelBaseNodesValueUpdate(SwitchingInfo &switchInfo,
         switchInfo.dataInfo.iterToInactiveMuxNodes[edgeIterIndex].push_back(
             muxNode);
 
-        // Update the inactive value list
-        // Get the source node for this mux
-        std::string selInactiveMuxDataSrcNode =
-            switchInfo.staticInfo.dataflowGraph->muxToSrcNodeMap[muxNode]["0"];
-        auto srcDb = getNodeDataBase(selInactiveMuxDataSrcNode);
+        // New mux RTL semantics: when the select token is absent, data output
+        // is forced to zero rather than leaking port 0.
+        std::string selInactiveMuxDataSrcNode = "<inactive_zero>";
         int tmpInactiveMuxOutput = 0;
-        if (!srcDb->originalDataOutVec.empty()) {
-          tmpInactiveMuxOutput = srcDb->originalDataOutVec.back();
-        } else {
-          tmpInactiveMuxOutput =
-              getDataOutValueAtOrBefore(srcDb, edgeIterIndex);
-        }
 
         IterationValue tmpInactiveMuxValuePair = {tmpInactiveMuxOutput,
                                                   edgeIterIndex};
@@ -1086,6 +1396,402 @@ static std::string peelBufferChain(const SwitchingInfo &SI, std::string node) {
   return node;
 }
 
+static unsigned getChannelBitWidth(mlir::Value value) {
+  if (auto chanType = dyn_cast<handshake::ChannelType>(value.getType()))
+    return chanType.getDataBitWidth();
+  return 0;
+}
+
+static int signExtendValue(int value, unsigned srcWidth) {
+  if (srcWidth == 0 || srcWidth >= 32)
+    return value;
+
+  int truncated = reduceBits(value, srcWidth);
+  unsigned signBit = 1U << (srcWidth - 1);
+  if (static_cast<unsigned>(truncated) & signBit)
+    truncated |= static_cast<int>(~((1U << srcWidth) - 1U));
+  return truncated;
+}
+
+static std::optional<int>
+evaluateNodeOperation(mlir::Operation *op,
+                      const std::function<int(unsigned)> &resolveOperandValue,
+                      std::optional<int> profiledCmpValue = std::nullopt) {
+  if (!op)
+    return std::nullopt;
+
+  if (auto shliOp = dyn_cast<handshake::ShLIOp>(op))
+    return resolveOperandValue(0) << resolveOperandValue(1);
+
+  if (auto shrsiOp = dyn_cast<handshake::ShRSIOp>(op)) {
+    unsigned inputWidth = getChannelBitWidth(shrsiOp.getLhs());
+    return signExtendValue(resolveOperandValue(0), inputWidth) >>
+           resolveOperandValue(1);
+  }
+
+  if (auto shruiOp = dyn_cast<handshake::ShRUIOp>(op)) {
+    unsigned inputWidth = getChannelBitWidth(shruiOp.getLhs());
+    return static_cast<int>(
+        static_cast<unsigned>(reduceBits(resolveOperandValue(0), inputWidth)) >>
+        resolveOperandValue(1));
+  }
+
+  if (auto extsiOp = dyn_cast<handshake::ExtSIOp>(op)) {
+    unsigned inputWidth = getChannelBitWidth(extsiOp.getOperand());
+    return signExtendValue(resolveOperandValue(0), inputWidth);
+  }
+
+  if (auto extuiOp = dyn_cast<handshake::ExtUIOp>(op)) {
+    unsigned inputWidth = getChannelBitWidth(extuiOp.getOperand());
+    return reduceBits(resolveOperandValue(0), inputWidth);
+  }
+
+  if (auto trunciOp = dyn_cast<handshake::TruncIOp>(op)) {
+    unsigned outputWidth = getChannelBitWidth(trunciOp.getResult());
+    return reduceBits(resolveOperandValue(0), outputWidth);
+  }
+
+  if (isa<handshake::AddIOp>(op))
+    return resolveOperandValue(0) + resolveOperandValue(1);
+
+  if (isa<handshake::SubIOp>(op))
+    return resolveOperandValue(0) - resolveOperandValue(1);
+
+  if (isa<handshake::MulIOp>(op))
+    return resolveOperandValue(0) * resolveOperandValue(1);
+
+  if (isa<handshake::AndIOp>(op))
+    return resolveOperandValue(0) & resolveOperandValue(1);
+
+  if (isa<handshake::OrIOp>(op))
+    return resolveOperandValue(0) | resolveOperandValue(1);
+
+  if (isa<handshake::XOrIOp>(op))
+    return resolveOperandValue(0) ^ resolveOperandValue(1);
+
+  if (auto cmpiOp = dyn_cast<handshake::CmpIOp>(op)) {
+    if (profiledCmpValue.has_value()) {
+      unsigned outputWidth = getChannelBitWidth(cmpiOp.getResult());
+      return reduceBits(*profiledCmpValue, outputWidth);
+    }
+
+    int lhs = resolveOperandValue(0);
+    int rhs = resolveOperandValue(1);
+    switch (cmpiOp.getPredicate()) {
+    case handshake::CmpIPredicate::eq:
+      return lhs == rhs;
+    case handshake::CmpIPredicate::ne:
+      return lhs != rhs;
+    case handshake::CmpIPredicate::uge:
+      return static_cast<unsigned>(lhs) >= static_cast<unsigned>(rhs);
+    case handshake::CmpIPredicate::sge:
+      return lhs >= rhs;
+    case handshake::CmpIPredicate::ugt:
+      return static_cast<unsigned>(lhs) > static_cast<unsigned>(rhs);
+    case handshake::CmpIPredicate::sgt:
+      return lhs > rhs;
+    case handshake::CmpIPredicate::ule:
+      return static_cast<unsigned>(lhs) <= static_cast<unsigned>(rhs);
+    case handshake::CmpIPredicate::sle:
+      return lhs <= rhs;
+    case handshake::CmpIPredicate::ult:
+      return static_cast<unsigned>(lhs) < static_cast<unsigned>(rhs);
+    case handshake::CmpIPredicate::slt:
+      return lhs < rhs;
+    }
+  }
+
+  return std::nullopt;
+}
+
+static std::optional<int>
+evaluateNodeFromCurrentSources(SwitchingInfo &switchInfo,
+                               const std::string &executedSeg,
+                               const std::string &nodeName, unsigned iter) {
+  auto graphIt = switchInfo.staticInfo.segToGraph.find(executedSeg);
+  if (graphIt == switchInfo.staticInfo.segToGraph.end() || !graphIt->second)
+    return std::nullopt;
+
+  auto nodeIt = graphIt->second->nodes.find(nodeName);
+  if (nodeIt == graphIt->second->nodes.end() || !nodeIt->second ||
+      !nodeIt->second->op)
+    return std::nullopt;
+
+  auto resolveOperandValue = [&](unsigned operandIdx) -> int {
+    if (operandIdx >= nodeIt->second->pres.size())
+      return 0;
+
+    std::string srcNode =
+        segNodeDataSrcSearch(switchInfo, nodeIt->second->pres[operandIdx],
+                             graphIt->second.get());
+    if (srcNode.empty())
+      return 0;
+
+    auto srcIt = switchInfo.dataInfo.nodeToDataState.find(srcNode);
+    if (srcIt == switchInfo.dataInfo.nodeToDataState.end() || !srcIt->second)
+      return 0;
+
+    return getCurrentDataOutValueAtOrBefore(srcIt->second, iter, 0);
+  };
+
+  mlir::Operation *op = nodeIt->second->op;
+  std::optional<int> profiledCmpValue;
+  auto selfStateIt = switchInfo.dataInfo.nodeToDataState.find(nodeName);
+  if (selfStateIt != switchInfo.dataInfo.nodeToDataState.end() &&
+      selfStateIt->second) {
+    profiledCmpValue = getDataOutValueIfPresent(selfStateIt->second, iter);
+  }
+
+  return evaluateNodeOperation(op, resolveOperandValue, profiledCmpValue);
+}
+
+static std::vector<int>
+getCurrentWaveformForIteration(const std::shared_ptr<DataBase> &nodeData,
+                               unsigned iter) {
+  if (!nodeData)
+    return {0};
+
+  auto glitchIt = nodeData->glitchDataOutByIter.find(iter);
+  if (glitchIt != nodeData->glitchDataOutByIter.end() &&
+      !glitchIt->second.empty())
+    return glitchIt->second;
+
+  if (std::optional<int> stableValue =
+          getCurrentDataOutValueAtOrBeforeStrict(nodeData, iter))
+    return {*stableValue};
+
+  return {0};
+}
+
+static std::optional<std::vector<int>>
+evaluateNodeWaveformFromCurrentSources(SwitchingInfo &switchInfo,
+                                       const std::string &executedSeg,
+                                       const std::string &nodeName,
+                                       unsigned iter) {
+  auto graphIt = switchInfo.staticInfo.segToGraph.find(executedSeg);
+  if (graphIt == switchInfo.staticInfo.segToGraph.end() || !graphIt->second)
+    return std::nullopt;
+
+  auto nodeIt = graphIt->second->nodes.find(nodeName);
+  if (nodeIt == graphIt->second->nodes.end() || !nodeIt->second ||
+      !nodeIt->second->op)
+    return std::nullopt;
+
+  std::vector<std::vector<int>> operandWaveforms;
+  operandWaveforms.reserve(nodeIt->second->pres.size());
+
+  for (const auto &preNode : nodeIt->second->pres) {
+    std::string srcNode =
+        segNodeDataSrcSearch(switchInfo, preNode, graphIt->second.get());
+    if (srcNode.empty()) {
+      operandWaveforms.push_back({0});
+      continue;
+    }
+
+    auto srcIt = switchInfo.dataInfo.nodeToDataState.find(srcNode);
+    if (srcIt == switchInfo.dataInfo.nodeToDataState.end() || !srcIt->second) {
+      operandWaveforms.push_back({0});
+      continue;
+    }
+
+    operandWaveforms.push_back(getCurrentWaveformForIteration(srcIt->second, iter));
+  }
+
+  if (operandWaveforms.empty())
+    return std::nullopt;
+
+  size_t eventCount = 1;
+  for (const auto &waveform : operandWaveforms)
+    eventCount = std::max(eventCount, waveform.size());
+
+  std::vector<int> outputWaveform;
+  outputWaveform.reserve(eventCount);
+
+  for (size_t eventIdx = 0; eventIdx < eventCount; ++eventIdx) {
+    auto resolveOperandValue = [&](unsigned operandIdx) -> int {
+      if (operandIdx >= operandWaveforms.size() ||
+          operandWaveforms[operandIdx].empty())
+        return 0;
+
+      const auto &waveform = operandWaveforms[operandIdx];
+      const size_t sampleIdx = std::min(eventIdx, waveform.size() - 1);
+      return waveform[sampleIdx];
+    };
+
+    std::optional<int> value =
+        evaluateNodeOperation(nodeIt->second->op, resolveOperandValue);
+    if (!value.has_value())
+      return std::nullopt;
+    outputWaveform.push_back(*value);
+  }
+
+  dedupConsecutiveValues(outputWaveform);
+  return outputWaveform;
+}
+
+static bool shouldRunGlitchUpdateSegment(const std::string &seg);
+
+static std::string
+findPreferredSegmentForNode(const SwitchingInfo &switchInfo,
+                            const std::string &nodeName) {
+  auto nodeIt = switchInfo.staticInfo.dataflowGraph->nodes.find(nodeName);
+  if (nodeIt == switchInfo.staticInfo.dataflowGraph->nodes.end() ||
+      !nodeIt->second)
+    return "";
+
+  const unsigned bbIndex = nodeIt->second->bbindex;
+  std::string bestSeg;
+  size_t bestBBCount = std::numeric_limits<size_t>::max();
+
+  for (const auto &[segLabelRef, bbList] : switchInfo.staticInfo.segToBBs) {
+    const std::string segLabel = segLabelRef.str();
+    if (!shouldRunGlitchUpdateSegment(segLabel) ||
+        !containsValue(bbList, bbIndex))
+      continue;
+
+    auto segGraphIt = switchInfo.staticInfo.segToGraph.find(segLabel);
+    if (segGraphIt == switchInfo.staticInfo.segToGraph.end() ||
+        !segGraphIt->second ||
+        !contains(segGraphIt->second->nodes, nodeName))
+      continue;
+
+    if (bbList.size() < bestBBCount) {
+      bestSeg = segLabel;
+      bestBBCount = bbList.size();
+    }
+  }
+
+  return bestSeg;
+}
+
+static bool hasCurrentIterationEvent(const std::shared_ptr<DataBase> &nodeData,
+                                     unsigned iter) {
+  if (!nodeData)
+    return false;
+
+  if (contains(nodeData->originalDataOut, iter))
+    return true;
+
+  auto glitchIt = nodeData->glitchDataOutByIter.find(iter);
+  return glitchIt != nodeData->glitchDataOutByIter.end() &&
+         !glitchIt->second.empty();
+}
+
+static bool shouldReplayCrossSegmentCombinationalNode(
+    const SwitchingInfo &switchInfo, const std::string &ownerSeg,
+    const std::string &nodeName) {
+  if (ownerSeg.empty() || contains(nodeName, "constant") ||
+      contains(nodeName, "source") || contains(nodeName, "load") ||
+      contains(nodeName, "buffer") || contains(nodeName, "mux") ||
+      contains(nodeName, "control_merge"))
+    return false;
+
+  auto segGraphIt = switchInfo.staticInfo.segToGraph.find(ownerSeg);
+  if (segGraphIt == switchInfo.staticInfo.segToGraph.end() ||
+      !segGraphIt->second)
+    return false;
+
+  auto graphNodeIt = segGraphIt->second->nodes.find(nodeName);
+  if (graphNodeIt == segGraphIt->second->nodes.end() || !graphNodeIt->second ||
+      !graphNodeIt->second->op)
+    return false;
+
+  if (isa<handshake::CmpIOp>(graphNodeIt->second->op))
+    return false;
+
+  auto glitchSegIt = switchInfo.dataInfo.glitches.find(ownerSeg);
+  if (glitchSegIt != switchInfo.dataInfo.glitches.end() &&
+      contains(glitchSegIt->second, nodeName))
+    return false;
+
+  return true;
+}
+
+static bool nodeHasOperandEventAtIter(SwitchingInfo &switchInfo,
+                                      const std::string &ownerSeg,
+                                      const std::string &nodeName,
+                                      unsigned iter) {
+  auto segGraphIt = switchInfo.staticInfo.segToGraph.find(ownerSeg);
+  if (segGraphIt == switchInfo.staticInfo.segToGraph.end() ||
+      !segGraphIt->second)
+    return false;
+
+  auto graphNodeIt = segGraphIt->second->nodes.find(nodeName);
+  if (graphNodeIt == segGraphIt->second->nodes.end() || !graphNodeIt->second)
+    return false;
+
+  bool sawDynamicOperand = false;
+  bool sawWaveformOperand = false;
+
+  for (const auto &preNode : graphNodeIt->second->pres) {
+    std::string srcNode =
+        segNodeDataSrcSearch(switchInfo, preNode, segGraphIt->second.get());
+    if (srcNode.empty())
+      continue;
+
+    if (contains(srcNode, "constant") || contains(srcNode, "source") ||
+        contains(srcNode, "start"))
+      continue;
+
+    sawDynamicOperand = true;
+
+    auto srcStateIt = switchInfo.dataInfo.nodeToDataState.find(srcNode);
+    if (srcStateIt == switchInfo.dataInfo.nodeToDataState.end() ||
+        !srcStateIt->second)
+      return false;
+
+    if (!hasCurrentIterationEvent(srcStateIt->second, iter))
+      return false;
+
+    auto glitchIt = srcStateIt->second->glitchDataOutByIter.find(iter);
+    if (glitchIt != srcStateIt->second->glitchDataOutByIter.end() &&
+        glitchIt->second.size() > 1)
+      sawWaveformOperand = true;
+  }
+
+  return sawDynamicOperand && sawWaveformOperand;
+}
+
+static void replayCrossSegmentCombinationalWaveforms(
+    SwitchingInfo &switchInfo, unsigned iter, const std::string &executedSeg,
+    bool debug) {
+  for (const auto &nodeName :
+       switchInfo.staticInfo.dataflowGraph->orderedNodeName) {
+    const std::string ownerSeg = findPreferredSegmentForNode(switchInfo, nodeName);
+    if (ownerSeg.empty() || ownerSeg == executedSeg)
+      continue;
+
+    if (!shouldReplayCrossSegmentCombinationalNode(switchInfo, ownerSeg,
+                                                   nodeName) ||
+        !nodeHasOperandEventAtIter(switchInfo, ownerSeg, nodeName, iter))
+      continue;
+
+    std::optional<std::vector<int>> waveform =
+        evaluateNodeWaveformFromCurrentSources(switchInfo, ownerSeg, nodeName,
+                                               iter);
+    if (!waveform.has_value() || waveform->empty())
+      continue;
+
+    auto stateIt = switchInfo.dataInfo.nodeToDataState.find(nodeName);
+    if (stateIt == switchInfo.dataInfo.nodeToDataState.end() || !stateIt->second)
+      continue;
+
+    if (contains(stateIt->second->glitchDataOutByIter, iter) &&
+        stateIt->second->glitchDataOutByIter[iter] == *waveform)
+      continue;
+
+    stateIt->second->glitchDataOutByIter[iter] = *waveform;
+    stateIt->second->lastUpdateIndex = iter;
+
+    if (debug) {
+      switchingDebugStream(SwitchingDebugCategory::Data)
+          << "[DEBUG] \t\t[CROSS_SEG_COMB] iter=" << iter
+          << " owner-seg=" << ownerSeg << " node=" << nodeName
+          << " waveform=" << formatIntVector(*waveform) << "\n";
+    }
+  }
+}
+
 static bool shouldRunGlitchUpdateSegment(const std::string &seg) {
   return !(contains(seg, "S") || contains(seg, "E") || contains(seg, "T"));
 }
@@ -1153,8 +1859,19 @@ updateALUGlitchValuesForSegment(SwitchingInfo &switchInfo,
         // If this is the last iteration, we ignore the glitching value,
         // just copy the original value
         if (iter == segExecTrace.size() - 1) {
-          int finalValue = getDataOutValueAtOrBefore(
-              switchInfo.dataInfo.nodeToDataState[selNode], iter, 0);
+          int finalValue =
+              evaluateNodeWaveformFromCurrentSources(switchInfo, executedSeg,
+                                                     selNode, iter)
+                  .value_or(std::vector<int>{})
+                  .empty()
+                  ? evaluateNodeFromCurrentSources(switchInfo, executedSeg,
+                                                   selNode, iter)
+                        .value_or(getDataOutValueAtOrBefore(
+                            switchInfo.dataInfo.nodeToDataState[selNode], iter,
+                            0))
+                  : evaluateNodeWaveformFromCurrentSources(
+                        switchInfo, executedSeg, selNode, iter)
+                        ->back();
           //! Testing
           if (debug) {
 
@@ -1205,9 +1922,9 @@ updateALUGlitchValuesForSegment(SwitchingInfo &switchInfo,
             if (contains(switchInfo.dataInfo.nodeToDataState[fasterNode]
                              ->originalDataOut,
                          op1PreIndex)) {
-              op1 = switchInfo.dataInfo.nodeToDataState[fasterNode]
-                        ->originalDataOut[op1PreIndex]
-                        .value;
+              op1 = getCurrentDataOutValueAtOrBefore(
+                  switchInfo.dataInfo.nodeToDataState[fasterNode], op1PreIndex,
+                  0);
             } else {
               op1 = 0;
             }
@@ -1225,9 +1942,9 @@ updateALUGlitchValuesForSegment(SwitchingInfo &switchInfo,
               }
               op2 = 0;
             } else {
-              op2 = switchInfo.dataInfo.nodeToDataState[slowerNode]
-                        ->originalDataOut[op2PreIndex]
-                        .value;
+              op2 = getCurrentDataOutValueAtOrBefore(
+                  switchInfo.dataInfo.nodeToDataState[slowerNode], op2PreIndex,
+                  0);
             }
 
             tmpValue.push_back(calGlitchValue(op1, op2, selNode));
@@ -1264,9 +1981,9 @@ updateALUGlitchValuesForSegment(SwitchingInfo &switchInfo,
             if (contains(switchInfo.dataInfo.nodeToDataState[fasterNode]
                              ->originalDataOut,
                          op1PreIndex)) {
-              op1 = switchInfo.dataInfo.nodeToDataState[fasterNode]
-                        ->originalDataOut[op1PreIndex]
-                        .value;
+              op1 = getCurrentDataOutValueAtOrBefore(
+                  switchInfo.dataInfo.nodeToDataState[fasterNode], op1PreIndex,
+                  0);
             }
           } else if (contains(fasterNode, "mux")) {
             // Check whether the source of mux node is the selected node
@@ -1281,11 +1998,11 @@ updateALUGlitchValuesForSegment(SwitchingInfo &switchInfo,
                             op1PreIndex)) {
                 op1 = 0;
               } else
-                op1 = switchInfo.dataInfo.nodeToDataState[fasterNode]
-                          ->originalDataOut[op1PreIndex]
-                          .value;
+                op1 = getCurrentDataOutValueAtOrBefore(
+                    switchInfo.dataInfo.nodeToDataState[fasterNode],
+                    op1PreIndex, 0);
             } else {
-              op1 = getDataOutValueAtOrBefore(
+              op1 = getCurrentDataOutValueAtOrBefore(
                   switchInfo.dataInfo.nodeToDataState[fasterNode], iter, 0);
             }
           } else if (contains(switchInfo.dataInfo.glitches[executedSeg],
@@ -1294,7 +2011,7 @@ updateALUGlitchValuesForSegment(SwitchingInfo &switchInfo,
             // is buffered or not
             if (srcBufferedDict[fasterNode]) {
               // Buffered
-              op1 = getDataOutValueAtOrBefore(
+              op1 = getCurrentDataOutValueAtOrBefore(
                   switchInfo.dataInfo.nodeToDataState[fasterNode], iter, 0);
             } else {
               auto &glitchvec = switchInfo.dataInfo.nodeToDataState[fasterNode]
@@ -1309,13 +2026,13 @@ updateALUGlitchValuesForSegment(SwitchingInfo &switchInfo,
                 op1 = glitchvec.back();
               } else { // only one glitch value – use it
                 llvm::errs() << "[ERROR] Use original dataout\n";
-                op1 = getDataOutValueAtOrBefore(
+                op1 = getCurrentDataOutValueAtOrBefore(
                     switchInfo.dataInfo.nodeToDataState[fasterNode], iter,
                     0); // no glitches recorded
               }
             }
           } else {
-            op1 = getDataOutValueAtOrBefore(
+            op1 = getCurrentDataOutValueAtOrBefore(
                 switchInfo.dataInfo.nodeToDataState[fasterNode], iter, 0);
           }
 
@@ -1323,11 +2040,11 @@ updateALUGlitchValuesForSegment(SwitchingInfo &switchInfo,
           if (contains(switchInfo.dataInfo.nodeToDataState[slowerNode]
                            ->originalDataOut,
                        op2PreIndex)) {
-            op2 = switchInfo.dataInfo.nodeToDataState[slowerNode]
-                      ->originalDataOut[op2PreIndex]
-                      .value;
+            op2 = getCurrentDataOutValueAtOrBefore(
+                switchInfo.dataInfo.nodeToDataState[slowerNode], op2PreIndex,
+                0);
           } else {
-            op2 = getDataOutValueAtOrBefore(
+            op2 = getCurrentDataOutValueAtOrBefore(
                 switchInfo.dataInfo.nodeToDataState[slowerNode], iter, 0);
           }
 
@@ -1364,22 +2081,22 @@ updateALUGlitchValuesForSegment(SwitchingInfo &switchInfo,
                             op1PreIndex)) {
                 op1 = 0;
               } else {
-                op1 = switchInfo.dataInfo.nodeToDataState[fasterNode]
-                          ->originalDataOut[op1PreIndex]
-                          .value;
+                op1 = getCurrentDataOutValueAtOrBefore(
+                    switchInfo.dataInfo.nodeToDataState[fasterNode],
+                    op1PreIndex, 0);
               }
             } else {
-              getDataOutValueAtOrBefore(
+              op1 = getCurrentDataOutValueAtOrBefore(
                   switchInfo.dataInfo.nodeToDataState[fasterNode], iter, 0);
             }
           } else {
-            op1 = getDataOutValueAtOrBefore(
+            op1 = getCurrentDataOutValueAtOrBefore(
                 switchInfo.dataInfo.nodeToDataState[fasterNode], iter, 0);
           }
 
           // Check whether the slower node is a mux node
           // TODO: Check the condition below
-          op2 = getDataOutValueAtOrBefore(
+          op2 = getCurrentDataOutValueAtOrBefore(
               switchInfo.dataInfo.nodeToDataState[slowerNode], iter, 0);
 
           tmpValue.push_back(calGlitchValue(op1, op2, selNode));
@@ -1395,14 +2112,26 @@ updateALUGlitchValuesForSegment(SwitchingInfo &switchInfo,
           }
         }
       } else {
-        tmpValue.push_back(getDataOutValueAtOrBefore(
-            switchInfo.dataInfo.nodeToDataState[selNode], iter, 0));
+        tmpValue.push_back(
+            evaluateNodeFromCurrentSources(switchInfo, executedSeg, selNode,
+                                           iter)
+                .value_or(getDataOutValueAtOrBefore(
+                    switchInfo.dataInfo.nodeToDataState[selNode], iter, 0)));
       }
     } else {
       // No neeed for glitch value calculation, we directly copy the ori
       // data
-      tmpValue.push_back(getDataOutValueAtOrBefore(
-          switchInfo.dataInfo.nodeToDataState[selNode], iter, 0));
+      if (std::optional<std::vector<int>> waveform =
+              evaluateNodeWaveformFromCurrentSources(switchInfo, executedSeg,
+                                                     selNode, iter)) {
+        tmpValue = *waveform;
+      } else {
+        tmpValue.push_back(
+            evaluateNodeFromCurrentSources(switchInfo, executedSeg, selNode,
+                                           iter)
+                .value_or(getDataOutValueAtOrBefore(
+                    switchInfo.dataInfo.nodeToDataState[selNode], iter, 0)));
+      }
     }
     dedupConsecutiveValues(tmpValue);
 
@@ -1415,155 +2144,266 @@ updateALUGlitchValuesForSegment(SwitchingInfo &switchInfo,
 static void appendMuxValuesForCond(
     SwitchingInfo &switchInfo, const std::string &executedSeg, unsigned iter,
     const std::string &selMuxNode,
-    const std::map<std::string, std::string> &muxSrcMap, int muxCondValue,
-    bool glitchUpdateFlag, bool debug, std::vector<int> &outValues) {
+    const std::map<std::string, std::string> &muxSrcMap,
+    std::optional<int> muxCondValue, bool glitchUpdateFlag, bool debug,
+    std::vector<int> &outValues) {
   const size_t oldOutSize = outValues.size();
   std::string resolveCase = "unresolved";
   std::string selDataSrcNode = "";
-  auto dataSrcIt = muxSrcMap.find(std::to_string(muxCondValue));
-  if (dataSrcIt != muxSrcMap.end())
-    selDataSrcNode = dataSrcIt->second;
 
-  // TODO: Validate the following indexing mechanism
-  // Check whether we have glitches from the srcs or not
-  bool validDataSrcNode =
-      !selDataSrcNode.empty() &&
-      contains(switchInfo.dataInfo.nodeToDataState, selDataSrcNode) &&
-      switchInfo.dataInfo.nodeToDataState[selDataSrcNode];
-
-  if (!validDataSrcNode) {
-    llvm::errs() << "[WARNING] Invalid data source \"" << selDataSrcNode
-                 << "\" for mux node " << selMuxNode << " at iter " << iter
-                 << ", using 0\n";
+  if (!muxCondValue.has_value()) {
     outValues.push_back(0);
-    resolveCase = "invalid_src_default_0";
-  } else if (contains(selDataSrcNode, "constant") ||
-             contains(selDataSrcNode, "source") ||
-             contains(selDataSrcNode, "start")) {
-    int constantLikeValue = switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
-                                ->originalDataOut[0]
-                                .value;
-
-    outValues.push_back(constantLikeValue);
-    resolveCase = "constant_like";
-  } else if (selDataSrcNode == selMuxNode) {
-    // The src node is the selected node itself
-    unsigned preIndex =
-        switchInfo.dataInfo.nodeToDataState[selDataSrcNode]->lastUpdateIndex;
-
-    // Check whether the preIndex exists or not
-    if (contains(switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
-                     ->originalDataOut,
-                 preIndex)) {
-      int selfValue = switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
-                          ->originalDataOut[preIndex]
-                          .value;
-
-      outValues.push_back(selfValue);
-      resolveCase = "self_feedback_last_update";
-    } else {
-      outValues.push_back(0);
-      resolveCase = "self_feedback_missing_last_update_default_0";
-    }
-  } else if (glitchUpdateFlag &&
-             (contains(switchInfo.dataInfo.glitches[executedSeg],
-                       selDataSrcNode))) {
-    // Check whether there are buffers in between
-    std::string preNode = "";
-    auto selMuxNodeStructure = dyn_cast<MuxNode>(
-        switchInfo.staticInfo.dataflowGraph->nodes[selMuxNode].get());
-
-    // Get the actual preNode
-    // TODO: Need to check the portidx to name mapping
-    for (const auto &[nodeName, portIdx] :
-         selMuxNodeStructure->preNameToPortIdxMap) {
-      //* Here we need to do cond + 1, as the port map of muxnode assigns
-      // 0 to its control input.
-      const unsigned int cond_add1 = static_cast<unsigned>(muxCondValue + 1);
-      if (portIdx == (cond_add1))
-        preNode = nodeName;
-    }
-
-    bool bufferedFlag = false;
-    auto segSucIt = switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
-                        ->segmentSuccessorInfoMap.find(executedSeg);
-    if (segSucIt != switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
-                        ->segmentSuccessorInfoMap.end() &&
-        containsValue(segSucIt->second.original, preNode))
-      bufferedFlag = true;
-
-    //! Testing
-    if (debug) {
-      switchingDebugStream(SwitchingDebugCategory::Data) << "\t\tCur src node has glitches, buffered: "
-                   << bufferedFlag << "\n";
-    }
-
-    if (bufferedFlag) {
-      // Src glitching but buffered
-      int bufferedValue = getDataOutValueAtOrBefore(
-          switchInfo.dataInfo.nodeToDataState[selDataSrcNode], iter, 0);
-
-      outValues.push_back(bufferedValue);
-      resolveCase = "glitch_src_buffered_stable";
-    } else {
-      auto &glitchValues = switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
-                               ->glitchDataOutByIter[iter];
-
-      outValues.insert(outValues.end(), glitchValues.begin(),
-                       glitchValues.end());
-      resolveCase = "glitch_src_event_list";
-    }
-  } else if (glitchUpdateFlag && contains(selDataSrcNode, "mux")) {
-    // Cascaded mux source: reuse upstream mux event output when
-    // available.
-    std::string preNode = "";
-    auto selMuxNodeStructure = dyn_cast<MuxNode>(
-        switchInfo.staticInfo.dataflowGraph->nodes[selMuxNode].get());
-    for (const auto &[nodeName, portIdx] :
-         selMuxNodeStructure->preNameToPortIdxMap) {
-      const unsigned int condAdd1 = static_cast<unsigned>(muxCondValue + 1);
-      if (portIdx == condAdd1)
-        preNode = nodeName;
-    }
-
-    bool bufferedFlag = false;
-    auto segSucIt = switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
-                        ->segmentSuccessorInfoMap.find(executedSeg);
-    if (segSucIt != switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
-                        ->segmentSuccessorInfoMap.end() &&
-        containsValue(segSucIt->second.original, preNode))
-      bufferedFlag = true;
-
-    auto glitchIt = switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
-                        ->glitchDataOutByIter.find(iter);
-    if (bufferedFlag ||
-        glitchIt == switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
-                        ->glitchDataOutByIter.end() ||
-        glitchIt->second.empty()) {
-      int cascadedStableValue = getDataOutValueAtOrBefore(
-          switchInfo.dataInfo.nodeToDataState[selDataSrcNode], iter, 0);
-
-      outValues.push_back(cascadedStableValue);
-      resolveCase = "cascaded_mux_stable";
-    } else {
-      outValues.insert(outValues.end(), glitchIt->second.begin(),
-                       glitchIt->second.end());
-      resolveCase = "cascaded_mux_event_list";
-    }
+    resolveCase = "inactive_no_control_default_0";
   } else {
-    // Handling special case for cascaded Muxes
-    int stableValue = getDataOutValueAtOrBefore(
-        switchInfo.dataInfo.nodeToDataState[selDataSrcNode], iter, 0);
+    const int resolvedCond = *muxCondValue;
+    selDataSrcNode =
+        getMuxReplayDataSrcNode(switchInfo, selMuxNode, resolvedCond);
+    const bool selectedInputHasCurrentEvent =
+        muxImmediateInputHasCurrentEvent(switchInfo, selMuxNode, resolvedCond,
+                                         iter);
+    const bool selectedInputAllowsHeld =
+        muxImmediateInputAllowsHeldToken(switchInfo, selMuxNode, resolvedCond);
 
-    outValues.push_back(stableValue);
-    resolveCase = "stable_source";
+    // TODO: Validate the following indexing mechanism
+    // Check whether we have glitches from the srcs or not
+    bool validDataSrcNode =
+        !selDataSrcNode.empty() &&
+        contains(switchInfo.dataInfo.nodeToDataState, selDataSrcNode) &&
+        switchInfo.dataInfo.nodeToDataState[selDataSrcNode];
+
+    if (!validDataSrcNode) {
+      llvm::errs() << "[WARNING] Invalid data source \"" << selDataSrcNode
+                   << "\" for mux node " << selMuxNode << " at iter " << iter
+                   << ", using 0\n";
+      outValues.push_back(0);
+      resolveCase = "invalid_src_default_0";
+    } else if (!muxSelectedInputIsValid(switchInfo, selMuxNode, resolvedCond,
+                                        iter)) {
+      outValues.push_back(0);
+      resolveCase = "selected_input_invalid_default_0";
+    } else if (contains(selDataSrcNode, "constant") ||
+               contains(selDataSrcNode, "source") ||
+               contains(selDataSrcNode, "start")) {
+      int constantLikeValue = switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
+                                  ->originalDataOut[0]
+                                  .value;
+
+      outValues.push_back(constantLikeValue);
+      resolveCase = "constant_like";
+    } else if (selDataSrcNode == selMuxNode) {
+      // The src node is the selected node itself
+      unsigned preIndex =
+          switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
+              ->lastUpdateIndex;
+
+      // Check whether the preIndex exists or not
+      if (contains(switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
+                       ->originalDataOut,
+                   preIndex)) {
+        int selfValue =
+            switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
+                            ->originalDataOut[preIndex]
+                            .value;
+
+        outValues.push_back(selfValue);
+        resolveCase = "self_feedback_last_update";
+      } else {
+        outValues.push_back(0);
+        resolveCase = "self_feedback_missing_last_update_default_0";
+      }
+    } else if (glitchUpdateFlag &&
+               (contains(switchInfo.dataInfo.glitches[executedSeg],
+                         selDataSrcNode))) {
+      // Check whether there are buffers in between
+      std::string preNode = "";
+      auto selMuxNodeStructure = dyn_cast<MuxNode>(
+          switchInfo.staticInfo.dataflowGraph->nodes[selMuxNode].get());
+
+      // Get the actual preNode
+      // TODO: Need to check the portidx to name mapping
+      for (const auto &[nodeName, portIdx] :
+           selMuxNodeStructure->preNameToPortIdxMap) {
+        //* Here we need to do cond + 1, as the port map of muxnode assigns
+        // 0 to its control input.
+        const unsigned int cond_add1 =
+            static_cast<unsigned>(resolvedCond + 1);
+        if (portIdx == (cond_add1))
+          preNode = nodeName;
+      }
+
+      bool bufferedFlag = false;
+      auto segSucIt = switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
+                          ->segmentSuccessorInfoMap.find(executedSeg);
+      if (segSucIt != switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
+                          ->segmentSuccessorInfoMap.end() &&
+          containsValue(segSucIt->second.original, preNode))
+        bufferedFlag = true;
+
+      //! Testing
+      if (debug) {
+        switchingDebugStream(SwitchingDebugCategory::Data) << "\t\tCur src node has glitches, buffered: "
+                     << bufferedFlag << "\n";
+      }
+
+      if (bufferedFlag) {
+        // The new mux semantics only force zero when the select token is
+        // absent. Once a select token is present, buffered feedback paths keep
+        // driving their held payload until they are overwritten.
+        if (std::optional<int> bufferedValue = getCurrentDataOutValueIfPresent(
+                switchInfo.dataInfo.nodeToDataState[selDataSrcNode],
+                iter)) {
+          outValues.push_back(*bufferedValue);
+          resolveCase = "glitch_src_buffered_current";
+        } else if (std::optional<int> heldValue =
+                       muxSourceAllowsHeldFallback(
+                           switchInfo, selMuxNode, resolvedCond, selDataSrcNode)
+                           ? getCurrentDataOutValueAtOrBeforeStrict(
+                                 switchInfo.dataInfo
+                                     .nodeToDataState[selDataSrcNode],
+                                 iter)
+                           : std::nullopt) {
+          outValues.push_back(*heldValue);
+          resolveCase = "glitch_src_buffered_held";
+        } else {
+          outValues.push_back(0);
+          resolveCase = "glitch_src_buffered_no_value_default_0";
+        }
+      } else {
+        auto glitchIt = switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
+                            ->glitchDataOutByIter.find(iter);
+        if (glitchIt !=
+                switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
+                             ->glitchDataOutByIter.end() &&
+            !glitchIt->second.empty()) {
+          outValues.insert(outValues.end(), glitchIt->second.begin(),
+                           glitchIt->second.end());
+          resolveCase = "glitch_src_event_list";
+        } else if (std::optional<int> stableValue =
+                       getCurrentDataOutValueIfPresent(
+                           switchInfo.dataInfo.nodeToDataState[selDataSrcNode],
+                           iter)) {
+          outValues.push_back(*stableValue);
+          resolveCase = "glitch_src_current";
+        } else if (std::optional<int> heldValue =
+                       muxSourceAllowsHeldFallback(
+                           switchInfo, selMuxNode, resolvedCond, selDataSrcNode)
+                           ? getCurrentDataOutValueAtOrBeforeStrict(
+                                 switchInfo.dataInfo.nodeToDataState[selDataSrcNode],
+                                 iter)
+                           : std::nullopt) {
+          outValues.push_back(*heldValue);
+          resolveCase = "glitch_src_held";
+        } else {
+          outValues.push_back(0);
+          resolveCase = "glitch_src_no_value_default_0";
+        }
+      }
+    } else if (glitchUpdateFlag && contains(selDataSrcNode, "mux")) {
+      // Cascaded mux source: reuse upstream mux event output when
+      // available.
+      std::string preNode = "";
+      auto selMuxNodeStructure = dyn_cast<MuxNode>(
+          switchInfo.staticInfo.dataflowGraph->nodes[selMuxNode].get());
+      for (const auto &[nodeName, portIdx] :
+           selMuxNodeStructure->preNameToPortIdxMap) {
+        const unsigned int condAdd1 = static_cast<unsigned>(resolvedCond + 1);
+        if (portIdx == condAdd1)
+          preNode = nodeName;
+      }
+
+      bool bufferedFlag = false;
+      auto segSucIt = switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
+                          ->segmentSuccessorInfoMap.find(executedSeg);
+      if (segSucIt != switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
+                          ->segmentSuccessorInfoMap.end() &&
+          containsValue(segSucIt->second.original, preNode))
+        bufferedFlag = true;
+
+      auto glitchIt = switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
+                          ->glitchDataOutByIter.find(iter);
+      if (std::optional<int> cascadedValue = getCurrentDataOutValueIfPresent(
+              switchInfo.dataInfo.nodeToDataState[selDataSrcNode], iter)) {
+        outValues.push_back(*cascadedValue);
+        resolveCase = bufferedFlag ? "cascaded_mux_buffered_current"
+                                   : "cascaded_mux_current";
+      } else if (!bufferedFlag &&
+                 glitchIt != switchInfo.dataInfo.nodeToDataState[selDataSrcNode]
+                                 ->glitchDataOutByIter.end() &&
+                 !glitchIt->second.empty()) {
+        outValues.insert(outValues.end(), glitchIt->second.begin(),
+                         glitchIt->second.end());
+        resolveCase = "cascaded_mux_event_list";
+      } else if (std::optional<int> heldValue =
+                     muxSourceAllowsHeldFallback(switchInfo, selMuxNode,
+                                                 resolvedCond, selDataSrcNode)
+                         ? getCurrentDataOutValueAtOrBeforeStrict(
+                               switchInfo.dataInfo.nodeToDataState[selDataSrcNode],
+                               iter)
+                         : std::nullopt) {
+        outValues.push_back(*heldValue);
+        resolveCase = bufferedFlag ? "cascaded_mux_buffered_held"
+                                   : "cascaded_mux_held";
+      } else {
+        outValues.push_back(0);
+        resolveCase = bufferedFlag
+                          ? "cascaded_mux_buffered_no_value_default_0"
+                          : "cascaded_mux_no_value_default_0";
+      }
+    } else {
+      std::optional<int> stableValue =
+          selectedInputHasCurrentEvent
+              ? getCurrentDataOutValueIfPresent(
+                    switchInfo.dataInfo.nodeToDataState[selDataSrcNode], iter)
+              : std::nullopt;
+      if (stableValue.has_value()) {
+        outValues.push_back(*stableValue);
+        resolveCase = "current_source";
+      } else {
+        std::optional<int> heldValue =
+            (selectedInputHasCurrentEvent || selectedInputAllowsHeld)
+                ? getCurrentDataOutValueAtOrBeforeStrict(
+                      switchInfo.dataInfo.nodeToDataState[selDataSrcNode], iter)
+                : std::nullopt;
+        if (heldValue.has_value()) {
+          outValues.push_back(*heldValue);
+          resolveCase =
+              selectedInputHasCurrentEvent ? "current_event_held_source"
+                                           : "held_source";
+        } else {
+          outValues.push_back(0);
+          resolveCase = "source_no_live_token_default_0";
+        }
+      }
+    }
   }
 
   std::vector<int> appendedValues(outValues.begin() + oldOutSize,
                                   outValues.end());
   switchingDebugStream(SwitchingDebugCategory::Mux) << "[MUX_TRACE][GLITCH] iter=" << iter << " seg=" << executedSeg
-               << " mux=" << selMuxNode << " cond=" << muxCondValue << " src="
+               << " mux=" << selMuxNode << " cond=";
+  if (muxCondValue.has_value())
+    switchingDebugStream(SwitchingDebugCategory::Mux) << *muxCondValue;
+  else
+    switchingDebugStream(SwitchingDebugCategory::Mux) << "<inactive>";
+  switchingDebugStream(SwitchingDebugCategory::Mux) << " src="
                << (selDataSrcNode.empty() ? "<empty>" : selDataSrcNode)
+               << " immediate="
+               << (muxCondValue.has_value()
+                       ? getMuxImmediateInputNode(switchInfo, selMuxNode,
+                                                  *muxCondValue)
+                       : std::string("<inactive>"))
+               << " fresh="
+               << (muxCondValue.has_value() &&
+                           muxImmediateInputHasCurrentEvent(
+                               switchInfo, selMuxNode, *muxCondValue, iter)
+                       ? "yes"
+                       : "no")
+               << " holds="
+               << (muxCondValue.has_value() &&
+                           muxImmediateInputAllowsHeldToken(
+                               switchInfo, selMuxNode, *muxCondValue)
+                       ? "yes"
+                       : "no")
                << " resolve=" << resolveCase
                << " appended=" << formatIntVector(appendedValues) << "\n";
 }
@@ -1577,6 +2417,7 @@ static void updateMuxGlitchValuesForSegment(SwitchingInfo &switchInfo,
   // ====================================================================
   const auto &activeMuxNodes =
       switchInfo.dataInfo.segmentControlNodes[executedSeg].muxNodes;
+  const unsigned segII = getSegmentII(switchInfo, executedSeg);
   // For each mux node in the executed segment, we update its value
   for (const auto &selMuxNode : activeMuxNodes) {
     auto muxSrcIt =
@@ -1589,20 +2430,24 @@ static void updateMuxGlitchValuesForSegment(SwitchingInfo &switchInfo,
     if (controlIt != muxSrcIt->second.end())
       selCondInputNode = controlIt->second;
 
-    int condValue = 0;
+    std::optional<int> condValue;
     if (!selCondInputNode.empty() &&
         contains(switchInfo.dataInfo.nodeToDataState, selCondInputNode)) {
       if (auto *tmpCMBaseNode = dyn_cast<CMergeData>(
               switchInfo.dataInfo.nodeToDataState[selCondInputNode].get()))
-        condValue = tmpCMBaseNode->getControlOutput(iter);
+        condValue = tmpCMBaseNode->getControlOutputIfPresent(iter);
     }
     switchingDebugStream(SwitchingDebugCategory::Mux) << "[MUX_TRACE][GLITCH] iter=" << iter
                  << " seg=" << executedSeg << " mux=" << selMuxNode
                  << " cond_node="
                  << (selCondInputNode.empty() ? "<empty>" : selCondInputNode)
-                 << " cond=" << condValue
-                 << " glitch_mode=" << (glitchUpdateFlag ? "on" : "off")
-                 << "\n";
+                 << " cond=";
+    if (condValue.has_value())
+      switchingDebugStream(SwitchingDebugCategory::Mux) << *condValue;
+    else
+      switchingDebugStream(SwitchingDebugCategory::Mux) << "<inactive>";
+    switchingDebugStream(SwitchingDebugCategory::Mux)
+        << " glitch_mode=" << (glitchUpdateFlag ? "on" : "off") << "\n";
 
     // Temp Value vector definition
     std::vector<int> preValue, curValue, nexValue;
@@ -1610,20 +2455,42 @@ static void updateMuxGlitchValuesForSegment(SwitchingInfo &switchInfo,
     //! Testing
     if (debug) {
       std::string selDataSrcNode = "";
-      auto dataSrcIt = muxSrcIt->second.find(std::to_string(condValue));
-      if (dataSrcIt != muxSrcIt->second.end())
-        selDataSrcNode = dataSrcIt->second;
+      if (condValue.has_value()) {
+        auto dataSrcIt = muxSrcIt->second.find(std::to_string(*condValue));
+        if (dataSrcIt != muxSrcIt->second.end())
+          selDataSrcNode = dataSrcIt->second;
+      }
 
       switchingDebugStream(SwitchingDebugCategory::Data) << "Mux Node: " << selMuxNode << "\n"
                    << "\t[CUR_VALUE]\n"
                    << "\t\tCond Node: " << selCondInputNode << "\n"
-                   << "\t\tCond_value: " << condValue << "\n"
-                   << "\t\tCur data src: " << selDataSrcNode << "\n";
+                   << "\t\tCond_value: ";
+      if (condValue.has_value())
+        switchingDebugStream(SwitchingDebugCategory::Data) << *condValue;
+      else
+        switchingDebugStream(SwitchingDebugCategory::Data) << "<inactive>";
+      switchingDebugStream(SwitchingDebugCategory::Data)
+          << "\n"
+          << "\t\tCur data src: " << selDataSrcNode << "\n";
     }
 
-    appendMuxValuesForCond(switchInfo, executedSeg, iter, selMuxNode,
-                           muxSrcIt->second, condValue, glitchUpdateFlag, debug,
-                           curValue);
+    std::vector<std::optional<int>> muxCondEvents;
+    if (condValue.has_value()) {
+      // In pipelined loop segments the select token disappears before the next
+      // token arrives. Model that invalid-select gap ahead of the next active
+      // event so traces match the RTL's 0-then-new-value ordering.
+      if (segII > 1)
+        muxCondEvents.push_back(std::nullopt);
+      muxCondEvents.push_back(condValue);
+    } else {
+      muxCondEvents.push_back(std::nullopt);
+    }
+
+    for (std::optional<int> eventCond : muxCondEvents) {
+      appendMuxValuesForCond(switchInfo, executedSeg, iter, selMuxNode,
+                             muxSrcIt->second, eventCond, glitchUpdateFlag,
+                             debug, curValue);
+    }
 
     //! Testing
     if (debug) {
@@ -1745,7 +2612,8 @@ static void updateMuxGlitchValuesForSegment(SwitchingInfo &switchInfo,
 
     // If we have glitches as the mux is inactive for sometime in this
     // iteration
-    if (contains(switchInfo.dataInfo.iterToInactiveMuxNodes, iter) &&
+    if (!condValue.has_value() &&
+        contains(switchInfo.dataInfo.iterToInactiveMuxNodes, iter) &&
         containsValue(switchInfo.dataInfo.iterToInactiveMuxNodes[iter],
                       selMuxNode)) {
       // finalMuxOutputList.push_back(0);
@@ -1822,6 +2690,8 @@ void dataBaseNodeGlitchUpdate(SwitchingInfo &switchInfo,
     updateMuxGlitchValuesForSegment(switchInfo, executedSeg, i,
                                     glitchUpdateFlag, debug);
     updateLoadNodesLastUpdateIndexForSegment(switchInfo, executedSeg, i);
+    replayCrossSegmentCombinationalWaveforms(switchInfo, i, executedSeg,
+                                             debug);
   }
 }
 
@@ -1864,7 +2734,7 @@ int getCondBrNodeCondValue(SwitchingInfo &switchInfo, unsigned iterIndex,
     return 0; // Default value
   }
 
-  const int rawCond = getDataOutValueAtOrBefore(
+  const int rawCond = getCurrentDataOutValueAtOrBefore(
       switchInfo.dataInfo.nodeToDataState[condSrcNode], iterIndex, 0);
   return rawCond != 0 ? 1 : 0;
 }
@@ -2037,10 +2907,10 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
             auto selStoreNode = dyn_cast<DStoreNode>(
                 switchInfo.staticInfo.dataflowGraph->nodes[selSucNode].get());
             selStoreNode->updateDataout(
-                reduceBits(
-                    getDataOutValueAtOrBefore(
-                        switchInfo.dataInfo.nodeToDataState[selNode], i, 0),
-                    tmpNodeWidth),
+                reduceBits(getCurrentDataOutValueAtOrBefore(
+                               switchInfo.dataInfo.nodeToDataState[selNode], i,
+                               0),
+                           tmpNodeWidth),
                 selNode);
           } else if (contains(selSucNode, "cond_br")) {
             // Get the node
@@ -2052,15 +2922,15 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
                 getCondBrNodeCondValue(switchInfo, i, selSucNode);
 
             selCondStoreNode->updateDataout(
-                reduceBits(
-                    getDataOutValueAtOrBefore(
-                        switchInfo.dataInfo.nodeToDataState[selNode], i, 0),
-                    tmpNodeWidth),
+                reduceBits(getCurrentDataOutValueAtOrBefore(
+                               switchInfo.dataInfo.nodeToDataState[selNode], i,
+                               0),
+                           tmpNodeWidth),
                 tmpCondValue);
           } else {
             switchInfo.staticInfo.dataflowGraph->nodes[selSucNode]
                 ->updateDataoutChannel(reduceBits(
-                    getDataOutValueAtOrBefore(
+                    getCurrentDataOutValueAtOrBefore(
                         switchInfo.dataInfo.nodeToDataState[selNode], i, 0),
                     tmpNodeWidth));
           }
@@ -2287,14 +3157,10 @@ void dfgDataChannelPropagate(SwitchingInfo &switchInfo,
             unsigned tmpNodeWidth = resolveOutWidth(selNode, selSucNode);
 
             //
-            if (contains(switchInfo.dataInfo.nodeToDataState[selNode]
-                             ->originalDataOut,
-                         i)) {
-              int originalValue = switchInfo.dataInfo.nodeToDataState[selNode]
-                                      ->originalDataOut[i]
-                                      .value;
+            if (std::optional<int> originalValue = getCurrentDataOutValueIfPresent(
+                    switchInfo.dataInfo.nodeToDataState[selNode], i)) {
               int reducedOriginalValue =
-                  reduceBits(originalValue, tmpNodeWidth);
+                  reduceBits(*originalValue, tmpNodeWidth);
               if (contains(selSucNode, "store")) {
                 auto selStoreNode = dyn_cast<DStoreNode>(
                     switchInfo.staticInfo.dataflowGraph->nodes[selSucNode]
@@ -2873,12 +3739,9 @@ LongestPathResult selLongestPath(SwitchingInfo &switchInfo, std::string dstNode,
 
 std::string getMuxDataSrc(SwitchingInfo &switchInfo, std::string selMuxNode,
                           unsigned selIter) {
-  const auto &selMuxSrcMap =
-      switchInfo.staticInfo.dataflowGraph->muxToSrcNodeMap;
-
-  // Check if the mux node exists in the map
-  auto muxIt = selMuxSrcMap.find(selMuxNode);
-  if (muxIt == selMuxSrcMap.end()) {
+  auto muxIt =
+      switchInfo.staticInfo.dataflowGraph->muxToSrcNodeMap.find(selMuxNode);
+  if (muxIt == switchInfo.staticInfo.dataflowGraph->muxToSrcNodeMap.end()) {
     llvm::errs() << "[ERROR] Mux node " << selMuxNode
                  << " not found in muxToSrcNodeMap\n";
     return ""; // Return empty string on error
@@ -2918,17 +3781,32 @@ std::string getMuxDataSrc(SwitchingInfo &switchInfo, std::string selMuxNode,
     return ""; // Return empty string on error
   }
 
-  int ctrlInValue = selCMBaseNode->getControlOutput(selIter);
+  std::optional<int> ctrlInValue = selCMBaseNode->getControlOutputIfPresent(selIter);
+  if (!ctrlInValue.has_value())
+    return "";
 
-  // Check if the control value key exists
-  auto dataIt = muxIt->second.find(std::to_string(ctrlInValue));
-  if (dataIt == muxIt->second.end()) {
-    llvm::errs() << "[ERROR] Data input for control value " << ctrlInValue
-                 << " not found for mux node " << selMuxNode << "\n";
-    return ""; // Return empty string on error
-  }
+  if (!muxSelectedInputIsValid(switchInfo, selMuxNode, *ctrlInValue, selIter))
+    return "";
 
-  return dataIt->second;
+  const std::string selDataSrcNode =
+      getMuxReplayDataSrcNode(switchInfo, selMuxNode, *ctrlInValue);
+  if (contains(selDataSrcNode, "constant") || contains(selDataSrcNode, "source") ||
+      contains(selDataSrcNode, "start"))
+    return selDataSrcNode;
+
+  auto srcIt = switchInfo.dataInfo.nodeToDataState.find(selDataSrcNode);
+  if (srcIt == switchInfo.dataInfo.nodeToDataState.end() || !srcIt->second)
+    return "";
+
+  if (getCurrentDataOutValueIfPresent(srcIt->second, selIter).has_value())
+    return selDataSrcNode;
+
+  if (muxSourceAllowsHeldFallback(switchInfo, selMuxNode, *ctrlInValue,
+                                  selDataSrcNode) &&
+      getCurrentDataOutValueAtOrBeforeStrict(srcIt->second, selIter).has_value())
+    return selDataSrcNode;
+
+  return "";
 }
 
 // This function finds the src node in a specified segment for a given node
@@ -3125,10 +4003,17 @@ void CMergeData::printDetail() {
   }
 }
 
-int CMergeData::getControlOutput(unsigned selIter) {
-  if (contains(controlDataOut, selIter))
-    return controlDataOut[selIter].value;
+std::optional<int> CMergeData::getControlOutputIfPresent(
+    unsigned selIter) const {
+  auto it = controlDataOut.find(selIter);
+  if (it == controlDataOut.end())
+    return std::nullopt;
+  return it->second.value;
+}
 
+int CMergeData::getControlOutput(unsigned selIter) {
+  if (std::optional<int> value = getControlOutputIfPresent(selIter))
+    return *value;
   // ControlMerge control output is event-based in this model. If the selected
   // iteration has no event, default to 0 rather than reusing an older value.
   return 0;

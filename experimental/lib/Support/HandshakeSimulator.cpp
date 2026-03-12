@@ -859,7 +859,7 @@ void MuxModel::execDataless() {
 
 void MuxModel::execDataFull() {
   bool selectedDataValid = false, indexEqual = false;
-  Data selectedData = *insData[0].data;
+  Data selectedData = APInt(outsData.dataWidth, 0);
   for (unsigned i = 0; i < size; ++i) {
     indexEqual = (i == indexNum);
 
